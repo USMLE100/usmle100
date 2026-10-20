@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { secureHeaders } from 'hono/secure-headers';
 import type { AppEnv } from './lib/types';
 import { loadUser, sameOrigin } from './lib/auth';
+import { ensureMigrated } from './lib/migrate';
 import { publicRoutes } from './routes/public';
 import { portal } from './routes/portal';
 import { admin } from './routes/admin';
@@ -23,6 +24,10 @@ app.use(
     },
   }),
 );
+app.use('*', async (c, next) => {
+  await ensureMigrated(c.env.DB);
+  await next();
+});
 app.use('*', loadUser);
 app.use('*', sameOrigin);
 

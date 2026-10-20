@@ -1,0 +1,48 @@
+import m0001 from '../../migrations/0001_init.sql';
+import m0002 from '../../migrations/0002_seed.sql';
+
+/**
+ * Database migrations run by the Worker itself on first request, so deploys
+ * need no extra database permissions. Add new files to the end of this list.
+ */
+const MIGRATIONS: [string, string][] = [
+  ['0001_init', m0001],
+  ['0002_seed', m0002],
+];
+
+function statements(sql: string): string[] {
+  return sql
+    .split('\n')
+    .filter((l) => !l.trim().startsWith('--'))
+    .join('\n')
+    .split(/;\s*(?:\n|$)/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+let done: Promise<void> | null = null;
+
+export function ensureMigrated(db: D1Database): Promise<void> {
+  if (!done) {
+    done = run(db).catch((e) => {
+      done = null;
+      throw e;
+    });
+  }
+  return done;
+}
+
+async function run(db: D1Database) {
+  await db.prepare('CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime(\'now\')))').run();
+  const applied = new Set((await db.prepare('SELECT name FROM _migrations').all<{ name: string }>()).results.map((r) => r.name));
+  for (const [name, sql] of MIGRATIONS) {
+    if (applied.has(name)) continue;
+    try {
+      // One transaction: the migration's statements plus its record. A concurrent run fails and rolls back.
+      await db.batch([...statements(sql).map((s) => db.prepare(s)), db.prepare('INSERT INTO _migrations (name) VALUES (?)').bind(name)]);
+    } catch (e) {
+      const now = await db.prepare('SELECT 1 FROM _migrations WHERE name = ?').bind(name).first();
+      if (!now) throw e;
+    }
+  }
+}

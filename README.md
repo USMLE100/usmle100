@@ -30,22 +30,17 @@ Set these with `npx wrangler secret put NAME` (never commit them):
 
 `SITE_URL` (optional, in `wrangler.toml`) fixes the public address used in Stripe links; otherwise it is taken from each request.
 
-## First deploy
+## Deploys
 
-```sh
-npm install
-npx wrangler d1 create usmle100          # paste the database_id into wrangler.toml
-npm run db:migrate:remote
-npx wrangler secret put ADMIN_EMAILS     # and the others above
-npm run deploy
-```
+The `USMLE100/usmle100` repository is connected to Cloudflare Workers Builds: every push to `main` deploys automatically (deploy command `npm run deploy`).
+
+Database tables are created by the Worker itself on its first request (`src/lib/migrate.ts`), so deploys need no database permissions. To change the schema, add a new file in `migrations/` and append it to the list in `src/lib/migrate.ts`.
 
 ## Local development
 
 ```sh
 npm install
 printf 'ADMIN_EMAILS=you@example.com\nDEV_FAKE_PAYMENTS=1\n' > .dev.vars
-npm run db:migrate:local
 npm run dev
 ```
 

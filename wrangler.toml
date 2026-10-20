@@ -1,6 +1,13 @@
 name = "usmle100"
 main = "src/index.tsx"
 compatibility_date = "2025-09-01"
+account_id = "e5499163bc179d7f63daef657f6196f2"
+
+# Migration files are bundled as text and applied by the Worker (src/lib/migrate.ts).
+[[rules]]
+type = "Text"
+globs = ["**/*.sql"]
+fallthrough = true
 
 [assets]
 directory = "./public"
