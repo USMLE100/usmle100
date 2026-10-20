@@ -8,7 +8,7 @@ function form(data: Record<string, string>) {
 
 export async function createCheckoutSession(
   env: Env,
-  opts: { enrollmentId: number; email: string; name: string; amountCents: number; productName: string },
+  opts: { enrollmentId: number; email: string; name: string; amountCents: number; productName: string; siteUrl: string },
 ): Promise<{ id: string; url: string }> {
   const res = await fetch(`${API}/checkout/sessions`, {
     method: 'POST',
@@ -25,8 +25,8 @@ export async function createCheckoutSession(
       customer_email: opts.email,
       client_reference_id: String(opts.enrollmentId),
       'metadata[enrollment_id]': String(opts.enrollmentId),
-      success_url: `${env.SITE_URL}/enroll/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${env.SITE_URL}/enroll?cancelled=1`,
+      success_url: `${opts.siteUrl}/enroll/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${opts.siteUrl}/enroll?cancelled=1`,
     }),
   });
   const json = (await res.json()) as any;

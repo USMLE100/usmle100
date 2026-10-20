@@ -8,10 +8,11 @@ directory = "./public"
 [[d1_databases]]
 binding = "DB"
 database_name = "usmle100"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "d1ff7fee-bf81-42d8-863a-652e3476716c"
 migrations_dir = "migrations"
 
 [vars]
-SITE_URL = "http://localhost:8787"
+ADMIN_EMAILS = "info.usmle100@gmail.com"
+# SITE_URL = "https://usmle100.com"   # set once the domain points here
 # Secrets (set with `wrangler secret put NAME`, never committed):
 # STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, BUNNY_TOKEN_KEY, BUNNY_LIBRARY_ID

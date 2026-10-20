@@ -262,7 +262,8 @@ publicRoutes.post('/enroll/:pkg', requireUser, async (c) => {
   const ins = await c.env.DB.prepare("INSERT INTO enrollments (user_id, package_id, status) VALUES (?, ?, 'pending')").bind(user.id, pkg.id).run();
   const enrollmentId = Number(ins.meta.last_row_id);
 
-  if (c.env.DEV_FAKE_PAYMENTS === '1' && !c.env.SITE_URL.startsWith('https://')) {
+  const siteUrl = (c.env.SITE_URL || new URL(c.req.url).origin).replace(/\/$/, '');
+  if (c.env.DEV_FAKE_PAYMENTS === '1' && new URL(c.req.url).protocol === 'http:') {
     const fakeId = 'dev_' + enrollmentId;
     await c.env.DB.prepare('UPDATE enrollments SET stripe_session_id = ? WHERE id = ?').bind(fakeId, enrollmentId).run();
     await activateEnrollment(c.env.DB, fakeId, enrollmentId, pkg.price_cents);
@@ -276,6 +277,7 @@ publicRoutes.post('/enroll/:pkg', requireUser, async (c) => {
     name: user.name,
     amountCents: pkg.price_cents,
     productName: pkg.name,
+    siteUrl,
   });
   await c.env.DB.prepare('UPDATE enrollments SET stripe_session_id = ? WHERE id = ?').bind(session.id, enrollmentId).run();
   return c.redirect(session.url, 303);

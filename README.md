@@ -26,9 +26,9 @@ Set these with `npx wrangler secret put NAME` (never commit them):
 | `STRIPE_WEBHOOK_SECRET` | Signing secret of the webhook pointing at `/stripe/webhook` (event `checkout.session.completed`) |
 | `BUNNY_LIBRARY_ID` | Bunny Stream video library ID |
 | `BUNNY_TOKEN_KEY` | Bunny Stream library's token authentication key |
-| `ADMIN_EMAILS` | Comma-separated emails that become admins when they sign up |
+| `ADMIN_EMAILS` | Set in `wrangler.toml`: emails that become admins when they sign up |
 
-Set `SITE_URL` in `wrangler.toml` to the live address (for example `https://usmle100.com`).
+`SITE_URL` (optional, in `wrangler.toml`) fixes the public address used in Stripe links; otherwise it is taken from each request.
 
 ## First deploy
 

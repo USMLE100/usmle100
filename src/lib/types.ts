@@ -1,7 +1,8 @@
 export type Env = {
   DB: D1Database;
   ASSETS: Fetcher;
-  SITE_URL: string;
+  /** Public address, e.g. https://usmle100.com. If unset, taken from each request. */
+  SITE_URL?: string;
   /** Comma-separated emails that become admins when they sign up. */
   ADMIN_EMAILS?: string;
   STRIPE_SECRET_KEY?: string;

@@ -59,7 +59,7 @@ export async function createSession(c: Context<AppEnv>, userId: number) {
     .run();
   setCookie(c, COOKIE, raw, {
     httpOnly: true,
-    secure: c.env.SITE_URL.startsWith('https://'),
+    secure: new URL(c.req.url).protocol === 'https:',
     sameSite: 'Lax',
     path: '/',
     expires,
