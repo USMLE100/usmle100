@@ -20,6 +20,7 @@ migrations_dir = "migrations"
 
 [vars]
 ADMIN_EMAILS = "info.usmle100@gmail.com"
+BUNNY_LIBRARY_ID = "785730"
 # SITE_URL = "https://usmle100.com"   # set once the domain points here
 # Secrets (set with `wrangler secret put NAME`, never committed):
-# STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, BUNNY_TOKEN_KEY, BUNNY_LIBRARY_ID
+# STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, BUNNY_TOKEN_KEY

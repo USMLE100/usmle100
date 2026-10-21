@@ -24,7 +24,7 @@ Set these with `npx wrangler secret put NAME` (never commit them):
 | --- | --- |
 | `STRIPE_SECRET_KEY` | Stripe secret key (`sk_test_…` while testing) |
 | `STRIPE_WEBHOOK_SECRET` | Signing secret of the webhook pointing at `/stripe/webhook` (event `checkout.session.completed`) |
-| `BUNNY_LIBRARY_ID` | Bunny Stream video library ID |
+| `BUNNY_LIBRARY_ID` | Set in `wrangler.toml` (not secret) |
 | `BUNNY_TOKEN_KEY` | Bunny Stream library's token authentication key |
 | `ADMIN_EMAILS` | Set in `wrangler.toml`: emails that become admins when they sign up |
 
