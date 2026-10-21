@@ -3,7 +3,7 @@ import type { AppEnv } from '../lib/types';
 import { isStaff } from '../lib/types';
 import { requireEnrolled } from '../lib/auth';
 import { PortalLayout, Eyebrow, Flash } from '../views/layout';
-import { bunnyEmbedUrl, cohortDay, currentCohort, dayDate, fmtDate, LETTERS, type Cohort } from '../lib/content';
+import { bunnyEmbedUrl, cohortDay, currentCohort, dayDate, dayOfDate, fmtDate, isWeekendDate, isWeekendToday, LETTERS, todayUtc, type Cohort } from '../lib/content';
 import { filterQuestions, questionStatuses, scoresBy, shuffle, type Pools } from '../lib/qbank';
 import { getSettings, isHttpUrl } from '../lib/settings';
 
@@ -40,15 +40,19 @@ function Calendar(props: { cohort: Cohort; today: number; lectures: Lecture[] })
         const days = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
         const cells = [];
         for (let i = 0; i < lead; i++) cells.push(<span></span>);
+        const todayT = todayUtc();
         for (let d = 1; d <= days; d++) {
-          const n = Math.round((Date.UTC(y, m, d) - first.getTime()) / 86400_000) + 1;
-          const lec = byDay.get(n);
+          const t = Date.UTC(y, m, d);
+          const weekend = isWeekendDate(t);
+          const n = dayOfDate(cohort, t);
+          const lec = weekend ? undefined : byDay.get(n);
           let cls = 'day day-up';
-          let label = `${fmtDate(new Date(Date.UTC(y, m, d)))}`;
-          if (n < 1 || n > cohort.total_days) cls = 'day day-out';
-          else if (n === today) (cls = 'day day-today'), (label += ', today');
+          let label = `${fmtDate(new Date(t))}`;
+          if (weekend) (cls = 'day day-out'), (label += t === todayT ? ', today, weekend' : ', weekend');
+          else if (t < first.getTime() || t > last.getTime()) cls = 'day day-out';
+          else if (t === todayT) (cls = 'day day-today'), (label += `, today, day ${n}`);
           else if (lec?.completed_at) (cls = 'day day-done'), (label += ', done');
-          else if (n < today && lec?.status === 'live') (cls = 'day day-missed'), (label += ', missed');
+          else if (t < todayT && lec?.status === 'live') (cls = 'day day-missed'), (label += ', missed');
           else if (n > cohort.lecture_days) (cls = 'day day-exam'), (label += ', exam window');
           cells.push(
             lec && lec.status === 'live' ? (
@@ -99,7 +103,14 @@ portal.get('/dashboard', async (c) => {
   const statuses = await questionStatuses(c.env.DB, user.id);
   const wrong = statuses.filter((s) => s.status === 'incorrect').length;
   const done = lectures.filter((l) => l.completed_at).length;
-  const phase = today < 1 ? `Starts ${fmtDate(dayDate(cohort, 1))}` : today > cohort.total_days ? 'Program complete' : `Day ${today} of ${cohort.total_days}`;
+  const weekend = isWeekendToday();
+  const phase = today < 1
+    ? `Starts ${fmtDate(dayDate(cohort, 1), { weekday: 'long', month: 'long', day: 'numeric' })}`
+    : today > cohort.total_days
+      ? 'Program complete'
+      : weekend
+        ? `Weekend · Day ${today} of ${cohort.total_days} done`
+        : `Day ${today} of ${cohort.total_days}`;
 
   return c.html(
     <PortalLayout title="Home" active="home" user={user}>
@@ -113,8 +124,15 @@ portal.get('/dashboard', async (c) => {
 
       <div class="grid">
         <section class="card card-dark">
-          <Eyebrow>{today > cohort.lecture_days ? 'Exam window' : `Today's lecture · Day ${today}`}</Eyebrow>
-          {today > cohort.lecture_days ? (
+          <Eyebrow>{today > cohort.lecture_days ? 'Exam window' : weekend ? 'Weekend' : today < 1 ? 'First class' : `Today's lecture · Day ${today}`}</Eyebrow>
+          {today < 1 ? (
+            <h2>Classes start {fmtDate(dayDate(cohort, 1), { weekday: 'long', month: 'long', day: 'numeric' })}.</h2>
+          ) : weekend && today <= cohort.lecture_days ? (
+            <>
+              <h2>No class today. A good time to catch up.</h2>
+              <a class="btn btn-gold" href="/create-test" style="align-self:flex-start">Practice questions</a>
+            </>
+          ) : today > cohort.lecture_days ? (
             <>
               <h2>Lectures are done. Time to book your exam.</h2>
               <a class="btn btn-gold" href="/exam-window" style="align-self:flex-start">
@@ -158,7 +176,7 @@ portal.get('/dashboard', async (c) => {
           <div class="stack" style="gap:4px">
             <h2>Your {cohort.total_days}-day plan</h2>
             <span class="muted small">
-              {cohort.lecture_days} days of lectures, then a {cohort.total_days - cohort.lecture_days}-day exam window · {cohort.name}
+              {cohort.lecture_days} teaching days, Monday to Friday, then a {cohort.total_days - cohort.lecture_days}-weekday exam window · {cohort.name}
             </span>
           </div>
           <div class="cal-legend">

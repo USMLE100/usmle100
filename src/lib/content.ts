@@ -3,17 +3,52 @@ import { sha256Hex } from './auth';
 
 export type Cohort = { id: number; name: string; start_date: string; lecture_days: number; total_days: number };
 
-/** Day number (1-based) of `today` within a cohort, using the student's calendar date. */
-export function cohortDay(cohort: Cohort, today = new Date()): number {
+/**
+ * Program days are weekdays only (Monday to Friday). Day 1 is the cohort's start date.
+ * Dates are calendar dates (stored as UTC midnight); "today" is taken in New York time.
+ */
+const DAY_MS = 86400_000;
+const isWeekend = (t: number) => {
+  const d = new Date(t).getUTCDay();
+  return d === 0 || d === 6;
+};
+const startOf = (cohort: Cohort) => {
   const [y, m, d] = cohort.start_date.split('-').map(Number);
-  const start = Date.UTC(y, m - 1, d);
-  const now = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
-  return Math.floor((now - start) / 86400_000) + 1;
+  return Date.UTC(y, m - 1, d);
+};
+
+/** Today's calendar date in the program's time zone, as UTC midnight. */
+export function todayUtc(now = new Date()): number {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(now);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)!.value);
+  return Date.UTC(get('year'), get('month') - 1, get('day'));
 }
 
+/** Program day of a calendar date: the number of weekdays from Day 1 up to and including it. 0 before the start. */
+export function dayOfDate(cohort: Cohort, t: number): number {
+  const start = startOf(cohort);
+  if (t < start) return 0;
+  let n = 0;
+  for (let x = start; x <= t; x += DAY_MS) if (!isWeekend(x)) n++;
+  return n;
+}
+
+/** Program day for today. On a weekend this is the Friday before. */
+export function cohortDay(cohort: Cohort, now = new Date()): number {
+  return dayOfDate(cohort, todayUtc(now));
+}
+
+export const isWeekendToday = (now = new Date()) => isWeekend(todayUtc(now));
+export const isWeekendDate = (t: number) => isWeekend(t);
+
 export function dayDate(cohort: Cohort, day: number): Date {
-  const [y, m, d] = cohort.start_date.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d + day - 1));
+  let t = startOf(cohort);
+  while (isWeekend(t)) t += DAY_MS;
+  for (let n = 1; n < day; ) {
+    t += DAY_MS;
+    if (!isWeekend(t)) n++;
+  }
+  return new Date(t);
 }
 
 export function fmtDate(dt: Date, opts: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric' }) {

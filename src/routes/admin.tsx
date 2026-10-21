@@ -41,14 +41,14 @@ admin.get('/lectures', async (c) => {
       {!cohort ? (
         <form method="post" action="/admin/cohorts" class="card">
           <h2>Start your first cohort</h2>
-          <p class="muted">Day 1 is the first lecture. Days 1–90 are lectures, days 91–100 are the exam window.</p>
+          <p class="muted">Classes run Monday to Friday. Days 1–90 are lectures and days 91–100 are the exam window, all on weekdays. Pick a Monday for Day 1.</p>
           <label class="field">Cohort name<input type="text" name="name" required placeholder="Winter 2026" /></label>
           <label class="field">Day 1 date<input type="date" name="start_date" required /></label>
           <button class="btn btn-primary" type="submit" style="align-self:flex-start">Create cohort</button>
         </form>
       ) : (
         <>
-          <p class="muted">{cohort.name} · Day 1 is {fmtDate(dayDate(cohort, 1), { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
+          <p class="muted">{cohort.name} · Day 1 is {fmtDate(dayDate(cohort, 1), { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} · last lecture (Day {cohort.lecture_days}) {fmtDate(dayDate(cohort, cohort.lecture_days), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · exam window ends {fmtDate(dayDate(cohort, cohort.total_days), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</p>
           <form method="post" action="/admin/lectures" class="card">
             <h2>Add Day {nextDay} · {fmtDate(dayDate(cohort, nextDay))}</h2>
             <input type="hidden" name="day_number" value={String(nextDay)} />
