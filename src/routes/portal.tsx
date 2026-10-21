@@ -3,7 +3,7 @@ import type { AppEnv } from '../lib/types';
 import { isStaff } from '../lib/types';
 import { requireEnrolled } from '../lib/auth';
 import { PortalLayout, Eyebrow, Flash } from '../views/layout';
-import { bunnyEmbedUrl, cohortDay, currentCohort, dayDate, dayOfDate, fmtDate, isWeekendDate, isWeekendToday, LETTERS, todayUtc, type Cohort } from '../lib/content';
+import { bunnyEmbedUrl, cohortDay, currentCohort, dayDate, dayOfDate, fmtDate, dayOffLabel, isClassDate, isOffToday, LETTERS, todayUtc, type Cohort } from '../lib/content';
 import { filterQuestions, questionStatuses, scoresBy, shuffle, type Pools } from '../lib/qbank';
 import { getSettings, isHttpUrl } from '../lib/settings';
 
@@ -43,12 +43,14 @@ function Calendar(props: { cohort: Cohort; today: number; lectures: Lecture[] })
         const todayT = todayUtc();
         for (let d = 1; d <= days; d++) {
           const t = Date.UTC(y, m, d);
-          const weekend = isWeekendDate(t);
+          const off = !isClassDate(cohort, t);
+          const holiday = dayOffLabel(cohort, t);
           const n = dayOfDate(cohort, t);
-          const lec = weekend ? undefined : byDay.get(n);
+          const lec = off ? undefined : byDay.get(n);
           let cls = 'day day-up';
           let label = `${fmtDate(new Date(t))}`;
-          if (weekend) (cls = 'day day-out'), (label += t === todayT ? ', today, weekend' : ', weekend');
+          if (holiday) (cls = 'day day-holiday'), (label += `, ${holiday}, no class`);
+          else if (off) (cls = 'day day-out'), (label += t === todayT ? ', today, weekend' : ', weekend');
           else if (t < first.getTime() || t > last.getTime()) cls = 'day day-out';
           else if (t === todayT) (cls = 'day day-today'), (label += `, today, day ${n}`);
           else if (lec?.completed_at) (cls = 'day day-done'), (label += ', done');
@@ -103,7 +105,7 @@ portal.get('/dashboard', async (c) => {
   const statuses = await questionStatuses(c.env.DB, user.id);
   const wrong = statuses.filter((s) => s.status === 'incorrect').length;
   const done = lectures.filter((l) => l.completed_at).length;
-  const weekend = isWeekendToday();
+  const weekend = isOffToday(cohort);
   const phase = today < 1
     ? `Starts ${fmtDate(dayDate(cohort, 1), { weekday: 'long', month: 'long', day: 'numeric' })}`
     : today > cohort.total_days
@@ -124,7 +126,7 @@ portal.get('/dashboard', async (c) => {
 
       <div class="grid">
         <section class="card card-dark">
-          <Eyebrow>{today > cohort.lecture_days ? 'Exam window' : weekend ? 'Weekend' : today < 1 ? 'First class' : `Today's lecture · Day ${today}`}</Eyebrow>
+          <Eyebrow>{today > cohort.lecture_days ? 'Exam window' : weekend ? dayOffLabel(cohort, todayUtc()) ?? 'Weekend' : today < 1 ? 'First class' : `Today's lecture · Day ${today}`}</Eyebrow>
           {today < 1 ? (
             <h2>Classes start {fmtDate(dayDate(cohort, 1), { weekday: 'long', month: 'long', day: 'numeric' })}.</h2>
           ) : weekend && today <= cohort.lecture_days ? (
@@ -176,7 +178,7 @@ portal.get('/dashboard', async (c) => {
           <div class="stack" style="gap:4px">
             <h2>Your {cohort.total_days}-day plan</h2>
             <span class="muted small">
-              {cohort.lecture_days} teaching days, Monday to Friday, then a {cohort.total_days - cohort.lecture_days}-weekday exam window · {cohort.name}
+              {cohort.lecture_days} teaching days, Monday to Friday{cohort.daysOff?.size ? ` (holidays off)` : ''}, then a {cohort.total_days - cohort.lecture_days}-weekday exam window · {cohort.name}
             </span>
           </div>
           <div class="cal-legend">
@@ -185,6 +187,7 @@ portal.get('/dashboard', async (c) => {
             <span><i class="sw day-today"></i>Today</span>
             <span><i class="sw day-up"></i>Upcoming</span>
             <span><i class="sw day-exam"></i>Exam window</span>
+            <span><i class="sw day-holiday"></i>Holiday</span>
           </div>
         </div>
         <Calendar cohort={cohort} today={today} lectures={lectures} />

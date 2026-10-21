@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../lib/types';
 import { requireStaff } from '../lib/auth';
 import { PortalLayout, Eyebrow, Flash } from '../views/layout';
-import { currentCohort, dayDate, fmtDate, LETTERS } from '../lib/content';
+import { currentCohort, dayDate, fmtDate, LETTERS, ymdToUtc } from '../lib/content';
 import { parseCsv, toCsv, TEMPLATE_HEADERS } from '../lib/csv';
 import { getSettings, isHttpUrl, SETTING_FIELDS } from '../lib/settings';
 
@@ -49,6 +49,33 @@ admin.get('/lectures', async (c) => {
       ) : (
         <>
           <p class="muted">{cohort.name} · Day 1 is {fmtDate(dayDate(cohort, 1), { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} · last lecture (Day {cohort.lecture_days}) {fmtDate(dayDate(cohort, cohort.lecture_days), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · exam window ends {fmtDate(dayDate(cohort, cohort.total_days), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</p>
+          <section class="card">
+            <h2>Days off</h2>
+            <p class="muted small">No class on these days. They are skipped like weekends, so later days move forward. Lectures already added keep their day number.</p>
+            {cohort.daysOff?.size ? (
+              <ul style="margin:0;padding:0;list-style:none" class="stack">
+                {[...cohort.daysOff.entries()].sort((a, b) => a[0] - b[0]).map(([t, label]) => {
+                  const ymd = new Date(t).toISOString().slice(0, 10);
+                  return (
+                    <li class="row between" style="border-top:1px solid var(--line-soft);padding-top:10px">
+                      <span><strong>{fmtDate(new Date(t), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</strong> · {label}</span>
+                      <form method="post" action="/admin/days-off/remove">
+                        <input type="hidden" name="date" value={ymd} />
+                        <button class="btn btn-ghost" type="submit">Remove</button>
+                      </form>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p class="muted">None yet.</p>
+            )}
+            <form method="post" action="/admin/days-off" class="row" style="align-items:flex-end">
+              <label class="field" style="flex:1 1 160px">Date<input type="date" name="date" required /></label>
+              <label class="field" style="flex:2 1 200px">Reason<input type="text" name="label" placeholder="Holiday" maxlength={60} /></label>
+              <button class="btn btn-outline" type="submit">Add day off</button>
+            </form>
+          </section>
           <form method="post" action="/admin/lectures" class="card">
             <h2>Add Day {nextDay} · {fmtDate(dayDate(cohort, nextDay))}</h2>
             <input type="hidden" name="day_number" value={String(nextDay)} />
@@ -483,4 +510,24 @@ admin.post('/settings', async (c) => {
     ...prices.map(([id, cents]) => c.env.DB.prepare('UPDATE packages SET price_cents = ? WHERE id = ?').bind(cents, id)),
   ]);
   return c.redirect('/admin/settings?ok=1');
+});
+
+// ---------- Days off ----------
+
+admin.post('/days-off', async (c) => {
+  const cohort = await currentCohort(c.env.DB);
+  const f = await c.req.parseBody();
+  const date = String(f.date ?? '');
+  if (!cohort || !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(ymdToUtc(date))) return c.redirect('/admin/lectures');
+  await c.env.DB.prepare('INSERT INTO cohort_days_off (cohort_id, date, label) VALUES (?, ?, ?) ON CONFLICT (cohort_id, date) DO UPDATE SET label = excluded.label')
+    .bind(cohort.id, date, String(f.label ?? '').trim().slice(0, 60) || 'Holiday')
+    .run();
+  return c.redirect('/admin/lectures?ok=1');
+});
+
+admin.post('/days-off/remove', async (c) => {
+  const cohort = await currentCohort(c.env.DB);
+  const f = await c.req.parseBody();
+  if (cohort) await c.env.DB.prepare('DELETE FROM cohort_days_off WHERE cohort_id = ? AND date = ?').bind(cohort.id, String(f.date ?? '')).run();
+  return c.redirect('/admin/lectures?ok=1');
 });
