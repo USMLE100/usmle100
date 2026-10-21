@@ -4,6 +4,7 @@ import { PublicLayout, Flash, Eyebrow } from '../views/layout';
 import { createSession, destroySession, hashPassword, verifyPassword, requireUser } from '../lib/auth';
 import { activateEnrollment, createCheckoutSession, retrieveCheckoutSession, verifyWebhook } from '../lib/stripe';
 import { money } from '../lib/content';
+import { getSettings } from '../lib/settings';
 
 type Pkg = { id: string; name: string; tagline: string; price_cents: number; one_on_one_sessions: number; evening_q_months: number; recommended: number };
 
@@ -49,15 +50,16 @@ const INDIVIDUAL = [
 
 export const publicRoutes = new Hono<AppEnv>();
 
-publicRoutes.get('/', (c) => {
+publicRoutes.get('/', async (c) => {
   const user = c.get('user');
+  const settings = await getSettings(c.env.DB);
   return c.html(
     <PublicLayout title="Board prep, taught live by doctors" user={user}>
       <section class="hero">
         <div class="wrap">
           <Eyebrow>USMLE Step 1 · COMLEX · CBSE</Eyebrow>
           <h1>Board prep, taught live by doctors.</h1>
-          <p>Join 1,400+ students preparing with USMLE100. A live structured review course, daily question practice and one-on-one help, in one 100-day program.</p>
+          <p>{settings.student_count ? `Join ${settings.student_count} students preparing with USMLE100. ` : ''}A live structured review course, daily question practice and one-on-one help, in one 100-day program.</p>
           <div class="row">
             <a class="btn btn-gold" href="/programs">See programs</a>
             <a class="btn btn-ghost" style="color:#fff;border-color:#5C8A75" href="/sign-up">Create account</a>
@@ -70,6 +72,7 @@ publicRoutes.get('/', (c) => {
 
 publicRoutes.get('/programs', async (c) => {
   const pkgs = (await c.env.DB.prepare('SELECT * FROM packages ORDER BY sort').all<Pkg>()).results;
+  const settings = await getSettings(c.env.DB);
   return c.html(
     <PublicLayout title="Programs" user={c.get('user')}>
       <section class="hero">
@@ -121,7 +124,7 @@ publicRoutes.get('/programs', async (c) => {
                 <strong style="font-size:26px">{i.price}</strong> <span class="muted small">{i.unit}</span>
               </p>
               <p class="muted small">{i.desc}</p>
-              <a class="btn btn-outline" href="mailto:info.usmle100@gmail.com?subject=USMLE100%20enquiry">
+              <a class="btn btn-outline" href={`mailto:${settings.contact_email}?subject=${encodeURIComponent('USMLE100: ' + i.name)}`}>
                 Ask about {i.name}
               </a>
             </div>

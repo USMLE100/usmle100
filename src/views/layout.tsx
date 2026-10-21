@@ -66,7 +66,13 @@ const groups = (staff: boolean): { label: string; items: NavItem[] }[] => [
       { key: 'exam', label: 'Exam window', sub: 'Days 91 to 100', href: '/exam-window' },
     ],
   },
-  { label: 'Help', items: [{ key: 'programs', label: 'Programs', sub: 'Packages and pricing', href: '/programs' }] },
+  {
+    label: 'Help',
+    items: [
+      { key: 'book', label: '1-on-1', sub: 'Book with Dr. Khan', href: '/book' },
+      { key: 'programs', label: 'Programs', sub: 'Packages and pricing', href: '/programs' },
+    ],
+  },
   { label: 'Study', items: [{ key: 'lectures', label: 'Lectures', sub: "Watch today's class", href: '/lectures' }] },
   { label: 'Practice', items: [{ key: 'create', label: 'Create a test', sub: 'Pick your pools', href: '/create-test' }] },
   { label: 'Progress', items: [{ key: 'performance', label: 'Performance', sub: 'Scores by system', href: '/performance' }] },
@@ -77,6 +83,7 @@ const groups = (staff: boolean): { label: string; items: NavItem[] }[] => [
           items: [
             { key: 'admin-lectures', label: 'Lectures', sub: 'Add Day 1, Day 2…', href: '/admin/lectures' },
             { key: 'admin-questions', label: 'Questions', sub: 'Write, import, approve', href: '/admin/questions' },
+            { key: 'admin-settings', label: 'Site settings', sub: 'Prices, links, dates', href: '/admin/settings' },
           ],
         },
       ]

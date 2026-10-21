@@ -4,6 +4,7 @@ import { requireStaff } from '../lib/auth';
 import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { currentCohort, dayDate, fmtDate, LETTERS } from '../lib/content';
 import { parseCsv, toCsv, TEMPLATE_HEADERS } from '../lib/csv';
+import { getSettings, isHttpUrl, SETTING_FIELDS } from '../lib/settings';
 
 export const admin = new Hono<AppEnv>();
 admin.use('*', requireStaff);
@@ -418,4 +419,68 @@ admin.post('/questions/:id{[0-9]+}', async (c) => {
        subject_id = ?, system_id = ?, perf_system_id = ?, discipline_id = ?, status = ?, approved_by = ? WHERE id = ?`,
   ).bind(...values, status, status === 'approved' ? user.id : null, id).run();
   return c.redirect(`/admin/questions?status=${status}&ok=` + encodeURIComponent('Question saved.'));
+});
+
+// ---------- Site settings ----------
+
+admin.get('/settings', async (c) => {
+  const settings = await getSettings(c.env.DB);
+  const pkgs = (await c.env.DB.prepare('SELECT id, name, price_cents FROM packages ORDER BY sort').all<{ id: string; name: string; price_cents: number }>()).results;
+  return c.html(
+    <PortalLayout title="Site settings" active="admin-settings" user={c.get('user')!}>
+      <Eyebrow>Admin</Eyebrow>
+      <h1>Site settings</h1>
+      {c.req.query('ok') && <Flash>Saved. Changes show on the site straight away.</Flash>}
+      {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
+      <form method="post" action="/admin/settings" class="stack">
+        <section class="card">
+          <h2>Details</h2>
+          {SETTING_FIELDS.map((f) => (
+            <label class="field">
+              {f.label}
+              <input type={f.type} name={f.key} value={settings[f.key]} />
+              <span class="muted small" style="font-weight:500">{f.hint}</span>
+            </label>
+          ))}
+        </section>
+        <section class="card">
+          <h2>Package prices</h2>
+          <p class="muted small">One-time price in US dollars. New checkouts use the new price straight away; students who already paid are not affected.</p>
+          {pkgs.map((p) => (
+            <label class="field" style="max-width:320px">
+              {p.name}
+              <input type="number" name={`price_${p.id}`} min="1" step="1" value={String(Math.round(p.price_cents / 100))} required />
+            </label>
+          ))}
+        </section>
+        <button class="btn btn-primary" type="submit" style="align-self:flex-start">Save settings</button>
+      </form>
+    </PortalLayout>,
+  );
+});
+
+admin.post('/settings', async (c) => {
+  const f = await c.req.parseBody();
+  const bad = (msg: string) => c.redirect('/admin/settings?error=' + encodeURIComponent(msg));
+  const values: Record<string, string> = {};
+  for (const field of SETTING_FIELDS) {
+    const v = String(f[field.key] ?? '').trim().slice(0, 300);
+    if (field.type === 'url' && v && !isHttpUrl(v)) return bad(`${field.label} must start with https://`);
+    if (field.type === 'email' && v && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return bad('Enter a valid contact email.');
+    values[field.key] = v;
+  }
+  const pkgs = (await c.env.DB.prepare('SELECT id FROM packages').all<{ id: string }>()).results;
+  const prices: [string, number][] = [];
+  for (const p of pkgs) {
+    const dollars = Number(f[`price_${p.id}`]);
+    if (!Number.isFinite(dollars) || dollars < 1 || dollars > 100000) return bad('Each price must be a whole number of dollars.');
+    prices.push([p.id, Math.round(dollars) * 100]);
+  }
+  await c.env.DB.batch([
+    ...Object.entries(values).map(([k, v]) =>
+      c.env.DB.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').bind(k, v),
+    ),
+    ...prices.map(([id, cents]) => c.env.DB.prepare('UPDATE packages SET price_cents = ? WHERE id = ?').bind(cents, id)),
+  ]);
+  return c.redirect('/admin/settings?ok=1');
 });

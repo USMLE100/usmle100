@@ -14,7 +14,7 @@ Runs on **Cloudflare Workers** with a **D1** database. Server-rendered with [Hon
 - **Test runner and results**: explanations, wrong-answer explanations, bottom line, flags, review.
 - **Performance**: by Dr. Khan's 8 systems and 10 disciplines, in his order, from the student's real answers.
 - **Exam window**: checklist, group practice test, weakest areas.
-- **Admin**: create a cohort, add lectures as Day 1, Day 2… with dates; write, edit, import (CSV) and approve questions. Only approved questions reach students.
+- **Admin**: create a cohort, add lectures as Day 1, Day 2… with dates; write, edit, import (CSV) and approve questions (only approved questions reach students); Site settings for package prices, student count, contact email, Calendly link and the group practice test.
 
 ## Accounts and secrets
 

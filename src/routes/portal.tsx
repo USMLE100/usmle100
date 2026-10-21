@@ -5,6 +5,7 @@ import { requireEnrolled } from '../lib/auth';
 import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { bunnyEmbedUrl, cohortDay, currentCohort, dayDate, fmtDate, LETTERS, type Cohort } from '../lib/content';
 import { filterQuestions, questionStatuses, scoresBy, shuffle, type Pools } from '../lib/qbank';
+import { getSettings, isHttpUrl } from '../lib/settings';
 
 export const portal = new Hono<AppEnv>();
 portal.use('*', requireEnrolled);
@@ -569,6 +570,7 @@ portal.get('/performance', async (c) => {
 
 portal.get('/exam-window', async (c) => {
   const user = c.get('user')!;
+  const settings = await getSettings(c.env.DB);
   const cohort = await currentCohort(c.env.DB, c.get('enrollment')?.cohort_id);
   const scores = [...(await scoresBy(c.env.DB, user.id, 'perf_system')), ...(await scoresBy(c.env.DB, user.id, 'discipline'))]
     .filter((s) => s.answered >= 5)
@@ -604,7 +606,10 @@ portal.get('/exam-window', async (c) => {
           <section class="card card-sand">
             <Eyebrow>Group practice test</Eyebrow>
             <h2>Full practice exam with your class</h2>
-            <p>Your instructor will post the date and Zoom link here.</p>
+            {settings.practice_test_when ? <p><strong>{settings.practice_test_when}</strong></p> : <p>Your instructor will post the date and Zoom link here.</p>}
+            {isHttpUrl(settings.practice_test_link) && (
+              <a class="btn btn-primary" href={settings.practice_test_link} rel="noopener" style="align-self:flex-start">Join on Zoom</a>
+            )}
           </section>
           <section class="card">
             <h2>Your last weak areas</h2>
@@ -625,6 +630,20 @@ portal.get('/exam-window', async (c) => {
           __html: `(function(){var k='u100-exam-steps';var s={};try{s=JSON.parse(localStorage.getItem(k)||'{}')}catch(e){}document.querySelectorAll('[data-step]').forEach(function(b){b.checked=!!s[b.dataset.step];b.addEventListener('change',function(){s[b.dataset.step]=b.checked;try{localStorage.setItem(k,JSON.stringify(s))}catch(e){}})})})();`,
         }}
       />
+    </PortalLayout>,
+  );
+});
+
+// ---------- One-on-one booking ----------
+
+portal.get('/book', async (c) => {
+  const settings = await getSettings(c.env.DB);
+  if (isHttpUrl(settings.calendly_url)) return c.redirect(settings.calendly_url);
+  return c.html(
+    <PortalLayout title="1-on-1" active="book" user={c.get('user')!}>
+      <Eyebrow>Help</Eyebrow>
+      <h1>Book a one-on-one session</h1>
+      <p class="muted">Online booking opens soon. Until then, email {settings.contact_email} to book.</p>
     </PortalLayout>,
   );
 });
