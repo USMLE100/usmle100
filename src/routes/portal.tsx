@@ -88,7 +88,7 @@ portal.get('/dashboard', async (c) => {
     return c.html(
       <PortalLayout title="Home" active="home" user={user}>
         <h1>Welcome, {user.name.split(' ')[0]}.</h1>
-        <Flash kind="error">No cohort is scheduled yet. {isStaff(user) ? 'Create one in Admin → Lectures.' : 'Your start date will appear here soon.'}</Flash>
+        <Flash kind="error">No cohort is scheduled yet. {isStaff(user) ? <a href="/admin/lectures">Create one in Admin → Lectures.</a> : 'Your start date will appear here soon.'}</Flash>
       </PortalLayout>,
     );
   }
