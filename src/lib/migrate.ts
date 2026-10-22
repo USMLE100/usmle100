@@ -3,6 +3,7 @@ import m0002 from '../../migrations/0002_seed.sql';
 import m0003 from '../../migrations/0003_settings.sql';
 import m0004 from '../../migrations/0004_days_off.sql';
 import m0005 from '../../migrations/0005_zoom_imports.sql';
+import m0006 from '../../migrations/0006_evening.sql';
 
 /**
  * Database migrations run by the Worker itself on first request, so deploys
@@ -14,6 +15,7 @@ const MIGRATIONS: [string, string][] = [
   ['0003_settings', m0003],
   ['0004_days_off', m0004],
   ['0005_zoom_imports', m0005],
+  ['0006_evening', m0006],
 ];
 
 function statements(sql: string): string[] {

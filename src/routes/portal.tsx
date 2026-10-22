@@ -6,9 +6,18 @@ import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { bunnyEmbedUrl, cohortDay, currentCohort, dayDate, dayOfDate, fmtDate, dayOffLabel, isClassDate, isOffToday, LETTERS, todayUtc, type Cohort } from '../lib/content';
 import { filterQuestions, questionStatuses, scoresBy, shuffle, type Pools } from '../lib/qbank';
 import { getSettings, isHttpUrl } from '../lib/settings';
+import { eveningAccessUntil, type EveningSession } from '../lib/evening';
 
 export const portal = new Hono<AppEnv>();
-portal.use('*', requireEnrolled);
+portal.use('*', async (c, next) => {
+  // Someone who only buys Evening Questions has no program enrollment: let them into that section only.
+  const user = c.get('user');
+  if (user && !isStaff(user) && !c.get('enrollment') && (await eveningAccessUntil(c.env.DB, user))) {
+    if (c.req.path === '/evening' || c.req.path.startsWith('/evening/')) return next();
+    return c.redirect('/evening');
+  }
+  return requireEnrolled(c, next);
+});
 
 type Lecture = { id: number; day_number: number; title: string; zoom_url: string | null; bunny_video_id: string | null; status: string; completed_at: string | null };
 
@@ -278,6 +287,80 @@ portal.post('/lectures/:id/done', async (c) => {
     .bind(user.id, id)
     .run();
   return c.redirect(`/lectures/${id}`);
+});
+
+// ---------- Evening Questions (Mon/Wed/Fri recordings, own access) ----------
+
+portal.get('/evening', async (c) => {
+  const user = c.get('user')!;
+  const until = await eveningAccessUntil(c.env.DB, user);
+  if (!until) {
+    const settings = await getSettings(c.env.DB);
+    return c.html(
+      <PortalLayout title="Evening Questions" active="evening" user={user}>
+        <Eyebrow>Study</Eyebrow>
+        <h1>Evening Questions</h1>
+        <section class="card">
+          <p>Live question sessions on Monday, Wednesday and Friday evenings, with every recording here to rewatch.</p>
+          <p>Included for 4 months with the <strong>Companion</strong>, <strong>Complete</strong> and <strong>MAX</strong> programs, or on its own for <strong>$160 a month</strong>.</p>
+          <div class="row">
+            <a class="btn btn-primary" href="/programs">See programs</a>
+            {settings.contact_email && (
+              <a class="btn btn-outline" href={`mailto:${settings.contact_email}?subject=${encodeURIComponent('USMLE100: Evening Questions')}`}>Ask about Evening Questions</a>
+            )}
+          </div>
+        </section>
+      </PortalLayout>,
+    );
+  }
+  const sessions = (await c.env.DB.prepare("SELECT * FROM evening_sessions WHERE status = 'live' ORDER BY session_date DESC").all<EveningSession>()).results;
+  return c.html(
+    <PortalLayout title="Evening Questions" active="evening" user={user}>
+      <Eyebrow>Study</Eyebrow>
+      <h1>Evening Questions</h1>
+      <p class="muted">Monday, Wednesday and Friday evening recordings.{!isStaff(user) && <> Your access runs until {fmtDate(new Date(until + 'T00:00:00Z'), { month: 'long', day: 'numeric', year: 'numeric' })}.</>}</p>
+      {!sessions.length ? (
+        <p class="muted">No recordings yet. They appear here after each evening class.</p>
+      ) : (
+        <div class="table-box">
+          <table class="t">
+            <thead><tr><th scope="col">Date</th><th scope="col">Session</th></tr></thead>
+            <tbody>
+              {sessions.map((e) => (
+                <tr>
+                  <td class="muted">{fmtDate(new Date(e.session_date + 'T00:00:00Z'), { weekday: 'short', month: 'short', day: 'numeric' })}</td>
+                  <td><a href={`/evening/${e.id}`}>{e.title}</a></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </PortalLayout>,
+  );
+});
+
+portal.get('/evening/:id', async (c) => {
+  const user = c.get('user')!;
+  if (!(await eveningAccessUntil(c.env.DB, user))) return c.redirect('/evening');
+  const e = await c.env.DB.prepare('SELECT * FROM evening_sessions WHERE id = ?').bind(Number(c.req.param('id'))).first<EveningSession>();
+  if (!e || (e.status !== 'live' && !isStaff(user))) return c.notFound();
+  const src = e.bunny_video_id ? await bunnyEmbedUrl(c.env, e.bunny_video_id) : null;
+  return c.html(
+    <PortalLayout title={e.title} active="evening" user={user}>
+      <Eyebrow>Evening Questions</Eyebrow>
+      <h1>{e.title}</h1>
+      {src ? (
+        <div class="video-wrap">
+          <iframe src={src} title={e.title} loading="lazy" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+          <span class="watermark" aria-hidden="true">{user.email}</span>
+        </div>
+      ) : (
+        <Flash kind="error">The video for this session isn’t ready yet.</Flash>
+      )}
+      <div class="row"><a class="btn btn-ghost" href="/evening">All evening sessions</a></div>
+    </PortalLayout>,
+  );
 });
 
 // ---------- Create a test ----------

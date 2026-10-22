@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../lib/types';
 import { requireStaff } from '../lib/auth';
 import { PortalLayout, Eyebrow, Flash } from '../views/layout';
-import { currentCohort, dayDate, fmtDate, LETTERS, ymdToUtc } from '../lib/content';
+import { currentCohort, dayDate, fmtDate, LETTERS, todayUtc, ymdToUtc } from '../lib/content';
 import { parseCsv, toCsv, TEMPLATE_HEADERS } from '../lib/csv';
 import { getSettings, isHttpUrl, SETTING_FIELDS } from '../lib/settings';
 import { meetingIdList, syncImports } from '../lib/zoom';
@@ -39,7 +39,9 @@ admin.get('/lectures', async (c) => {
   } catch (e) {
     console.error('sync imports', e);
   }
-  const imports = (await c.env.DB.prepare('SELECT * FROM zoom_imports ORDER BY id DESC LIMIT 10').all<any>()).results;
+  const imports = (
+    await c.env.DB.prepare('SELECT i.*, e.session_date AS evening_date FROM zoom_imports i LEFT JOIN evening_sessions e ON e.id = i.evening_session_id ORDER BY i.id DESC LIMIT 10').all<any>()
+  ).results;
   const meetingIds = (await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'zoom_meeting_ids'").first<{ value: string }>())?.value ?? '';
   const webhookUrl = new URL('/zoom/webhook', c.env.SITE_URL || c.req.url).toString();
   return c.html(
@@ -67,12 +69,12 @@ admin.get('/lectures', async (c) => {
               <li>Address for the Zoom app: <code style="word-break:break-all">{webhookUrl}</code></li>
             </ul>
             <form method="post" action="/admin/zoom-settings" class="row" style="align-items:flex-end">
-              <label class="field" style="flex:1 1 260px">Class Zoom meeting ID(s)
+              <label class="field" style="flex:1 1 260px">Lecture Zoom meeting ID (the 90 lectures)
                 <input type="text" name="zoom_meeting_ids" value={meetingIds} placeholder="123 4567 8901" inputmode="numeric" />
               </label>
               <button class="btn btn-outline" type="submit">Save</button>
             </form>
-            <p class="muted small">{meetingIdList(meetingIds).length ? 'Only recordings of these meetings are imported, and they go live on their own.' : 'Until you add your class meeting ID, every cloud recording is imported but waits for you to tick Live.'}</p>
+            <p class="muted small">{meetingIdList(meetingIds).length ? 'Recordings of this meeting become that day’s lecture and go live on their own. Other meetings are ignored, except the Evening Questions meeting.' : 'Add your lecture meeting ID so lectures go live on their own.'} <a href="/admin/evening">Evening Questions meeting →</a></p>
             {imports.length > 0 && (
               <div class="table-box">
                 <table class="t">
@@ -87,13 +89,20 @@ admin.get('/lectures', async (c) => {
                           <td>
                             {lec ? (
                               <>Day {lec.day_number}</>
+                            ) : i.evening_date ? (
+                              <>Evening · {fmtDate(new Date(i.evening_date + 'T00:00:00Z'))}</>
                             ) : i.status !== 'failed' ? (
-                              <form method="post" action={`/admin/zoom-imports/${i.id}/assign`} class="row" style="gap:8px">
-                                <label class="field" style="max-width:110px">Use as Day
-                                  <input type="number" name="day" min="1" max={String(cohort.lecture_days)} required />
-                                </label>
-                                <button class="btn btn-ghost" type="submit">Attach</button>
-                              </form>
+                              <div class="stack" style="gap:6px">
+                                <form method="post" action={`/admin/zoom-imports/${i.id}/assign`} class="row" style="gap:8px">
+                                  <label class="field" style="max-width:110px">Use as Day
+                                    <input type="number" name="day" min="1" max={String(cohort.lecture_days)} required />
+                                  </label>
+                                  <button class="btn btn-ghost" type="submit">Attach</button>
+                                </form>
+                                <form method="post" action={`/admin/zoom-imports/${i.id}/assign-evening`}>
+                                  <button class="btn btn-ghost" type="submit">Use as evening class</button>
+                                </form>
+                              </div>
                             ) : (
                               '—'
                             )}
@@ -230,8 +239,164 @@ admin.post('/zoom-imports/:id/assign', async (c) => {
       .bind(cohort.id, day, imp.topic || `Day ${day} lecture`, imp.share_url, imp.bunny_video_id, ready ? 'live' : 'processing').run();
     lec = { id: Number(r.meta.last_row_id) };
   }
-  await db.prepare("UPDATE zoom_imports SET lecture_id = ?, auto_live = 1, note = NULL, updated_at = datetime('now') WHERE id = ?").bind(lec.id, imp.id).run();
+  await db.prepare("UPDATE zoom_imports SET lecture_id = ?, evening_session_id = NULL, auto_live = 1, note = NULL, updated_at = datetime('now') WHERE id = ?").bind(lec.id, imp.id).run();
   return c.redirect('/admin/lectures?ok=1#zoom');
+});
+
+/** Attach an imported recording to the Evening Questions session of the day it was recorded. */
+admin.post('/zoom-imports/:id/assign-evening', async (c) => {
+  const db = c.env.DB;
+  const imp = await db.prepare('SELECT * FROM zoom_imports WHERE id = ?').bind(Number(c.req.param('id'))).first<any>();
+  if (!imp) return c.redirect('/admin/lectures');
+  const date = new Date(todayUtc(new Date(imp.start_time || Date.now()))).toISOString().slice(0, 10);
+  const ready = imp.status === 'ready' && imp.bunny_video_id;
+  let ev = await db.prepare('SELECT id FROM evening_sessions WHERE session_date = ?').bind(date).first<{ id: number }>();
+  if (ev) {
+    await db.prepare('UPDATE evening_sessions SET bunny_video_id = ?, status = ? WHERE id = ?').bind(imp.bunny_video_id, ready ? 'live' : 'processing', ev.id).run();
+  } else {
+    const label = fmtDate(new Date(date + 'T00:00:00Z'), { weekday: 'long', month: 'long', day: 'numeric' });
+    const r = await db.prepare('INSERT INTO evening_sessions (session_date, title, zoom_url, bunny_video_id, status) VALUES (?, ?, ?, ?, ?)')
+      .bind(date, `Evening Questions · ${label}`, imp.share_url, imp.bunny_video_id, ready ? 'live' : 'processing').run();
+    ev = { id: Number(r.meta.last_row_id) };
+  }
+  await db.prepare("UPDATE zoom_imports SET evening_session_id = ?, lecture_id = NULL, auto_live = 1, note = NULL, updated_at = datetime('now') WHERE id = ?").bind(ev.id, imp.id).run();
+  return c.redirect('/admin/evening?ok=1');
+});
+
+// ---------- Evening Questions ----------
+
+admin.get('/evening', async (c) => {
+  const db = c.env.DB;
+  const sessions = (await db.prepare('SELECT * FROM evening_sessions ORDER BY session_date DESC LIMIT 200').all<any>()).results;
+  const grants = (await db.prepare('SELECT a.user_id, a.until_date, a.note, u.email, u.name FROM evening_access a JOIN users u ON u.id = a.user_id ORDER BY a.until_date DESC').all<any>()).results;
+  const ids = (await db.prepare("SELECT value FROM settings WHERE key = 'zoom_evening_meeting_ids'").first<{ value: string }>())?.value ?? '';
+  const today = new Date(todayUtc()).toISOString().slice(0, 10);
+  return c.html(
+    <PortalLayout title="Admin: Evening Questions" active="admin-evening" user={c.get('user')!}>
+      <Eyebrow>Admin</Eyebrow>
+      <h1>Evening Questions</h1>
+      {c.req.query('ok') && <Flash>Saved.</Flash>}
+      {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
+      <section class="card">
+        <h2>Zoom meeting</h2>
+        <p class="muted small">Cloud recordings of this meeting are copied to Bunny and posted here by date, separate from the 90 lectures. They go live on their own.</p>
+        <form method="post" action="/admin/evening/settings" class="row" style="align-items:flex-end">
+          <label class="field" style="flex:1 1 260px">Evening Questions Zoom meeting ID
+            <input type="text" name="ids" value={ids} placeholder="844 8312 4634" inputmode="numeric" />
+          </label>
+          <button class="btn btn-outline" type="submit">Save</button>
+        </form>
+      </section>
+      <section class="card">
+        <h2>Who can watch</h2>
+        <p class="muted small">Students on Companion, Complete and MAX get 4 months automatically. Add anyone else here, for example someone paying $160 a month, with the last day of their access.</p>
+        <form method="post" action="/admin/evening/access" class="row" style="align-items:flex-end">
+          <label class="field" style="flex:2 1 220px">Student email (they must have an account)<input type="email" name="email" required /></label>
+          <label class="field" style="flex:1 1 150px">Access until<input type="date" name="until" required min={today} /></label>
+          <label class="field" style="flex:2 1 180px">Note (optional)<input type="text" name="note" maxlength={80} placeholder="Paid Nov by Zelle" /></label>
+          <button class="btn btn-primary" type="submit">Give access</button>
+        </form>
+        {grants.length > 0 && (
+          <div class="table-box">
+            <table class="t">
+              <thead><tr><th scope="col">Student</th><th scope="col">Until</th><th scope="col"><span class="sr">Remove</span></th></tr></thead>
+              <tbody>
+                {grants.map((g: any) => (
+                  <tr>
+                    <td>{g.name}<br /><span class="muted small">{g.email}{g.note ? ` · ${g.note}` : ''}</span></td>
+                    <td>{g.until_date < today ? <span class="chip chip-gray">Ended {g.until_date}</span> : g.until_date}</td>
+                    <td>
+                      <form method="post" action="/admin/evening/access/remove">
+                        <input type="hidden" name="user_id" value={String(g.user_id)} />
+                        <button class="btn btn-ghost" type="submit">Remove</button>
+                      </form>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+      <form method="post" action="/admin/evening/sessions" class="card">
+        <h2>Add a session by hand</h2>
+        <p class="muted small">Only needed for recordings that did not come in from Zoom automatically.</p>
+        <div class="grid">
+          <label class="field">Date<input type="date" name="date" required /></label>
+          <label class="field">Title<input type="text" name="title" placeholder="Evening Questions · Cardiology" /></label>
+          <label class="field">Bunny video ID<input type="text" name="bunny_video_id" /></label>
+        </div>
+        <button class="btn btn-outline" type="submit" style="align-self:flex-start">Add session</button>
+      </form>
+      <div class="table-box">
+        <table class="t">
+          <thead><tr><th scope="col">Date</th><th scope="col">Status</th><th scope="col">Update</th></tr></thead>
+          <tbody>
+            {sessions.map((e: any) => (
+              <tr>
+                <td><strong>{fmtDate(new Date(e.session_date + 'T00:00:00Z'), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</strong></td>
+                <td>{e.status === 'live' ? <span class="chip">Live for students</span> : <span class="chip chip-gray">Not live</span>}</td>
+                <td>
+                  <form method="post" action={`/admin/evening/sessions/${e.id}`} class="row" style="gap:8px">
+                    <input type="text" name="title" value={e.title} required aria-label="Title" style="max-width:240px" />
+                    <input type="text" name="bunny_video_id" value={e.bunny_video_id ?? ''} placeholder="Bunny video ID" aria-label="Bunny video ID" style="max-width:200px" />
+                    <label class="check"><input type="checkbox" name="live" value="1" checked={e.status === 'live'} /> Live</label>
+                    <button class="btn btn-ghost" type="submit">Save</button>
+                  </form>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!sessions.length && <p class="muted">No evening recordings yet.</p>}
+    </PortalLayout>,
+  );
+});
+
+admin.post('/evening/settings', async (c) => {
+  const f = await c.req.parseBody();
+  const ids = meetingIdList(String(f.ids ?? '')).join(', ');
+  await c.env.DB.prepare("INSERT INTO settings (key, value) VALUES ('zoom_evening_meeting_ids', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(ids).run();
+  return c.redirect('/admin/evening?ok=1');
+});
+
+admin.post('/evening/access', async (c) => {
+  const f = await c.req.parseBody();
+  const email = String(f.email ?? '').trim().toLowerCase();
+  const until = String(f.until ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(until)) return c.redirect('/admin/evening?error=' + encodeURIComponent('Pick an end date.'));
+  const u = await c.env.DB.prepare('SELECT id FROM users WHERE lower(email) = ?').bind(email).first<{ id: number }>();
+  if (!u) return c.redirect('/admin/evening?error=' + encodeURIComponent(`No account uses ${email}. Ask them to create one first.`));
+  await c.env.DB.prepare('INSERT INTO evening_access (user_id, until_date, note) VALUES (?, ?, ?) ON CONFLICT (user_id) DO UPDATE SET until_date = excluded.until_date, note = excluded.note')
+    .bind(u.id, until, String(f.note ?? '').trim().slice(0, 80) || null).run();
+  return c.redirect('/admin/evening?ok=1');
+});
+
+admin.post('/evening/access/remove', async (c) => {
+  const f = await c.req.parseBody();
+  await c.env.DB.prepare('DELETE FROM evening_access WHERE user_id = ?').bind(Number(f.user_id)).run();
+  return c.redirect('/admin/evening?ok=1');
+});
+
+admin.post('/evening/sessions', async (c) => {
+  const f = await c.req.parseBody();
+  const date = String(f.date ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.redirect('/admin/evening');
+  const vid = String(f.bunny_video_id ?? '').trim() || null;
+  const title = String(f.title ?? '').trim().slice(0, 160) || `Evening Questions · ${fmtDate(new Date(date + 'T00:00:00Z'), { weekday: 'long', month: 'long', day: 'numeric' })}`;
+  const r = await c.env.DB.prepare('INSERT OR IGNORE INTO evening_sessions (session_date, title, bunny_video_id, status) VALUES (?, ?, ?, ?)').bind(date, title, vid, vid ? 'live' : 'processing').run();
+  if (!r.meta.changes) return c.redirect('/admin/evening?error=' + encodeURIComponent('That date already has a session. Edit it in the list below.'));
+  return c.redirect('/admin/evening?ok=1');
+});
+
+admin.post('/evening/sessions/:id', async (c) => {
+  const f = await c.req.parseBody();
+  const vid = String(f.bunny_video_id ?? '').trim() || null;
+  const title = String(f.title ?? '').trim().slice(0, 160);
+  await c.env.DB.prepare("UPDATE evening_sessions SET bunny_video_id = ?, status = ?, title = COALESCE(NULLIF(?, ''), title) WHERE id = ?")
+    .bind(vid, f.live && vid ? 'live' : 'processing', title, Number(c.req.param('id'))).run();
+  return c.redirect('/admin/evening?ok=1');
 });
 
 // ---------- Questions ----------

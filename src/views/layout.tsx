@@ -73,7 +73,13 @@ const groups = (staff: boolean): { label: string; items: NavItem[] }[] => [
       { key: 'programs', label: 'Programs', sub: 'Packages and pricing', href: '/programs' },
     ],
   },
-  { label: 'Study', items: [{ key: 'lectures', label: 'Lectures', sub: "Watch today's class", href: '/lectures' }] },
+  {
+    label: 'Study',
+    items: [
+      { key: 'lectures', label: 'Lectures', sub: "Watch today's class", href: '/lectures' },
+      { key: 'evening', label: 'Evening Questions', sub: 'Mon · Wed · Fri recordings', href: '/evening' },
+    ],
+  },
   { label: 'Practice', items: [{ key: 'create', label: 'Create a test', sub: 'Pick your pools', href: '/create-test' }] },
   { label: 'Progress', items: [{ key: 'performance', label: 'Performance', sub: 'Scores by system', href: '/performance' }] },
   ...(staff
@@ -82,6 +88,7 @@ const groups = (staff: boolean): { label: string; items: NavItem[] }[] => [
           label: 'Admin',
           items: [
             { key: 'admin-lectures', label: 'Lectures', sub: 'Add Day 1, Day 2…', href: '/admin/lectures' },
+            { key: 'admin-evening', label: 'Evening Questions', sub: 'Recordings and access', href: '/admin/evening' },
             { key: 'admin-questions', label: 'Questions', sub: 'Write, import, approve', href: '/admin/questions' },
             { key: 'admin-settings', label: 'Site settings', sub: 'Prices, links, dates', href: '/admin/settings' },
           ],

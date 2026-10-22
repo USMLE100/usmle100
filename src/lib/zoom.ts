@@ -84,37 +84,57 @@ export async function importRecording(env: Env, payload: any) {
   const { file, extraParts } = picked;
   const meetingId = String(obj.id ?? '');
   const topic = String(obj.topic ?? 'Lecture').slice(0, 120);
-  const allowed = meetingIdList(await getSetting(db, 'zoom_meeting_ids'));
-  if (allowed.length && !allowed.includes(meetingId)) return; // Not a class meeting: ignore it.
+  const lectureIds = meetingIdList(await getSetting(db, 'zoom_meeting_ids'));
+  const eveningIds = meetingIdList(await getSetting(db, 'zoom_evening_meeting_ids'));
+  const isEvening = eveningIds.includes(meetingId);
+  const isLecture = !isEvening && lectureIds.includes(meetingId);
+  // Once any class meeting ID is saved, recordings of other meetings (personal calls etc.) are ignored.
+  if (!isEvening && !isLecture && (lectureIds.length || eveningIds.length)) return;
 
   const existing = await db.prepare('SELECT id FROM zoom_imports WHERE zoom_file_id = ?').bind(file.id).first();
   if (existing) return;
 
-  // Which program day was this recorded on? (New York date of the recording.)
+  // New York date of the recording decides the lecture day or the evening session.
   const startedAt = file.recording_start || obj.start_time || new Date().toISOString();
-  const cohort = await currentCohort(db);
   const t = todayUtc(new Date(startedAt));
-  const day = cohort && isClassDate(cohort, t) ? dayOfDate(cohort, t) : 0;
+  const ymd = new Date(t).toISOString().slice(0, 10);
   let lectureId: number | null = null;
+  let eveningId: number | null = null;
   let note: string | null = extraParts ? `Zoom made ${extraParts + 1} parts; the longest was imported.` : null;
-  if (cohort && day >= 1 && day <= cohort.lecture_days) {
-    const lec = await db.prepare('SELECT id, bunny_video_id FROM lectures WHERE cohort_id = ? AND day_number = ?').bind(cohort.id, day).first<{ id: number; bunny_video_id: string | null }>();
-    if (!lec) {
-      const r = await db.prepare("INSERT INTO lectures (cohort_id, day_number, title, zoom_url, status) VALUES (?, ?, ?, ?, 'processing')").bind(cohort.id, day, topic, obj.share_url ?? null).run();
-      lectureId = Number(r.meta.last_row_id);
-    } else if (!lec.bunny_video_id) {
-      lectureId = lec.id;
+
+  if (isEvening) {
+    const ev = await db.prepare('SELECT id, bunny_video_id FROM evening_sessions WHERE session_date = ?').bind(ymd).first<{ id: number; bunny_video_id: string | null }>();
+    if (!ev) {
+      const label = new Date(t).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric' });
+      const r = await db.prepare("INSERT INTO evening_sessions (session_date, title, zoom_url, status) VALUES (?, ?, ?, 'processing')").bind(ymd, `Evening Questions · ${label}`, obj.share_url ?? null).run();
+      eveningId = Number(r.meta.last_row_id);
+    } else if (!ev.bunny_video_id) {
+      eveningId = ev.id;
     } else {
-      note = `Day ${day} already has a video, so this one was not attached.`;
+      note = 'That evening already has a video, so this one was not attached.';
     }
   } else {
-    note = 'Recorded outside the class days, so it was not attached to a day.';
+    const cohort = await currentCohort(db);
+    const day = cohort && isClassDate(cohort, t) ? dayOfDate(cohort, t) : 0;
+    if (cohort && day >= 1 && day <= cohort.lecture_days) {
+      const lec = await db.prepare('SELECT id, bunny_video_id FROM lectures WHERE cohort_id = ? AND day_number = ?').bind(cohort.id, day).first<{ id: number; bunny_video_id: string | null }>();
+      if (!lec) {
+        const r = await db.prepare("INSERT INTO lectures (cohort_id, day_number, title, zoom_url, status) VALUES (?, ?, ?, ?, 'processing')").bind(cohort.id, day, topic, obj.share_url ?? null).run();
+        lectureId = Number(r.meta.last_row_id);
+      } else if (!lec.bunny_video_id) {
+        lectureId = lec.id;
+      } else {
+        note = `Day ${day} already has a video, so this one was not attached.`;
+      }
+    } else {
+      note = 'Recorded outside the class days, so it was not attached to a day.';
+    }
   }
 
-  const autoLive = allowed.length > 0 && lectureId ? 1 : 0;
+  const autoLive = (isEvening && eveningId) || (isLecture && lectureId) ? 1 : 0;
   const ins = await db
-    .prepare('INSERT OR IGNORE INTO zoom_imports (zoom_file_id, meeting_id, topic, start_time, share_url, lecture_id, auto_live, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(file.id, meetingId, topic, startedAt, obj.share_url ?? null, lectureId, autoLive, note)
+    .prepare('INSERT OR IGNORE INTO zoom_imports (zoom_file_id, meeting_id, topic, start_time, share_url, lecture_id, evening_session_id, auto_live, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(file.id, meetingId, topic, startedAt, obj.share_url ?? null, lectureId, eveningId, autoLive, note)
     .run();
   if (!ins.meta.changes) return;
   const importId = Number(ins.meta.last_row_id);
@@ -168,6 +188,7 @@ export async function syncImports(env: Env) {
       await db.batch([
         db.prepare("UPDATE zoom_imports SET bunny_video_id = ?, status = 'processing', updated_at = datetime('now') WHERE id = ?").bind(vid, imp.id),
         db.prepare('UPDATE lectures SET bunny_video_id = ? WHERE id = ? AND bunny_video_id IS NULL').bind(vid, imp.lecture_id),
+        db.prepare('UPDATE evening_sessions SET bunny_video_id = ? WHERE id = ? AND bunny_video_id IS NULL').bind(vid, imp.evening_session_id),
       ]);
     } else {
       const res = await fetch(`${bunnyBase(env)}/videos/${vid}`, { headers });
@@ -179,6 +200,9 @@ export async function syncImports(env: Env) {
         db.prepare("UPDATE zoom_imports SET status = 'ready', updated_at = datetime('now') WHERE id = ?").bind(imp.id),
         ...(imp.auto_live && imp.lecture_id
           ? [db.prepare("UPDATE lectures SET status = 'live' WHERE id = ? AND bunny_video_id = ?").bind(imp.lecture_id, vid)]
+          : []),
+        ...(imp.auto_live && imp.evening_session_id
+          ? [db.prepare("UPDATE evening_sessions SET status = 'live' WHERE id = ? AND bunny_video_id = ?").bind(imp.evening_session_id, vid)]
           : []),
       ]);
     } else if (FAILED.includes(video.status)) {
