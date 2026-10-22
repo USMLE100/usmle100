@@ -9,6 +9,14 @@ export type Env = {
   STRIPE_WEBHOOK_SECRET?: string;
   BUNNY_LIBRARY_ID?: string;
   BUNNY_TOKEN_KEY?: string;
+  /** Bunny Stream library API key: lets the site ask Bunny to copy Zoom recordings. */
+  BUNNY_API_KEY?: string;
+  /** Secret Token from the Zoom app's event subscription. */
+  ZOOM_WEBHOOK_SECRET?: string;
+  /** Optional Zoom Server-to-Server OAuth credentials, used only if Zoom sends no download token. */
+  ZOOM_ACCOUNT_ID?: string;
+  ZOOM_CLIENT_ID?: string;
+  ZOOM_CLIENT_SECRET?: string;
   /** Local development only: "1" marks enrollments paid without Stripe. Never set in production. */
   DEV_FAKE_PAYMENTS?: string;
 };

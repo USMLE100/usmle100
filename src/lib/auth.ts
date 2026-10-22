@@ -101,7 +101,7 @@ export async function loadUser(c: Context<AppEnv>, next: Next) {
 
 /** Rejects cross-site form posts (defence in depth on top of SameSite cookies). */
 export async function sameOrigin(c: Context<AppEnv>, next: Next) {
-  if (c.req.method === 'POST' && !c.req.path.startsWith('/stripe/webhook')) {
+  if (c.req.method === 'POST' && !c.req.path.startsWith('/stripe/webhook') && !c.req.path.startsWith('/zoom/webhook')) {
     // Browsers send Sec-Fetch-Site on every request; Origin can be "null" under strict referrer policies.
     const site = c.req.header('sec-fetch-site');
     if (site === 'cross-site') return c.text('Forbidden', 403);

@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { secureHeaders } from 'hono/secure-headers';
-import type { AppEnv } from './lib/types';
+import type { AppEnv, Env } from './lib/types';
+import { syncImports } from './lib/zoom';
+import { zoom } from './routes/zoom';
 import { loadUser, sameOrigin } from './lib/auth';
 import { ensureMigrated } from './lib/migrate';
 import { publicRoutes } from './routes/public';
@@ -32,6 +34,7 @@ app.use('*', loadUser);
 app.use('*', sameOrigin);
 
 app.route('/', publicRoutes);
+app.route('/zoom', zoom);
 app.route('/admin', admin);
 app.route('/', portal);
 
@@ -41,4 +44,10 @@ app.onError((err, c) => {
   return c.text('Something went wrong. Please try again.', 500);
 });
 
-export default app;
+export default {
+  fetch: app.fetch,
+  /** Every few minutes: link Zoom recordings that Bunny has copied and put finished ones live. */
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(ensureMigrated(env.DB).then(() => syncImports(env)));
+  },
+};

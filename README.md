@@ -26,6 +26,9 @@ Set these with `npx wrangler secret put NAME` (never commit them):
 | `STRIPE_WEBHOOK_SECRET` | Signing secret of the webhook pointing at `/stripe/webhook` (event `checkout.session.completed`) |
 | `BUNNY_LIBRARY_ID` | Set in `wrangler.toml` (not secret) |
 | `BUNNY_TOKEN_KEY` | Bunny Stream library's token authentication key |
+| `BUNNY_API_KEY` | Bunny Stream library's API key (lets the site ask Bunny to copy Zoom recordings) |
+| `ZOOM_WEBHOOK_SECRET` | Secret Token from the Zoom app's event subscription |
+| `ZOOM_ACCOUNT_ID`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET` | Optional: Zoom Server-to-Server OAuth credentials, used only if Zoom sends no download token |
 | `ADMIN_EMAILS` | Set in `wrangler.toml`: emails that become admins when they sign up |
 
 `SITE_URL` (optional, in `wrangler.toml`) fixes the public address used in Stripe links; otherwise it is taken from each request.
@@ -49,3 +52,11 @@ npm run dev
 ## Question spreadsheet
 
 Admin → Questions → Import has a downloadable template. Columns: `stem, choice_a … choice_h, correct (letter), explanation, bottom_line, subject, system, discipline, perf_system, lecture_day`. Imports are all-or-nothing and land as drafts for faculty approval.
+
+## Automatic Zoom import
+
+A Zoom app sends `recording.completed` to `/zoom/webhook`. The site picks the screen-share MP4, attaches it to the
+program day it was recorded on (creating the lecture if needed) and asks Bunny to fetch it straight from Zoom.
+A cron job every 5 minutes (and each visit to Admin → Lectures) saves the Bunny video ID on the lecture and puts it
+live once Bunny has finished encoding. Only meetings listed under "Class Zoom meeting ID(s)" go live on their own;
+recordings from other meetings are ignored, and with no IDs listed everything imports but waits for an admin.

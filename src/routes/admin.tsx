@@ -5,6 +5,7 @@ import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { currentCohort, dayDate, fmtDate, LETTERS, ymdToUtc } from '../lib/content';
 import { parseCsv, toCsv, TEMPLATE_HEADERS } from '../lib/csv';
 import { getSettings, isHttpUrl, SETTING_FIELDS } from '../lib/settings';
+import { meetingIdList, syncImports } from '../lib/zoom';
 
 export const admin = new Hono<AppEnv>();
 admin.use('*', requireStaff);
@@ -33,6 +34,14 @@ admin.get('/lectures', async (c) => {
     ? (await c.env.DB.prepare('SELECT * FROM lectures WHERE cohort_id = ? ORDER BY day_number').bind(cohort.id).all<any>()).results
     : [];
   const nextDay = (lectures.at(-1)?.day_number ?? 0) + 1;
+  try {
+    await syncImports(c.env);
+  } catch (e) {
+    console.error('sync imports', e);
+  }
+  const imports = (await c.env.DB.prepare('SELECT * FROM zoom_imports ORDER BY id DESC LIMIT 10').all<any>()).results;
+  const meetingIds = (await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'zoom_meeting_ids'").first<{ value: string }>())?.value ?? '';
+  const webhookUrl = new URL('/zoom/webhook', c.env.SITE_URL || c.req.url).toString();
   return c.html(
     <PortalLayout title="Admin: lectures" active="admin-lectures" user={user}>
       <Eyebrow>Admin</Eyebrow>
@@ -49,6 +58,54 @@ admin.get('/lectures', async (c) => {
       ) : (
         <>
           <p class="muted">{cohort.name} · Day 1 is {fmtDate(dayDate(cohort, 1), { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} · last lecture (Day {cohort.lecture_days}) {fmtDate(dayDate(cohort, cohort.lecture_days), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · exam window ends {fmtDate(dayDate(cohort, cohort.total_days), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</p>
+          <section class="card" id="zoom">
+            <h2>Automatic Zoom import</h2>
+            <p class="muted small">When a class recording finishes in your Zoom cloud, it is copied to Bunny and attached to that day’s lecture. It goes live for students when Bunny has finished preparing it, usually 10–30 minutes later.</p>
+            <ul class="small" style="margin:0;padding-left:18px">
+              <li>Bunny connection: {c.env.BUNNY_API_KEY ? <strong>connected</strong> : <span class="chip chip-rust">add BUNNY_API_KEY in Cloudflare</span>}</li>
+              <li>Zoom connection: {c.env.ZOOM_WEBHOOK_SECRET ? <strong>connected</strong> : <span class="chip chip-rust">add ZOOM_WEBHOOK_SECRET in Cloudflare</span>}</li>
+              <li>Address for the Zoom app: <code style="word-break:break-all">{webhookUrl}</code></li>
+            </ul>
+            <form method="post" action="/admin/zoom-settings" class="row" style="align-items:flex-end">
+              <label class="field" style="flex:1 1 260px">Class Zoom meeting ID(s)
+                <input type="text" name="zoom_meeting_ids" value={meetingIds} placeholder="123 4567 8901" inputmode="numeric" />
+              </label>
+              <button class="btn btn-outline" type="submit">Save</button>
+            </form>
+            <p class="muted small">{meetingIdList(meetingIds).length ? 'Only recordings of these meetings are imported, and they go live on their own.' : 'Until you add your class meeting ID, every cloud recording is imported but waits for you to tick Live.'}</p>
+            {imports.length > 0 && (
+              <div class="table-box">
+                <table class="t">
+                  <thead><tr><th scope="col">Recording</th><th scope="col">Status</th><th scope="col">Day</th></tr></thead>
+                  <tbody>
+                    {imports.map((i: any) => {
+                      const lec = lectures.find((l: any) => l.id === i.lecture_id);
+                      return (
+                        <tr>
+                          <td>{i.topic}<br /><span class="muted small">{i.start_time ? new Date(i.start_time).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</span>{i.note && <><br /><span class="small">{i.note}</span></>}</td>
+                          <td>{i.status === 'ready' ? <span class="chip">Ready</span> : i.status === 'failed' ? <span class="chip chip-rust">Failed</span> : <span class="chip chip-sand">{i.status === 'fetching' ? 'Copying from Zoom' : 'Bunny is preparing it'}</span>}</td>
+                          <td>
+                            {lec ? (
+                              <>Day {lec.day_number}</>
+                            ) : i.status !== 'failed' ? (
+                              <form method="post" action={`/admin/zoom-imports/${i.id}/assign`} class="row" style="gap:8px">
+                                <label class="field" style="max-width:110px">Use as Day
+                                  <input type="number" name="day" min="1" max={String(cohort.lecture_days)} required />
+                                </label>
+                                <button class="btn btn-ghost" type="submit">Attach</button>
+                              </form>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
           <section class="card">
             <h2>Days off</h2>
             <p class="muted small">No class on these days. They are skipped like weekends, so later days move forward. Lectures already added keep their day number.</p>
@@ -102,6 +159,7 @@ admin.get('/lectures', async (c) => {
                     <td>{l.status === 'live' ? <span class="chip">Live for students</span> : <span class="chip chip-gray">Not live</span>}</td>
                     <td>
                       <form method="post" action={`/admin/lectures/${l.id}`} class="row" style="gap:8px">
+                        <input type="text" name="title" value={l.title} required aria-label={`Title for day ${l.day_number}`} style="max-width:220px" />
                         <input type="text" name="bunny_video_id" value={l.bunny_video_id ?? ''} placeholder="Bunny video ID" aria-label={`Bunny video ID for day ${l.day_number}`} style="max-width:220px" />
                         <label class="check"><input type="checkbox" name="live" value="1" checked={l.status === 'live'} /> Live</label>
                         <button class="btn btn-ghost" type="submit">Save</button>
@@ -141,10 +199,39 @@ admin.post('/lectures', async (c) => {
 admin.post('/lectures/:id', async (c) => {
   const f = await c.req.parseBody();
   const vid = String(f.bunny_video_id ?? '').trim() || null;
-  await c.env.DB.prepare('UPDATE lectures SET bunny_video_id = ?, status = ? WHERE id = ?')
-    .bind(vid, f.live && vid ? 'live' : 'processing', Number(c.req.param('id')))
+  const title = String(f.title ?? '').trim().slice(0, 160);
+  await c.env.DB.prepare('UPDATE lectures SET bunny_video_id = ?, status = ?, title = COALESCE(NULLIF(?, \'\'), title) WHERE id = ?')
+    .bind(vid, f.live && vid ? 'live' : 'processing', title, Number(c.req.param('id')))
     .run();
   return c.redirect('/admin/lectures?ok=1');
+});
+
+admin.post('/zoom-settings', async (c) => {
+  const f = await c.req.parseBody();
+  const ids = meetingIdList(String(f.zoom_meeting_ids ?? '')).join(', ');
+  await c.env.DB.prepare("INSERT INTO settings (key, value) VALUES ('zoom_meeting_ids', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(ids).run();
+  return c.redirect('/admin/lectures?ok=1#zoom');
+});
+
+/** Attach an imported recording that had no day (e.g. recorded on a weekend) to a lecture day. */
+admin.post('/zoom-imports/:id/assign', async (c) => {
+  const db = c.env.DB;
+  const cohort = await currentCohort(db);
+  const f = await c.req.parseBody();
+  const day = Number(f.day);
+  const imp = await db.prepare('SELECT * FROM zoom_imports WHERE id = ?').bind(Number(c.req.param('id'))).first<any>();
+  if (!cohort || !imp || !Number.isInteger(day) || day < 1 || day > cohort.lecture_days) return c.redirect('/admin/lectures');
+  const ready = imp.status === 'ready' && imp.bunny_video_id;
+  let lec = await db.prepare('SELECT id FROM lectures WHERE cohort_id = ? AND day_number = ?').bind(cohort.id, day).first<{ id: number }>();
+  if (lec) {
+    await db.prepare('UPDATE lectures SET bunny_video_id = ?, status = ? WHERE id = ?').bind(imp.bunny_video_id, ready ? 'live' : 'processing', lec.id).run();
+  } else {
+    const r = await db.prepare('INSERT INTO lectures (cohort_id, day_number, title, zoom_url, bunny_video_id, status) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(cohort.id, day, imp.topic || `Day ${day} lecture`, imp.share_url, imp.bunny_video_id, ready ? 'live' : 'processing').run();
+    lec = { id: Number(r.meta.last_row_id) };
+  }
+  await db.prepare("UPDATE zoom_imports SET lecture_id = ?, auto_live = 1, note = NULL, updated_at = datetime('now') WHERE id = ?").bind(lec.id, imp.id).run();
+  return c.redirect('/admin/lectures?ok=1#zoom');
 });
 
 // ---------- Questions ----------

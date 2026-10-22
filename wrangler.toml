@@ -18,6 +18,9 @@ database_name = "usmle100"
 database_id = "d1ff7fee-bf81-42d8-863a-652e3476716c"
 migrations_dir = "migrations"
 
+[triggers]
+crons = ["*/5 * * * *"]
+
 [vars]
 ADMIN_EMAILS = "info.usmle100@gmail.com"
 BUNNY_LIBRARY_ID = "785730"
