@@ -3,8 +3,6 @@ export type Env = {
   ASSETS: Fetcher;
   /** Public address, e.g. https://usmle100.com. If unset, taken from each request. */
   SITE_URL?: string;
-  /** Comma-separated emails that become admins when they sign up. */
-  ADMIN_EMAILS?: string;
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   BUNNY_LIBRARY_ID?: string;
@@ -48,4 +46,7 @@ export type Vars = {
 
 export type AppEnv = { Bindings: Env; Variables: Vars };
 
+/** Faculty or admin: can watch everything and use the teaching parts of the admin area. */
 export const isStaff = (u: User | null) => !!u && (u.role === 'admin' || u.role === 'faculty');
+/** Admin only: prices, settings, schedule, student access and the team. */
+export const isAdmin = (u: User | null) => !!u && u.role === 'admin';

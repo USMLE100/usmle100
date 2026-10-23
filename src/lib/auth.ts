@@ -1,7 +1,7 @@
 import type { Context, Next } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { AppEnv, Enrollment, User } from './types';
-import { isStaff } from './types';
+import { isAdmin, isStaff } from './types';
 
 const COOKIE = 'u100_session';
 const SESSION_DAYS = 30;
@@ -136,4 +136,34 @@ export async function requireStaff(c: Context<AppEnv>, next: Next) {
   if (!user) return c.redirect('/sign-in?next=' + encodeURIComponent(c.req.path));
   if (!isStaff(user)) return c.text('Not found', 404);
   await next();
+}
+
+/**
+ * What faculty may do in the admin area (everything else there is admin-only).
+ * Deny by default: a new admin page is admin-only unless it is added here.
+ */
+const FACULTY_ALLOWED: [method: string, path: RegExp][] = [
+  // Qbank: write, import, approve
+  ['GET', /^\/admin\/questions(\/.*)?$/],
+  ['POST', /^\/admin\/questions(\/.*)?$/],
+  // Lectures: list, add a day, edit title / video / live
+  ['GET', /^\/admin\/lectures$/],
+  ['POST', /^\/admin\/lectures(\/\d+)?$/],
+  // Attach an imported Zoom recording to a lecture day or an evening class
+  ['POST', /^\/admin\/zoom-imports\/\d+\/(assign|assign-evening)$/],
+  // Evening Questions recordings (not who can watch)
+  ['GET', /^\/admin\/evening$/],
+  ['POST', /^\/admin\/evening\/sessions(\/\d+)?$/],
+];
+
+export const facultyMay = (method: string, path: string) =>
+  FACULTY_ALLOWED.some(([m, re]) => m === method && re.test(path.replace(/\/+$/, '')));
+
+/** Admins may use the whole admin area; faculty only the parts listed above. */
+export async function requireAdminOrFacultyAllowed(c: Context<AppEnv>, next: Next) {
+  const user = c.get('user');
+  if (!user) return c.redirect('/sign-in?next=' + encodeURIComponent(c.req.path));
+  if (isAdmin(user)) return next();
+  if (user.role === 'faculty' && facultyMay(c.req.method, c.req.path)) return next();
+  return c.text('Not found', 404);
 }

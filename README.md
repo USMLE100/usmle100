@@ -29,7 +29,6 @@ Set these with `npx wrangler secret put NAME` (never commit them):
 | `BUNNY_API_KEY` | Bunny Stream library's API key (lets the site ask Bunny to copy Zoom recordings) |
 | `ZOOM_WEBHOOK_SECRET` | Secret Token from the Zoom app's event subscription |
 | `ZOOM_ACCOUNT_ID`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET` | Optional: Zoom Server-to-Server OAuth credentials, used only if Zoom sends no download token |
-| `ADMIN_EMAILS` | Set in `wrangler.toml`: emails that become admins when they sign up |
 
 `SITE_URL` (optional, in `wrangler.toml`) fixes the public address used in Stripe links; otherwise it is taken from each request.
 
@@ -43,9 +42,26 @@ Database tables are created by the Worker itself on its first request (`src/lib/
 
 ```sh
 npm install
-printf 'ADMIN_EMAILS=you@example.com\nDEV_FAKE_PAYMENTS=1\n' > .dev.vars
+printf 'DEV_FAKE_PAYMENTS=1\n' > .dev.vars
 npm run dev
 ```
+
+## Roles
+
+Public sign-up always creates a **student**. An admin gives faculty or admin roles in **Admin → Team**
+(the last admin cannot be removed). Faculty may only use the admin pages listed in `FACULTY_ALLOWED`
+(`src/lib/auth.ts`): questions, lectures and Evening Questions recordings. Everything else in `/admin` is admin-only.
+
+The very first admin (a new database, or if every admin is lost) is set from the command line by someone
+with Cloudflare access, after that person has signed up:
+
+```sh
+npx wrangler d1 execute usmle100 --remote --command "UPDATE users SET role = 'admin' WHERE email = 'you@example.com'"
+```
+
+## Tests
+
+`npm test` runs the security tests in `test/` inside the Workers runtime with a fresh local database.
 
 `DEV_FAKE_PAYMENTS=1` skips Stripe locally; it is ignored on any `https://` site.
 

@@ -1,6 +1,6 @@
 import type { Child } from 'hono/jsx';
 import type { User } from '../lib/types';
-import { isStaff } from '../lib/types';
+import { isAdmin, isStaff } from '../lib/types';
 
 const Logo = () => (
   <a href="/" class="logo" aria-label="USMLE100 home">
@@ -58,7 +58,7 @@ export function PublicLayout(props: { title: string; user: User | null; children
 
 type NavItem = { key: string; label: string; sub: string; href: string };
 
-const groups = (staff: boolean): { label: string; items: NavItem[] }[] => [
+const groups = (staff: boolean, admin: boolean): { label: string; items: NavItem[] }[] => [
   {
     label: '',
     items: [
@@ -88,10 +88,15 @@ const groups = (staff: boolean): { label: string; items: NavItem[] }[] => [
           label: 'Admin',
           items: [
             { key: 'admin-lectures', label: 'Lectures', sub: 'Add Day 1, Day 2…', href: '/admin/lectures' },
-            { key: 'admin-evening', label: 'Evening Questions', sub: 'Recordings and access', href: '/admin/evening' },
-            { key: 'admin-students', label: 'Students', sub: 'Lecture access', href: '/admin/students' },
+            { key: 'admin-evening', label: 'Evening Questions', sub: admin ? 'Recordings and access' : 'Recordings', href: '/admin/evening' },
             { key: 'admin-questions', label: 'Questions', sub: 'Write, import, approve', href: '/admin/questions' },
-            { key: 'admin-settings', label: 'Site settings', sub: 'Prices, links, dates', href: '/admin/settings' },
+            ...(admin
+              ? [
+                  { key: 'admin-students', label: 'Students', sub: 'Lecture access', href: '/admin/students' },
+                  { key: 'admin-settings', label: 'Site settings', sub: 'Prices, links, dates', href: '/admin/settings' },
+                  { key: 'admin-team', label: 'Team', sub: 'Faculty and admins', href: '/admin/team' },
+                ]
+              : []),
           ],
         },
       ]
@@ -109,7 +114,7 @@ export function PortalLayout(props: { title: string; active: string; user: User;
             <label for="nav-toggle" class="btn btn-ghost menu-btn">Menu</label>
           </div>
           <div class="nav-body">
-          {groups(isStaff(props.user)).map((g) => (
+          {groups(isStaff(props.user), isAdmin(props.user)).map((g) => (
             <div class="nav-group">
               {g.label && <div class="nav-label">{g.label}</div>}
               {g.items.map((i) => (

@@ -194,14 +194,13 @@ publicRoutes.post('/sign-up', async (c) => {
   if (password.length < 10) return again('Your password needs at least 10 characters.');
   const exists = await c.env.DB.prepare('SELECT 1 FROM users WHERE email = ?').bind(email).first();
   if (exists) return again('An account with that email already exists. Try signing in.');
-  const admins = (c.env.ADMIN_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-  const role = admins.includes(email) ? 'admin' : 'student';
+  // Public sign-up always creates a student. Faculty and admin roles are only given by an admin (Admin -> Team).
   const { hash, salt } = await hashPassword(password);
-  const r = await c.env.DB.prepare('INSERT INTO users (email, name, password_hash, password_salt, role) VALUES (?, ?, ?, ?, ?)')
-    .bind(email, name, hash, salt, role)
+  const r = await c.env.DB.prepare("INSERT INTO users (email, name, password_hash, password_salt, role) VALUES (?, ?, ?, ?, 'student')")
+    .bind(email, name, hash, salt)
     .run();
   await createSession(c, Number(r.meta.last_row_id));
-  return c.redirect(role === 'admin' ? '/dashboard' : '/enroll');
+  return c.redirect('/enroll');
 });
 
 publicRoutes.get('/sign-in', (c) => c.html(<AuthPage mode="in" next={c.req.query('next')} user={c.get('user')} />));

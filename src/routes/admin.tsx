@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../lib/types';
-import { requireStaff } from '../lib/auth';
+import { isAdmin } from '../lib/types';
+import { requireAdminOrFacultyAllowed } from '../lib/auth';
 import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { currentCohort, dayDate, defaultLecturesUntil, fmtDate, LECTURE_DAYS_AFTER_END, LETTERS, todayUtc, ymdToUtc, type Cohort } from '../lib/content';
 import { parseCsv, toCsv, TEMPLATE_HEADERS } from '../lib/csv';
@@ -9,7 +10,8 @@ import { meetingIdList, syncImports } from '../lib/zoom';
 import { allSessions, CLASSES_PER_MONTH, giveEveningMonths, GRACE_DAYS, subStatus, todayYmd } from '../lib/evening';
 
 export const admin = new Hono<AppEnv>();
-admin.use('*', requireStaff);
+// Every admin route is admin-only unless faculty are explicitly allowed (see FACULTY_ALLOWED in lib/auth).
+admin.use('*', requireAdminOrFacultyAllowed);
 
 type Named = { id: number; name: string };
 type Taxonomy = { subjects: Named[]; systems: (Named & { suggested_perf_system_id: number | null })[]; perf: Named[]; disc: Named[]; subjDisc: Map<number, number> };
@@ -45,12 +47,15 @@ admin.get('/lectures', async (c) => {
   ).results;
   const meetingIds = (await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'zoom_meeting_ids'").first<{ value: string }>())?.value ?? '';
   const webhookUrl = new URL('/zoom/webhook', c.env.SITE_URL || c.req.url).toString();
+  const adminUser = isAdmin(user);
   return c.html(
     <PortalLayout title="Admin: lectures" active="admin-lectures" user={user}>
       <Eyebrow>Admin</Eyebrow>
       <h1>Lectures</h1>
       {c.req.query('ok') && <Flash>Saved.</Flash>}
-      {!cohort ? (
+      {!cohort && !adminUser ? (
+        <p class="muted">No cohort yet. An admin needs to create one.</p>
+      ) : !cohort ? (
         <form method="post" action="/admin/cohorts" class="card">
           <h2>Start your first cohort</h2>
           <p class="muted">Classes run Monday to Friday. Days 1–90 are lectures and days 91–100 are the exam window, all on weekdays. Pick a Monday for Day 1.</p>
@@ -64,6 +69,7 @@ admin.get('/lectures', async (c) => {
           <section class="card" id="zoom">
             <h2>Automatic Zoom import</h2>
             <p class="muted small">When a class recording finishes in your Zoom cloud, it is copied to Bunny and attached to that day’s lecture. It goes live for students when Bunny has finished preparing it, usually 10–30 minutes later.</p>
+            {adminUser && <>
             <ul class="small" style="margin:0;padding-left:18px">
               <li>Bunny connection: {c.env.BUNNY_API_KEY ? <strong>connected</strong> : <span class="chip chip-rust">add BUNNY_API_KEY in Cloudflare</span>}</li>
               <li>Zoom connection: {c.env.ZOOM_WEBHOOK_SECRET ? <strong>connected</strong> : <span class="chip chip-rust">add ZOOM_WEBHOOK_SECRET in Cloudflare</span>}</li>
@@ -76,6 +82,7 @@ admin.get('/lectures', async (c) => {
               <button class="btn btn-outline" type="submit">Save</button>
             </form>
             <p class="muted small">{meetingIdList(meetingIds).length ? 'Recordings of this meeting become that day’s lecture and go live on their own. Other meetings are ignored, except the Evening Questions meeting.' : 'Add your lecture meeting ID so lectures go live on their own.'} <a href="/admin/evening">Evening Questions meeting →</a></p>
+            </>}
             {imports.length > 0 && (
               <div class="table-box">
                 <table class="t">
@@ -126,10 +133,12 @@ admin.get('/lectures', async (c) => {
                   return (
                     <li class="row between" style="border-top:1px solid var(--line-soft);padding-top:10px">
                       <span><strong>{fmtDate(new Date(t), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</strong> · {label}</span>
-                      <form method="post" action="/admin/days-off/remove">
-                        <input type="hidden" name="date" value={ymd} />
-                        <button class="btn btn-ghost" type="submit">Remove</button>
-                      </form>
+                      {adminUser && (
+                        <form method="post" action="/admin/days-off/remove">
+                          <input type="hidden" name="date" value={ymd} />
+                          <button class="btn btn-ghost" type="submit">Remove</button>
+                        </form>
+                      )}
                     </li>
                   );
                 })}
@@ -137,11 +146,11 @@ admin.get('/lectures', async (c) => {
             ) : (
               <p class="muted">None yet.</p>
             )}
-            <form method="post" action="/admin/days-off" class="row" style="align-items:flex-end">
+            {adminUser && <form method="post" action="/admin/days-off" class="row" style="align-items:flex-end">
               <label class="field" style="flex:1 1 160px">Date<input type="date" name="date" required /></label>
               <label class="field" style="flex:2 1 200px">Reason<input type="text" name="label" placeholder="Holiday" maxlength={60} /></label>
               <button class="btn btn-outline" type="submit">Add day off</button>
-            </form>
+            </form>}
           </section>
           <form method="post" action="/admin/lectures" class="card">
             <h2>Add Day {nextDay} · {fmtDate(dayDate(cohort, nextDay))}</h2>
@@ -264,6 +273,65 @@ admin.post('/zoom-imports/:id/assign-evening', async (c) => {
   return c.redirect('/admin/evening?ok=1');
 });
 
+// ---------- Team (admin only): who is faculty or admin ----------
+
+admin.get('/team', async (c) => {
+  const me = c.get('user')!;
+  const staff = (await c.env.DB.prepare("SELECT id, name, email, role, created_at FROM users WHERE role IN ('admin', 'faculty') ORDER BY role, name COLLATE NOCASE").all<any>()).results;
+  return c.html(
+    <PortalLayout title="Admin: team" active="admin-team" user={me}>
+      <Eyebrow>Admin</Eyebrow>
+      <h1>Team</h1>
+      {c.req.query('ok') && <Flash>Saved.</Flash>}
+      {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
+      <p class="muted">
+        New accounts are always students. Only an admin can make someone faculty or admin here.{' '}
+        <strong>Faculty</strong> can write and approve questions and manage lecture and Evening Questions recordings.{' '}
+        <strong>Admins</strong> can also change prices, settings, the schedule, student access and this team.
+      </p>
+      <form method="post" action="/admin/team" class="card row" style="align-items:flex-end">
+        <label class="field" style="flex:2 1 240px">Email of an existing account<input type="email" name="email" required /></label>
+        <label class="field" style="flex:1 1 160px">Role
+          <select name="role"><option value="faculty">Faculty</option><option value="admin">Admin</option><option value="student">Student (remove access)</option></select>
+        </label>
+        <button class="btn btn-primary" type="submit">Save</button>
+      </form>
+      <div class="table-box">
+        <table class="t">
+          <thead><tr><th scope="col">Name</th><th scope="col">Role</th><th scope="col">Since</th></tr></thead>
+          <tbody>
+            {staff.map((u: any) => (
+              <tr>
+                <td>{u.name}{u.id === me.id && ' (you)'}<br /><span class="muted small">{u.email}</span></td>
+                <td>{u.role === 'admin' ? <span class="chip">Admin</span> : <span class="chip chip-sand">Faculty</span>}</td>
+                <td class="muted small">{String(u.created_at).slice(0, 10)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </PortalLayout>,
+  );
+});
+
+admin.post('/team', async (c) => {
+  const f = await c.req.parseBody();
+  const email = String(f.email ?? '').trim().toLowerCase();
+  const role = String(f.role ?? '');
+  const bad = (m: string) => c.redirect('/admin/team?error=' + encodeURIComponent(m));
+  if (!['student', 'faculty', 'admin'].includes(role)) return bad('Pick a role.');
+  const u = await c.env.DB.prepare('SELECT id, role FROM users WHERE email = ?').bind(email).first<{ id: number; role: string }>();
+  if (!u) return bad(`No account uses ${email}. They need to create one first.`);
+  if (u.role === 'admin' && role !== 'admin') {
+    const admins = (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'").first<{ n: number }>())?.n ?? 0;
+    if (admins <= 1) return bad('There must always be at least one admin. Make someone else an admin first.');
+  }
+  // Only change the role if it is still what we read, so two admins acting at once cannot remove the last admin.
+  await c.env.DB.prepare("UPDATE users SET role = ? WHERE id = ? AND role = ? AND (? = 'admin' OR role <> 'admin' OR (SELECT COUNT(*) FROM users WHERE role = 'admin') > 1)")
+    .bind(role, u.id, u.role, role).run();
+  return c.redirect('/admin/team?ok=1');
+});
+
 // ---------- Students: lecture access ----------
 
 admin.get('/students', async (c) => {
@@ -354,12 +422,14 @@ admin.get('/evening', async (c) => {
     .filter((g: any, i: number, arr: any[]) => arr.findIndex((x: any) => x.user_id === g.user_id) === i) // latest per student
     .map((g: any) => ({ ...g, st: subStatus({ start: g.start_date, months: g.months }, allS, today) }));
   const ids = (await db.prepare("SELECT value FROM settings WHERE key = 'zoom_evening_meeting_ids'").first<{ value: string }>())?.value ?? '';
+  const adminUser = isAdmin(c.get('user'));
   return c.html(
     <PortalLayout title="Admin: Evening Questions" active="admin-evening" user={c.get('user')!}>
       <Eyebrow>Admin</Eyebrow>
       <h1>Evening Questions</h1>
       {c.req.query('ok') && <Flash>Saved.</Flash>}
       {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
+      {adminUser && <>
       <section class="card">
         <h2>Zoom meeting</h2>
         <p class="muted small">Cloud recordings of this meeting are copied to Bunny and posted here by date, separate from the 90 lectures. They go live on their own.</p>
@@ -421,6 +491,7 @@ admin.get('/evening', async (c) => {
           </div>
         )}
       </section>
+      </>}
       <form method="post" action="/admin/evening/sessions" class="card">
         <h2>Add a session by hand</h2>
         <p class="muted small">Only needed for recordings that did not come in from Zoom automatically.</p>
