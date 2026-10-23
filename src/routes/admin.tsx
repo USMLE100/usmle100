@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../lib/types';
 import { isAdmin } from '../lib/types';
 import { requireAdminOrFacultyAllowed } from '../lib/auth';
+import { createResetToken, RESET_LINK_SECONDS } from '../lib/reset';
 import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { currentCohort, dayDate, defaultLecturesUntil, fmtDate, LECTURE_DAYS_AFTER_END, LETTERS, todayUtc, ymdToUtc, type Cohort } from '../lib/content';
 import { parseCsv, toCsv, TEMPLATE_HEADERS } from '../lib/csv';
@@ -357,6 +358,14 @@ admin.get('/students', async (c) => {
       <h1>Students</h1>
       {c.req.query('ok') && <Flash>Saved.</Flash>}
       <p class="muted">Lecture recordings stay open until {LECTURE_DAYS_AFTER_END} days after a cohort’s last day (Day 100). To give one student more time, change their date and tap Save.</p>
+      <form method="post" action="/admin/reset-link" class="card row" style="align-items:flex-end">
+        <div class="stack" style="flex:1 1 100%;gap:4px">
+          <h2 style="margin:0">Password reset link</h2>
+          <p class="muted small" style="margin:0">For anyone who forgot their password. First make sure the request really comes from them, for example from the email address on their account or a phone number you know. The link works once, for 1 hour, and signs them out everywhere else.</p>
+        </div>
+        <label class="field" style="flex:2 1 240px">Email of the account<input type="email" name="email" required /></label>
+        <button class="btn btn-outline" type="submit">Make reset link</button>
+      </form>
       {!rows.length ? (
         <p class="muted">No paid students yet.</p>
       ) : (
@@ -390,6 +399,40 @@ admin.get('/students', async (c) => {
           </table>
         </div>
       )}
+    </PortalLayout>,
+  );
+});
+
+/** Make a one-time password reset link for any account and show it once, to send to its owner. */
+admin.post('/reset-link', async (c) => {
+  const me = c.get('user')!;
+  const f = await c.req.parseBody();
+  const email = String(f.email ?? '').trim().toLowerCase();
+  const u = await c.env.DB.prepare('SELECT id, name, email FROM users WHERE email = ?').bind(email).first<{ id: number; name: string; email: string }>();
+  c.header('Cache-Control', 'no-store');
+  if (!u) {
+    return c.html(
+      <PortalLayout title="Password reset link" active="admin-students" user={me}>
+        <Eyebrow>Admin · Students</Eyebrow>
+        <h1>Password reset link</h1>
+        <Flash kind="error">No account uses {email}.</Flash>
+        <a class="btn btn-ghost" href="/admin/students">Back</a>
+      </PortalLayout>,
+      404,
+    );
+  }
+  const token = await createResetToken(c.env.DB, u.id, me.id);
+  const link = new URL('/reset-password?token=' + token, c.env.SITE_URL || c.req.url).toString();
+  return c.html(
+    <PortalLayout title="Password reset link" active="admin-students" user={me}>
+      <Eyebrow>Admin · Students</Eyebrow>
+      <h1>Password reset link</h1>
+      <section class="card">
+        <p style="margin:0">For <strong>{u.name}</strong> ({u.email}). Send it only to them. It works once and expires in {RESET_LINK_SECONDS / 60} minutes. Making another link cancels this one.</p>
+        <label class="field">Link<textarea readonly rows={3} style="font-family:monospace;word-break:break-all">{link}</textarea></label>
+        <p class="muted small" style="margin:0">This page will not show the link again.</p>
+      </section>
+      <a class="btn btn-ghost" href="/admin/students">Back to students</a>
     </PortalLayout>,
   );
 });

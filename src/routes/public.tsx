@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../lib/types';
 import { PublicLayout, Flash, Eyebrow } from '../views/layout';
 import { createSession, destroySession, hashPassword, verifyPassword, requireUser } from '../lib/auth';
+import { clearFailures, emailKey, ipKey, lockedFor, recordFailure } from '../lib/ratelimit';
+import { consumeResetToken, resetTokenUser } from '../lib/reset';
 import { activateEnrollment, createCheckoutSession, retrieveCheckoutSession, verifyWebhook } from '../lib/stripe';
 import { money } from '../lib/content';
 import { getSettings } from '../lib/settings';
@@ -137,7 +139,7 @@ publicRoutes.get('/programs', async (c) => {
 
 // ---------- Accounts ----------
 
-const AuthPage = (p: { mode: 'in' | 'up'; error?: string; email?: string; name?: string; next?: string; user: any }) => (
+const AuthPage = (p: { mode: 'in' | 'up'; error?: string; email?: string; name?: string; next?: string; user: any; contact?: string }) => (
   <PublicLayout title={p.mode === 'in' ? 'Sign in' : 'Create account'} user={p.user}>
     <main class="wrap">
       <div class="card auth-card">
@@ -169,6 +171,12 @@ const AuthPage = (p: { mode: 'in' | 'up'; error?: string; email?: string; name?:
           {p.mode === 'in' ? (
             <>
               New here? <a href="/sign-up">Create an account</a>
+              {p.contact && (
+                <>
+                  <br />
+                  Forgot your password? Email <a href={`mailto:${p.contact}?subject=${encodeURIComponent('USMLE100: password reset')}`}>{p.contact}</a> from the address you signed up with, and we’ll send you a reset link.
+                </>
+              )}
             </>
           ) : (
             <>
@@ -203,18 +211,93 @@ publicRoutes.post('/sign-up', async (c) => {
   return c.redirect('/enroll');
 });
 
-publicRoutes.get('/sign-in', (c) => c.html(<AuthPage mode="in" next={c.req.query('next')} user={c.get('user')} />));
+const contactEmail = async (db: D1Database) => (await getSettings(db)).contact_email || undefined;
+
+publicRoutes.get('/sign-in', async (c) => c.html(<AuthPage mode="in" next={c.req.query('next')} user={c.get('user')} contact={await contactEmail(c.env.DB)} />));
 publicRoutes.post('/sign-in', async (c) => {
   const f = await c.req.parseBody();
   const email = String(f.email ?? '').trim().toLowerCase();
   const password = String(f.password ?? '');
+  // Cloudflare sets CF-Connecting-IP to the visitor's address; visitors cannot override it.
+  const ip = c.req.header('cf-connecting-ip') ?? null;
+  const contact = await contactEmail(c.env.DB);
+  const wait = await lockedFor(c.env.DB, [emailKey(email), ...(ip ? [ipKey(ip)] : [])]);
+  if (wait > 0) {
+    // Refused before the password is checked, so guessing gains nothing while locked.
+    const minutes = Math.max(1, Math.ceil(wait / 60));
+    return c.html(<AuthPage mode="in" error={`Too many sign-in attempts. Please wait ${minutes} minute${minutes === 1 ? '' : 's'} and try again.`} email={email} user={null} contact={contact} />, 429);
+  }
   const u = await c.env.DB.prepare('SELECT id, password_hash, password_salt FROM users WHERE email = ?')
     .bind(email)
     .first<{ id: number; password_hash: string; password_salt: string }>();
   const ok = u ? await verifyPassword(password, u.password_hash, u.password_salt) : (await hashPassword(password), false);
-  if (!u || !ok) return c.html(<AuthPage mode="in" error="That email and password don’t match." email={email} user={null} />, 401);
+  if (!u || !ok) {
+    await recordFailure(c.env.DB, email, ip);
+    return c.html(<AuthPage mode="in" error="That email and password don’t match." email={email} user={null} contact={contact} />, 401);
+  }
+  await clearFailures(c.env.DB, email);
   await createSession(c, u.id);
   return c.redirect(safeNext(f.next));
+});
+
+// ---------- Password reset (one-time links made by an admin) ----------
+
+const ResetPage = (p: { token?: string; name?: string; error?: string; invalid?: boolean }) => (
+  <PublicLayout title="Reset password" user={null}>
+    <main class="wrap">
+      <div class="card auth-card">
+        <h1>Choose a new password</h1>
+        {p.invalid ? (
+          <>
+            <Flash kind="error">This reset link has expired or has already been used.</Flash>
+            <p class="small">Ask us for a new link, or <a href="/sign-in">sign in</a> if you remember your password.</p>
+          </>
+        ) : (
+          <>
+            <p class="muted">For {p.name}. This link works once and expires 1 hour after it was made.</p>
+            {p.error && <Flash kind="error">{p.error}</Flash>}
+            <form method="post" action="/reset-password" class="stack" style="gap:14px">
+              <input type="hidden" name="token" value={p.token} />
+              <label class="field">New password<input type="password" name="password" required minlength={10} autocomplete="new-password" /></label>
+              <label class="field">Type it again<input type="password" name="again" required minlength={10} autocomplete="new-password" /></label>
+              <span class="muted small">At least 10 characters.</span>
+              <button class="btn btn-primary btn-block" type="submit">Save new password</button>
+            </form>
+          </>
+        )}
+      </div>
+    </main>
+  </PublicLayout>
+);
+
+publicRoutes.get('/reset-password', async (c) => {
+  // The link's secret is in the address. The site-wide Referrer-Policy (strict-origin-when-cross-origin) means
+  // other sites, such as the font server, only ever see https://<site>/ and never the path or token.
+  c.header('Cache-Control', 'no-store');
+  const token = c.req.query('token') ?? '';
+  const u = await resetTokenUser(c.env.DB, token);
+  return c.html(u ? <ResetPage token={token} name={u.name} /> : <ResetPage invalid />, u ? 200 : 400);
+});
+
+publicRoutes.post('/reset-password', async (c) => {
+  c.header('Cache-Control', 'no-store');
+  const f = await c.req.parseBody();
+  const token = String(f.token ?? '');
+  const password = String(f.password ?? '');
+  const u = await resetTokenUser(c.env.DB, token);
+  if (!u) return c.html(<ResetPage invalid />, 400);
+  if (password.length < 10) return c.html(<ResetPage token={token} name={u.name} error="Your password needs at least 10 characters." />, 400);
+  if (password !== String(f.again ?? '')) return c.html(<ResetPage token={token} name={u.name} error="The two passwords don’t match." />, 400);
+  if (!(await consumeResetToken(c.env.DB, token, u.id))) return c.html(<ResetPage invalid />, 400);
+  const { hash, salt } = await hashPassword(password);
+  // New password, and every existing sign-in for this account is ended.
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?').bind(hash, salt, u.id),
+    c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(u.id),
+  ]);
+  await clearFailures(c.env.DB, u.email);
+  await createSession(c, u.id);
+  return c.redirect('/dashboard');
 });
 
 publicRoutes.post('/sign-out', async (c) => {

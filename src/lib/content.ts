@@ -85,9 +85,12 @@ export async function currentCohort(db: D1Database, cohortId?: number | null): P
  * Links expire, so a copied URL stops working.
  */
 export async function bunnyEmbedUrl(env: Env, videoId: string, ttlSeconds = 4 * 3600) {
-  if (!env.BUNNY_LIBRARY_ID) return null;
+  // Fail closed: never hand out an unsigned player link. Without the key the video simply does not play.
+  if (!env.BUNNY_LIBRARY_ID || !env.BUNNY_TOKEN_KEY) {
+    console.error('Bunny video not shown: BUNNY_LIBRARY_ID or BUNNY_TOKEN_KEY is missing');
+    return null;
+  }
   const base = `https://iframe.mediadelivery.net/embed/${env.BUNNY_LIBRARY_ID}/${encodeURIComponent(videoId)}`;
-  if (!env.BUNNY_TOKEN_KEY) return base;
   const expires = Math.floor(Date.now() / 1000) + ttlSeconds;
   const token = await sha256Hex(env.BUNNY_TOKEN_KEY + videoId + expires);
   return `${base}?token=${token}&expires=${expires}`;

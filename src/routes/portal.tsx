@@ -317,7 +317,7 @@ portal.get('/lectures/:id', async (c) => {
           <span class="watermark" aria-hidden="true">{user.email}</span>
         </div>
       ) : (
-        <Flash kind="error">The video for this lecture isn’t uploaded yet.</Flash>
+        <Flash kind="error">{l.bunny_video_id ? 'This video can’t be played right now. Please try again later.' : 'The video for this lecture isn’t uploaded yet.'}</Flash>
       )}
       <div class="row">
         {l.completed_at ? (
@@ -430,7 +430,7 @@ portal.get('/evening/:id', async (c) => {
           <span class="watermark" aria-hidden="true">{user.email}</span>
         </div>
       ) : (
-        <Flash kind="error">The video for this session isn’t ready yet.</Flash>
+        <Flash kind="error">{e.bunny_video_id ? 'This video can’t be played right now. Please try again later.' : 'The video for this session isn’t ready yet.'}</Flash>
       )}
       <div class="row"><a class="btn btn-ghost" href="/evening">All evening sessions</a></div>
     </PortalLayout>,

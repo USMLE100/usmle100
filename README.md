@@ -97,6 +97,15 @@ Always confirm the person and grant access by the account's unique **user ID**:
 
 With `wrangler`, `--remote` is required; without it the command only changes a local copy of the database.
 
+## Sign-in protection and password resets
+
+- **Lockout:** 5 wrong passwords for one email within 15 minutes locks that email for 15 minutes; 20 wrong passwords
+  from one network address (any emails) locks that address for 15 minutes. Counters live in `login_attempts`.
+- **Password reset:** an admin makes a one-time link in **Admin → Students → Password reset link** and sends it to
+  the student. It works once, for 1 hour; making a new link cancels the old one; using it signs the account out
+  everywhere else. Only a SHA-256 hash of the link's secret is stored (`password_resets`).
+- **Videos:** the site never shows an unsigned Bunny player link. If `BUNNY_TOKEN_KEY` is missing, videos do not play.
+
 ## Tests
 
 `npm test` runs the security tests in `test/` inside the Workers runtime with a fresh local database.
