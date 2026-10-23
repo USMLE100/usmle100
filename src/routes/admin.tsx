@@ -265,6 +265,17 @@ admin.post('/zoom-imports/:id/assign-evening', async (c) => {
 
 // ---------- Evening Questions ----------
 
+/** Monthly Evening Questions access: 32 days per month, so the last class can still be watched. */
+const EVENING_MONTH_DAYS = 32;
+const addDays = (ymd: string, n: number) => new Date(ymdToUtc(ymd) + n * 86400_000).toISOString().slice(0, 10);
+
+/** New last day: continue from the current last day if access is still running, else from the start date. */
+function newLastDay(current: string | null, start: string, months: number) {
+  const from = current && current >= addDays(start, -1) ? addDays(current, 1) : start;
+  return addDays(from, EVENING_MONTH_DAYS * months - 1);
+}
+
+
 admin.get('/evening', async (c) => {
   const db = c.env.DB;
   const sessions = (await db.prepare('SELECT * FROM evening_sessions ORDER BY session_date DESC LIMIT 200').all<any>()).results;
@@ -289,23 +300,37 @@ admin.get('/evening', async (c) => {
       </section>
       <section class="card">
         <h2>Who can watch</h2>
-        <p class="muted small">Students on Companion, Complete and MAX get 4 months automatically. Add anyone else here, for example someone paying $160 a month, with the last day of their access.</p>
+        <p class="muted small">Students on Companion, Complete and MAX get 4 months automatically. For someone paying monthly, each month gives <strong>{EVENING_MONTH_DAYS} days</strong> of access (a few extra days to watch the last class), then it switches off by itself. Giving another month to someone who still has access adds it to the end.</p>
         <form method="post" action="/admin/evening/access" class="row" style="align-items:flex-end">
           <label class="field" style="flex:2 1 220px">Student email (they must have an account)<input type="email" name="email" required /></label>
-          <label class="field" style="flex:1 1 150px">Access until<input type="date" name="until" required min={today} /></label>
+          <label class="field" style="flex:1 1 150px">Starts<input type="date" name="start" required value={today} /></label>
+          <label class="field" style="flex:0 1 110px">Months<input type="number" name="months" min="1" max="12" value="1" required /></label>
           <label class="field" style="flex:2 1 180px">Note (optional)<input type="text" name="note" maxlength={80} placeholder="Paid Nov by Zelle" /></label>
           <button class="btn btn-primary" type="submit">Give access</button>
         </form>
         {grants.length > 0 && (
           <div class="table-box">
             <table class="t">
-              <thead><tr><th scope="col">Student</th><th scope="col">Until</th><th scope="col"><span class="sr">Remove</span></th></tr></thead>
+              <thead><tr><th scope="col">Student</th><th scope="col">Last day</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
               <tbody>
                 {grants.map((g: any) => (
                   <tr>
                     <td>{g.name}<br /><span class="muted small">{g.email}{g.note ? ` · ${g.note}` : ''}</span></td>
-                    <td>{g.until_date < today ? <span class="chip chip-gray">Ended {g.until_date}</span> : g.until_date}</td>
                     <td>
+                      {g.until_date < today ? (
+                        <span class="chip chip-gray">Ended {fmtDate(new Date(g.until_date + 'T00:00:00Z'), { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                      ) : (
+                        <>
+                          {fmtDate(new Date(g.until_date + 'T00:00:00Z'), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                          <br /><span class="muted small">{Math.round((ymdToUtc(g.until_date) - ymdToUtc(today)) / 86400_000) + 1} day(s) left</span>
+                        </>
+                      )}
+                    </td>
+                    <td class="row" style="gap:6px">
+                      <form method="post" action="/admin/evening/access/extend">
+                        <input type="hidden" name="user_id" value={String(g.user_id)} />
+                        <button class="btn btn-outline" type="submit">+1 month</button>
+                      </form>
                       <form method="post" action="/admin/evening/access/remove">
                         <input type="hidden" name="user_id" value={String(g.user_id)} />
                         <button class="btn btn-ghost" type="submit">Remove</button>
@@ -364,12 +389,26 @@ admin.post('/evening/settings', async (c) => {
 admin.post('/evening/access', async (c) => {
   const f = await c.req.parseBody();
   const email = String(f.email ?? '').trim().toLowerCase();
-  const until = String(f.until ?? '');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(until)) return c.redirect('/admin/evening?error=' + encodeURIComponent('Pick an end date.'));
+  const start = String(f.start ?? '');
+  const months = Math.min(12, Math.max(1, Math.floor(Number(f.months) || 1)));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return c.redirect('/admin/evening?error=' + encodeURIComponent('Pick a start date.'));
   const u = await c.env.DB.prepare('SELECT id FROM users WHERE lower(email) = ?').bind(email).first<{ id: number }>();
   if (!u) return c.redirect('/admin/evening?error=' + encodeURIComponent(`No account uses ${email}. Ask them to create one first.`));
-  await c.env.DB.prepare('INSERT INTO evening_access (user_id, until_date, note) VALUES (?, ?, ?) ON CONFLICT (user_id) DO UPDATE SET until_date = excluded.until_date, note = excluded.note')
+  const cur = await c.env.DB.prepare('SELECT until_date FROM evening_access WHERE user_id = ?').bind(u.id).first<{ until_date: string }>();
+  const until = newLastDay(cur?.until_date ?? null, start, months);
+  await c.env.DB.prepare('INSERT INTO evening_access (user_id, until_date, note) VALUES (?, ?, ?) ON CONFLICT (user_id) DO UPDATE SET until_date = excluded.until_date, note = COALESCE(excluded.note, evening_access.note)')
     .bind(u.id, until, String(f.note ?? '').trim().slice(0, 80) || null).run();
+  return c.redirect('/admin/evening?ok=1');
+});
+
+admin.post('/evening/access/extend', async (c) => {
+  const f = await c.req.parseBody();
+  const id = Number(f.user_id);
+  const cur = await c.env.DB.prepare('SELECT until_date FROM evening_access WHERE user_id = ?').bind(id).first<{ until_date: string }>();
+  if (cur) {
+    const today = new Date(todayUtc()).toISOString().slice(0, 10);
+    await c.env.DB.prepare('UPDATE evening_access SET until_date = ? WHERE user_id = ?').bind(newLastDay(cur.until_date, today, 1), id).run();
+  }
   return c.redirect('/admin/evening?ok=1');
 });
 
