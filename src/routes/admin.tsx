@@ -6,6 +6,7 @@ import { currentCohort, dayDate, fmtDate, LETTERS, todayUtc, ymdToUtc } from '..
 import { parseCsv, toCsv, TEMPLATE_HEADERS } from '../lib/csv';
 import { getSettings, isHttpUrl, SETTING_FIELDS } from '../lib/settings';
 import { meetingIdList, syncImports } from '../lib/zoom';
+import { addEveningMonths, EVENING_MONTH_DAYS, todayYmd } from '../lib/evening';
 
 export const admin = new Hono<AppEnv>();
 admin.use('*', requireStaff);
@@ -265,23 +266,25 @@ admin.post('/zoom-imports/:id/assign-evening', async (c) => {
 
 // ---------- Evening Questions ----------
 
-/** Monthly Evening Questions access: 32 days per month, so the last class can still be watched. */
-const EVENING_MONTH_DAYS = 32;
-const addDays = (ymd: string, n: number) => new Date(ymdToUtc(ymd) + n * 86400_000).toISOString().slice(0, 10);
-
-/** New last day: continue from the current last day if access is still running, else from the start date. */
-function newLastDay(current: string | null, start: string, months: number) {
-  const from = current && current >= addDays(start, -1) ? addDays(current, 1) : start;
-  return addDays(from, EVENING_MONTH_DAYS * months - 1);
-}
-
-
 admin.get('/evening', async (c) => {
   const db = c.env.DB;
   const sessions = (await db.prepare('SELECT * FROM evening_sessions ORDER BY session_date DESC LIMIT 200').all<any>()).results;
-  const grants = (await db.prepare('SELECT a.user_id, a.until_date, a.note, u.email, u.name FROM evening_access a JOIN users u ON u.id = a.user_id ORDER BY a.until_date DESC').all<any>()).results;
+  const today = todayYmd();
+  // One row per student: their current month (if any), months still to come, and their last day.
+  const grants = (
+    await db.prepare(
+      `SELECT u.id AS user_id, u.email, u.name,
+              (SELECT start_date FROM evening_periods p WHERE p.user_id = u.id AND p.start_date <= ?1 AND p.end_date >= ?1 ORDER BY start_date DESC LIMIT 1) AS cur_start,
+              (SELECT end_date FROM evening_periods p WHERE p.user_id = u.id AND p.start_date <= ?1 AND p.end_date >= ?1 ORDER BY start_date DESC LIMIT 1) AS cur_end,
+              (SELECT COUNT(*) FROM evening_periods p WHERE p.user_id = u.id AND p.start_date > ?1) AS queued,
+              (SELECT MIN(start_date) FROM evening_periods p WHERE p.user_id = u.id AND p.start_date > ?1) AS next_start,
+              (SELECT MAX(end_date) FROM evening_periods p WHERE p.user_id = u.id) AS last_day,
+              (SELECT note FROM evening_periods p WHERE p.user_id = u.id ORDER BY id DESC LIMIT 1) AS note
+       FROM users u WHERE u.id IN (SELECT user_id FROM evening_periods)
+       ORDER BY last_day DESC`,
+    ).bind(today).all<any>()
+  ).results;
   const ids = (await db.prepare("SELECT value FROM settings WHERE key = 'zoom_evening_meeting_ids'").first<{ value: string }>())?.value ?? '';
-  const today = new Date(todayUtc()).toISOString().slice(0, 10);
   return c.html(
     <PortalLayout title="Admin: Evening Questions" active="admin-evening" user={c.get('user')!}>
       <Eyebrow>Admin</Eyebrow>
@@ -300,7 +303,7 @@ admin.get('/evening', async (c) => {
       </section>
       <section class="card">
         <h2>Who can watch</h2>
-        <p class="muted small">Students on Companion, Complete and MAX get 4 months automatically. For someone paying monthly, each month gives <strong>{EVENING_MONTH_DAYS} days</strong> of access (a few extra days to watch the last class), then it switches off by itself. Giving another month to someone who still has access adds it to the end.</p>
+        <p class="muted small">Students on Companion, Complete and MAX get 4 months automatically. For someone paying monthly, each month is <strong>{EVENING_MONTH_DAYS} days</strong>. During a month they see only the recordings made in that month, and when it ends those recordings disappear for them. Giving another month to someone who still has one starts it the day after their current month ends.</p>
         <form method="post" action="/admin/evening/access" class="row" style="align-items:flex-end">
           <label class="field" style="flex:2 1 220px">Student email (they must have an account)<input type="email" name="email" required /></label>
           <label class="field" style="flex:1 1 150px">Starts<input type="date" name="start" required value={today} /></label>
@@ -311,20 +314,23 @@ admin.get('/evening', async (c) => {
         {grants.length > 0 && (
           <div class="table-box">
             <table class="t">
-              <thead><tr><th scope="col">Student</th><th scope="col">Last day</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
+              <thead><tr><th scope="col">Student</th><th scope="col">Current month</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
               <tbody>
                 {grants.map((g: any) => (
                   <tr>
                     <td>{g.name}<br /><span class="muted small">{g.email}{g.note ? ` · ${g.note}` : ''}</span></td>
                     <td>
-                      {g.until_date < today ? (
-                        <span class="chip chip-gray">Ended {fmtDate(new Date(g.until_date + 'T00:00:00Z'), { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                      ) : (
+                      {g.cur_start ? (
                         <>
-                          {fmtDate(new Date(g.until_date + 'T00:00:00Z'), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
-                          <br /><span class="muted small">{Math.round((ymdToUtc(g.until_date) - ymdToUtc(today)) / 86400_000) + 1} day(s) left</span>
+                          {fmtDate(new Date(g.cur_start + 'T00:00:00Z'), { month: 'short', day: 'numeric' })} – {fmtDate(new Date(g.cur_end + 'T00:00:00Z'), { month: 'short', day: 'numeric', year: 'numeric' })}
+                          <br /><span class="muted small">{Math.round((ymdToUtc(g.cur_end) - ymdToUtc(today)) / 86400_000) + 1} day(s) left</span>
                         </>
+                      ) : g.next_start ? (
+                        <span class="chip chip-sand">Starts {fmtDate(new Date(g.next_start + 'T00:00:00Z'), { month: 'short', day: 'numeric' })}</span>
+                      ) : (
+                        <span class="chip chip-gray">Ended {fmtDate(new Date(g.last_day + 'T00:00:00Z'), { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                       )}
+                      {g.queued > 0 && <><br /><span class="muted small">+{g.queued} more month(s) paid, until {fmtDate(new Date(g.last_day + 'T00:00:00Z'), { month: 'short', day: 'numeric', year: 'numeric' })}</span></>}
                     </td>
                     <td class="row" style="gap:6px">
                       <form method="post" action="/admin/evening/access/extend">
@@ -394,27 +400,19 @@ admin.post('/evening/access', async (c) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return c.redirect('/admin/evening?error=' + encodeURIComponent('Pick a start date.'));
   const u = await c.env.DB.prepare('SELECT id FROM users WHERE lower(email) = ?').bind(email).first<{ id: number }>();
   if (!u) return c.redirect('/admin/evening?error=' + encodeURIComponent(`No account uses ${email}. Ask them to create one first.`));
-  const cur = await c.env.DB.prepare('SELECT until_date FROM evening_access WHERE user_id = ?').bind(u.id).first<{ until_date: string }>();
-  const until = newLastDay(cur?.until_date ?? null, start, months);
-  await c.env.DB.prepare('INSERT INTO evening_access (user_id, until_date, note) VALUES (?, ?, ?) ON CONFLICT (user_id) DO UPDATE SET until_date = excluded.until_date, note = COALESCE(excluded.note, evening_access.note)')
-    .bind(u.id, until, String(f.note ?? '').trim().slice(0, 80) || null).run();
+  await addEveningMonths(c.env.DB, u.id, start, months, String(f.note ?? '').trim().slice(0, 80) || null);
   return c.redirect('/admin/evening?ok=1');
 });
 
 admin.post('/evening/access/extend', async (c) => {
   const f = await c.req.parseBody();
-  const id = Number(f.user_id);
-  const cur = await c.env.DB.prepare('SELECT until_date FROM evening_access WHERE user_id = ?').bind(id).first<{ until_date: string }>();
-  if (cur) {
-    const today = new Date(todayUtc()).toISOString().slice(0, 10);
-    await c.env.DB.prepare('UPDATE evening_access SET until_date = ? WHERE user_id = ?').bind(newLastDay(cur.until_date, today, 1), id).run();
-  }
+  await addEveningMonths(c.env.DB, Number(f.user_id), todayYmd(), 1, null);
   return c.redirect('/admin/evening?ok=1');
 });
 
 admin.post('/evening/access/remove', async (c) => {
   const f = await c.req.parseBody();
-  await c.env.DB.prepare('DELETE FROM evening_access WHERE user_id = ?').bind(Number(f.user_id)).run();
+  await c.env.DB.prepare('DELETE FROM evening_periods WHERE user_id = ?').bind(Number(f.user_id)).run();
   return c.redirect('/admin/evening?ok=1');
 });
 

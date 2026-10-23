@@ -6,13 +6,13 @@ import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { bunnyEmbedUrl, cohortDay, currentCohort, dayDate, dayOfDate, fmtDate, dayOffLabel, isClassDate, isOffToday, LETTERS, todayUtc, type Cohort } from '../lib/content';
 import { filterQuestions, questionStatuses, scoresBy, shuffle, type Pools } from '../lib/qbank';
 import { getSettings, isHttpUrl } from '../lib/settings';
-import { eveningAccessUntil, type EveningSession } from '../lib/evening';
+import { eveningWindow, todayYmd, type EveningSession } from '../lib/evening';
 
 export const portal = new Hono<AppEnv>();
 portal.use('*', async (c, next) => {
   // Someone who only buys Evening Questions has no program enrollment: let them into that section only.
   const user = c.get('user');
-  if (user && !isStaff(user) && !c.get('enrollment') && (await eveningAccessUntil(c.env.DB, user))) {
+  if (user && !isStaff(user) && !c.get('enrollment') && (await eveningWindow(c.env.DB, user))) {
     if (c.req.path === '/evening' || c.req.path.startsWith('/evening/')) return next();
     return c.redirect('/evening');
   }
@@ -293,15 +293,17 @@ portal.post('/lectures/:id/done', async (c) => {
 
 portal.get('/evening', async (c) => {
   const user = c.get('user')!;
-  const until = await eveningAccessUntil(c.env.DB, user);
-  if (!until) {
+  const win = await eveningWindow(c.env.DB, user);
+  if (!win) {
     const settings = await getSettings(c.env.DB);
+    const next = await c.env.DB.prepare('SELECT MIN(start_date) AS d FROM evening_periods WHERE user_id = ? AND start_date > ?').bind(user.id, todayYmd()).first<{ d: string | null }>();
     return c.html(
       <PortalLayout title="Evening Questions" active="evening" user={user}>
         <Eyebrow>Study</Eyebrow>
         <h1>Evening Questions</h1>
         <section class="card">
-          <p>Live question sessions on Monday, Wednesday and Friday evenings, with every recording here to rewatch.</p>
+          {next?.d && <Flash>Your next month of Evening Questions starts on {fmtDate(new Date(next.d + 'T00:00:00Z'), { weekday: 'long', month: 'long', day: 'numeric' })}.</Flash>}
+          <p>Live question sessions on Monday, Wednesday and Friday evenings. Each month you can rewatch that month’s recordings for 32 days.</p>
           <p>Included for 4 months with the <strong>Companion</strong>, <strong>Complete</strong> and <strong>MAX</strong> programs, or on its own for <strong>$160 a month</strong>.</p>
           <div class="row">
             <a class="btn btn-primary" href="/programs">See programs</a>
@@ -313,14 +315,20 @@ portal.get('/evening', async (c) => {
       </PortalLayout>,
     );
   }
-  const sessions = (await c.env.DB.prepare("SELECT * FROM evening_sessions WHERE status = 'live' ORDER BY session_date DESC").all<EveningSession>()).results;
+  const sessions = (
+    await c.env.DB.prepare("SELECT * FROM evening_sessions WHERE status = 'live' AND session_date BETWEEN ? AND ? ORDER BY session_date DESC").bind(win.start, win.end).all<EveningSession>()
+  ).results;
+  const long = (d: string) => fmtDate(new Date(d + 'T00:00:00Z'), { month: 'long', day: 'numeric' });
   return c.html(
     <PortalLayout title="Evening Questions" active="evening" user={user}>
       <Eyebrow>Study</Eyebrow>
       <h1>Evening Questions</h1>
-      <p class="muted">Monday, Wednesday and Friday evening recordings.{!isStaff(user) && <> Your access runs until {fmtDate(new Date(until + 'T00:00:00Z'), { month: 'long', day: 'numeric', year: 'numeric' })}.</>}</p>
+      <p class="muted">
+        Monday, Wednesday and Friday evening recordings.
+        {!win.staff && <> Your month runs from {long(win.start)} to {long(win.end)}: you can watch this month’s recordings until the end of {long(win.end)}.</>}
+      </p>
       {!sessions.length ? (
-        <p class="muted">No recordings yet. They appear here after each evening class.</p>
+        <p class="muted">No recordings for this month yet. They appear here after each evening class.</p>
       ) : (
         <div class="table-box">
           <table class="t">
@@ -342,9 +350,12 @@ portal.get('/evening', async (c) => {
 
 portal.get('/evening/:id', async (c) => {
   const user = c.get('user')!;
-  if (!(await eveningAccessUntil(c.env.DB, user))) return c.redirect('/evening');
+  const win = await eveningWindow(c.env.DB, user);
+  if (!win) return c.redirect('/evening');
   const e = await c.env.DB.prepare('SELECT * FROM evening_sessions WHERE id = ?').bind(Number(c.req.param('id'))).first<EveningSession>();
   if (!e || (e.status !== 'live' && !isStaff(user))) return c.notFound();
+  // Only recordings from the student's current month.
+  if (e.session_date < win.start || e.session_date > win.end) return c.redirect('/evening');
   const src = e.bunny_video_id ? await bunnyEmbedUrl(c.env, e.bunny_video_id) : null;
   return c.html(
     <PortalLayout title={e.title} active="evening" user={user}>
