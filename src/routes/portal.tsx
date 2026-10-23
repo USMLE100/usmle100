@@ -3,7 +3,7 @@ import type { AppEnv } from '../lib/types';
 import { isStaff } from '../lib/types';
 import { requireEnrolled } from '../lib/auth';
 import { PortalLayout, Eyebrow, Flash } from '../views/layout';
-import { bunnyEmbedUrl, cohortDay, currentCohort, dayDate, dayOfDate, fmtDate, dayOffLabel, isClassDate, isOffToday, LETTERS, todayUtc, type Cohort } from '../lib/content';
+import { bunnyEmbedUrl, cohortDay, currentCohort, defaultLecturesUntil, dayDate, dayOfDate, fmtDate, dayOffLabel, isClassDate, isOffToday, LETTERS, todayUtc, type Cohort } from '../lib/content';
 import { filterQuestions, questionStatuses, scoresBy, shuffle, type Pools } from '../lib/qbank';
 import { getSettings, isHttpUrl } from '../lib/settings';
 import { CLASSES_PER_MONTH, eveningAccess, GRACE_DAYS, nextStart, type EveningSession } from '../lib/evening';
@@ -207,9 +207,36 @@ portal.get('/dashboard', async (c) => {
 
 // ---------- Lectures ----------
 
+/** Students can watch lectures until 60 days after Day 100, or the date an admin set for them. Null = still allowed. */
+async function lecturesEndedOn(c: Context<AppEnv>, cohort: Cohort | null): Promise<string | null> {
+  const user = c.get('user')!;
+  const enr = c.get('enrollment');
+  if (isStaff(user) || !enr || !cohort) return null;
+  const until = enr.lectures_until || defaultLecturesUntil(cohort);
+  const today = new Date(todayUtc()).toISOString().slice(0, 10);
+  return today > until ? until : null;
+}
+
+function LecturesEnded(props: { user: any; until: string; email: string }) {
+  return (
+    <PortalLayout title="Lectures" active="lectures" user={props.user}>
+      <Eyebrow>Study</Eyebrow>
+      <h1>Lectures</h1>
+      <section class="card">
+        <p style="margin:0">
+          Your access to the lecture recordings ended on {fmtDate(new Date(props.until + 'T00:00:00Z'), { month: 'long', day: 'numeric', year: 'numeric' })}.
+          {props.email && <> To ask for more time, email <a href={`mailto:${props.email}?subject=${encodeURIComponent('USMLE100: more time for lectures')}`}>{props.email}</a>.</>}
+        </p>
+      </section>
+    </PortalLayout>
+  );
+}
+
 portal.get('/lectures', async (c) => {
   const user = c.get('user')!;
   const cohort = await currentCohort(c.env.DB, c.get('enrollment')?.cohort_id);
+  const ended = await lecturesEndedOn(c, cohort);
+  if (ended) return c.html(<LecturesEnded user={user} until={ended} email={(await getSettings(c.env.DB)).contact_email} />);
   const lectures = cohort ? await lecturesFor(c.env.DB, cohort.id, user.id) : [];
   const today = cohort ? cohortDay(cohort) : 0;
   return c.html(
@@ -250,6 +277,8 @@ portal.get('/lectures/:id', async (c) => {
     .bind(user.id, Number(c.req.param('id')))
     .first<Lecture>();
   if (!l || (l.status !== 'live' && !isStaff(user))) return c.notFound();
+  const ended = await lecturesEndedOn(c, await currentCohort(c.env.DB, c.get('enrollment')?.cohort_id));
+  if (ended) return c.html(<LecturesEnded user={user} until={ended} email={(await getSettings(c.env.DB)).contact_email} />);
   const src = l.bunny_video_id ? await bunnyEmbedUrl(c.env, l.bunny_video_id) : null;
   return c.html(
     <PortalLayout title={l.title} active="lectures" user={user}>

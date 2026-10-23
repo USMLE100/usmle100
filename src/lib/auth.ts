@@ -87,7 +87,7 @@ export async function loadUser(c: Context<AppEnv>, next: Next) {
     if (user) {
       c.set('user', user);
       const enr = await c.env.DB.prepare(
-        `SELECT e.id, e.package_id, e.cohort_id, e.status, p.name AS package_name, p.one_on_one_sessions, p.evening_q_months
+        `SELECT e.id, e.package_id, e.cohort_id, e.status, p.name AS package_name, p.one_on_one_sessions, p.evening_q_months, e.lectures_until
          FROM enrollments e JOIN packages p ON p.id = e.package_id
          WHERE e.user_id = ? AND e.status = 'active' ORDER BY e.paid_at DESC LIMIT 1`,
       )

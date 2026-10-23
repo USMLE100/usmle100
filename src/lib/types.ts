@@ -37,6 +37,8 @@ export type Enrollment = {
   package_name: string;
   one_on_one_sessions: number;
   evening_q_months: number;
+  /** Admin-set last day to watch lectures (YYYY-MM-DD); null = the default for the cohort. */
+  lectures_until: string | null;
 };
 
 export type Vars = {

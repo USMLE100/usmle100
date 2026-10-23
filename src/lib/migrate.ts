@@ -6,6 +6,7 @@ import m0005 from '../../migrations/0005_zoom_imports.sql';
 import m0006 from '../../migrations/0006_evening.sql';
 import m0007 from '../../migrations/0007_evening_periods.sql';
 import m0008 from '../../migrations/0008_evening_classes.sql';
+import m0009 from '../../migrations/0009_lecture_access.sql';
 
 /**
  * Database migrations run by the Worker itself on first request, so deploys
@@ -20,6 +21,7 @@ const MIGRATIONS: [string, string][] = [
   ['0006_evening', m0006],
   ['0007_evening_periods', m0007],
   ['0008_evening_classes', m0008],
+  ['0009_lecture_access', m0009],
 ];
 
 function statements(sql: string): string[] {

@@ -89,6 +89,7 @@ const groups = (staff: boolean): { label: string; items: NavItem[] }[] => [
           items: [
             { key: 'admin-lectures', label: 'Lectures', sub: 'Add Day 1, Day 2…', href: '/admin/lectures' },
             { key: 'admin-evening', label: 'Evening Questions', sub: 'Recordings and access', href: '/admin/evening' },
+            { key: 'admin-students', label: 'Students', sub: 'Lecture access', href: '/admin/students' },
             { key: 'admin-questions', label: 'Questions', sub: 'Write, import, approve', href: '/admin/questions' },
             { key: 'admin-settings', label: 'Site settings', sub: 'Prices, links, dates', href: '/admin/settings' },
           ],

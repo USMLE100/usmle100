@@ -93,6 +93,14 @@ export async function bunnyEmbedUrl(env: Env, videoId: string, ttlSeconds = 4 * 
   return `${base}?token=${token}&expires=${expires}`;
 }
 
+/** Days lecture recordings stay available after the cohort's last day (Day 100). */
+export const LECTURE_DAYS_AFTER_END = 60;
+
+/** Default last day to watch lectures for a cohort: 60 days after Day 100 (YYYY-MM-DD). */
+export function defaultLecturesUntil(cohort: Cohort): string {
+  return new Date(dayDate(cohort, cohort.total_days).getTime() + LECTURE_DAYS_AFTER_END * DAY_MS).toISOString().slice(0, 10);
+}
+
 export const LETTERS = 'ABCDEFGHIJ';
 
 export function money(cents: number) {

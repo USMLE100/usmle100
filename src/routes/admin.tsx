@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../lib/types';
 import { requireStaff } from '../lib/auth';
 import { PortalLayout, Eyebrow, Flash } from '../views/layout';
-import { currentCohort, dayDate, fmtDate, LETTERS, todayUtc, ymdToUtc } from '../lib/content';
+import { currentCohort, dayDate, defaultLecturesUntil, fmtDate, LECTURE_DAYS_AFTER_END, LETTERS, todayUtc, ymdToUtc, type Cohort } from '../lib/content';
 import { parseCsv, toCsv, TEMPLATE_HEADERS } from '../lib/csv';
 import { getSettings, isHttpUrl, SETTING_FIELDS } from '../lib/settings';
 import { meetingIdList, syncImports } from '../lib/zoom';
@@ -262,6 +262,82 @@ admin.post('/zoom-imports/:id/assign-evening', async (c) => {
   }
   await db.prepare("UPDATE zoom_imports SET evening_session_id = ?, lecture_id = NULL, auto_live = 1, note = NULL, updated_at = datetime('now') WHERE id = ?").bind(ev.id, imp.id).run();
   return c.redirect('/admin/evening?ok=1');
+});
+
+// ---------- Students: lecture access ----------
+
+admin.get('/students', async (c) => {
+  const db = c.env.DB;
+  const rows = (
+    await db.prepare(
+      `SELECT e.id, e.cohort_id, e.lectures_until, e.paid_at, u.name, u.email, p.name AS package_name
+       FROM enrollments e JOIN users u ON u.id = e.user_id JOIN packages p ON p.id = e.package_id
+       WHERE e.status = 'active' ORDER BY u.name COLLATE NOCASE`,
+    ).all<any>()
+  ).results;
+  const cohorts = new Map<number, Cohort>();
+  for (const id of new Set(rows.map((r: any) => r.cohort_id).filter(Boolean))) {
+    const co = await currentCohort(db, id as number);
+    if (co) cohorts.set(id as number, co);
+  }
+  const fallback = await currentCohort(db);
+  const today = new Date(todayUtc()).toISOString().slice(0, 10);
+  const long = (d: string) => fmtDate(new Date(d + 'T00:00:00Z'), { month: 'short', day: 'numeric', year: 'numeric' });
+  return c.html(
+    <PortalLayout title="Admin: students" active="admin-students" user={c.get('user')!}>
+      <Eyebrow>Admin</Eyebrow>
+      <h1>Students</h1>
+      {c.req.query('ok') && <Flash>Saved.</Flash>}
+      <p class="muted">Lecture recordings stay open until {LECTURE_DAYS_AFTER_END} days after a cohort’s last day (Day 100). To give one student more time, change their date and tap Save.</p>
+      {!rows.length ? (
+        <p class="muted">No paid students yet.</p>
+      ) : (
+        <div class="table-box">
+          <table class="t">
+            <thead><tr><th scope="col">Student</th><th scope="col">Program</th><th scope="col">Lectures until</th><th scope="col">Extend access</th></tr></thead>
+            <tbody>
+              {rows.map((r: any) => {
+                const co = cohorts.get(r.cohort_id) ?? fallback;
+                const def = co ? defaultLecturesUntil(co) : null;
+                const until = r.lectures_until || def;
+                return (
+                  <tr>
+                    <td>{r.name}<br /><span class="muted small">{r.email}</span></td>
+                    <td>{r.package_name}<br /><span class="muted small">{co?.name ?? 'No cohort'}</span></td>
+                    <td>
+                      {until ? (until < today ? <span class="chip chip-gray">Ended {long(until)}</span> : long(until)) : '—'}
+                      {r.lectures_until && <><br /><span class="chip chip-sand">Extended</span></>}
+                    </td>
+                    <td>
+                      <form method="post" action={`/admin/students/${r.id}/lectures`} class="row" style="gap:8px">
+                        <input type="date" name="until" value={until ?? ''} required aria-label={`Lectures until for ${r.name}`} style="max-width:170px" />
+                        <button class="btn btn-outline" type="submit">Save</button>
+                        {r.lectures_until && <button class="btn btn-ghost" type="submit" name="reset" value="1">Back to {def ? long(def) : 'default'}</button>}
+                      </form>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </PortalLayout>,
+  );
+});
+
+admin.post('/students/:id/lectures', async (c) => {
+  const f = await c.req.parseBody();
+  const until = String(f.until ?? '');
+  let value = f.reset ? null : /^\d{4}-\d{2}-\d{2}$/.test(until) ? until : undefined;
+  if (value) {
+    // Saving the cohort's normal date is the same as no extension.
+    const e = await c.env.DB.prepare('SELECT cohort_id FROM enrollments WHERE id = ?').bind(Number(c.req.param('id'))).first<{ cohort_id: number | null }>();
+    const co = await currentCohort(c.env.DB, e?.cohort_id);
+    if (co && defaultLecturesUntil(co) === value) value = null;
+  }
+  if (value !== undefined) await c.env.DB.prepare('UPDATE enrollments SET lectures_until = ? WHERE id = ?').bind(value, Number(c.req.param('id'))).run();
+  return c.redirect('/admin/students?ok=1');
 });
 
 // ---------- Evening Questions ----------
