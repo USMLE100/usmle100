@@ -202,7 +202,7 @@ export async function syncImports(env: Env) {
           ? [db.prepare("UPDATE lectures SET status = 'live' WHERE id = ? AND bunny_video_id = ?").bind(imp.lecture_id, vid)]
           : []),
         ...(imp.auto_live && imp.evening_session_id
-          ? [db.prepare("UPDATE evening_sessions SET status = 'live' WHERE id = ? AND bunny_video_id = ?").bind(imp.evening_session_id, vid)]
+          ? [db.prepare("UPDATE evening_sessions SET status = 'live', live_at = COALESCE(live_at, datetime('now')) WHERE id = ? AND bunny_video_id = ?").bind(imp.evening_session_id, vid)]
           : []),
       ]);
     } else if (FAILED.includes(video.status)) {

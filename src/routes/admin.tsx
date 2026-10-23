@@ -6,7 +6,7 @@ import { currentCohort, dayDate, fmtDate, LETTERS, todayUtc, ymdToUtc } from '..
 import { parseCsv, toCsv, TEMPLATE_HEADERS } from '../lib/csv';
 import { getSettings, isHttpUrl, SETTING_FIELDS } from '../lib/settings';
 import { meetingIdList, syncImports } from '../lib/zoom';
-import { addEveningMonths, EVENING_MONTH_DAYS, todayYmd } from '../lib/evening';
+import { allSessions, CLASSES_PER_MONTH, giveEveningMonths, GRACE_DAYS, subStatus, todayYmd } from '../lib/evening';
 
 export const admin = new Hono<AppEnv>();
 admin.use('*', requireStaff);
@@ -253,10 +253,10 @@ admin.post('/zoom-imports/:id/assign-evening', async (c) => {
   const ready = imp.status === 'ready' && imp.bunny_video_id;
   let ev = await db.prepare('SELECT id FROM evening_sessions WHERE session_date = ?').bind(date).first<{ id: number }>();
   if (ev) {
-    await db.prepare('UPDATE evening_sessions SET bunny_video_id = ?, status = ? WHERE id = ?').bind(imp.bunny_video_id, ready ? 'live' : 'processing', ev.id).run();
+    await db.prepare("UPDATE evening_sessions SET bunny_video_id = ?, status = ?, live_at = CASE WHEN ?2 = 'live' THEN COALESCE(live_at, datetime('now')) END WHERE id = ?").bind(imp.bunny_video_id, ready ? 'live' : 'processing', ev.id).run();
   } else {
     const label = fmtDate(new Date(date + 'T00:00:00Z'), { weekday: 'long', month: 'long', day: 'numeric' });
-    const r = await db.prepare('INSERT INTO evening_sessions (session_date, title, zoom_url, bunny_video_id, status) VALUES (?, ?, ?, ?, ?)')
+    const r = await db.prepare("INSERT INTO evening_sessions (session_date, title, zoom_url, bunny_video_id, status, live_at) VALUES (?, ?, ?, ?, ?5, CASE WHEN ?5 = 'live' THEN datetime('now') END)")
       .bind(date, `Evening Questions · ${label}`, imp.share_url, imp.bunny_video_id, ready ? 'live' : 'processing').run();
     ev = { id: Number(r.meta.last_row_id) };
   }
@@ -270,20 +270,13 @@ admin.get('/evening', async (c) => {
   const db = c.env.DB;
   const sessions = (await db.prepare('SELECT * FROM evening_sessions ORDER BY session_date DESC LIMIT 200').all<any>()).results;
   const today = todayYmd();
-  // One row per student: their current month (if any), months still to come, and their last day.
+  // One row per student with months given by hand: where they are in their 12-class months.
+  const allS = await allSessions(db);
   const grants = (
-    await db.prepare(
-      `SELECT u.id AS user_id, u.email, u.name,
-              (SELECT start_date FROM evening_periods p WHERE p.user_id = u.id AND p.start_date <= ?1 AND p.end_date >= ?1 ORDER BY start_date DESC LIMIT 1) AS cur_start,
-              (SELECT end_date FROM evening_periods p WHERE p.user_id = u.id AND p.start_date <= ?1 AND p.end_date >= ?1 ORDER BY start_date DESC LIMIT 1) AS cur_end,
-              (SELECT COUNT(*) FROM evening_periods p WHERE p.user_id = u.id AND p.start_date > ?1) AS queued,
-              (SELECT MIN(start_date) FROM evening_periods p WHERE p.user_id = u.id AND p.start_date > ?1) AS next_start,
-              (SELECT MAX(end_date) FROM evening_periods p WHERE p.user_id = u.id) AS last_day,
-              (SELECT note FROM evening_periods p WHERE p.user_id = u.id ORDER BY id DESC LIMIT 1) AS note
-       FROM users u WHERE u.id IN (SELECT user_id FROM evening_periods)
-       ORDER BY last_day DESC`,
-    ).bind(today).all<any>()
-  ).results;
+    await db.prepare('SELECT s.user_id, s.start_date, s.months, s.note, u.email, u.name FROM evening_subscriptions s JOIN users u ON u.id = s.user_id ORDER BY s.start_date DESC, s.id DESC').all<any>()
+  ).results
+    .filter((g: any, i: number, arr: any[]) => arr.findIndex((x: any) => x.user_id === g.user_id) === i) // latest per student
+    .map((g: any) => ({ ...g, st: subStatus({ start: g.start_date, months: g.months }, allS, today) }));
   const ids = (await db.prepare("SELECT value FROM settings WHERE key = 'zoom_evening_meeting_ids'").first<{ value: string }>())?.value ?? '';
   return c.html(
     <PortalLayout title="Admin: Evening Questions" active="admin-evening" user={c.get('user')!}>
@@ -303,7 +296,7 @@ admin.get('/evening', async (c) => {
       </section>
       <section class="card">
         <h2>Who can watch</h2>
-        <p class="muted small">Students on Companion, Complete and MAX get 4 months automatically. For someone paying monthly, each month is <strong>{EVENING_MONTH_DAYS} days</strong>. During a month they see only the recordings made in that month, and when it ends those recordings disappear for them. Giving another month to someone who still has one starts it the day after their current month ends.</p>
+        <p class="muted small">One month = the next <strong>{CLASSES_PER_MONTH} evening classes</strong> from the start date. Students see only their month’s classes, and lose them <strong>{GRACE_DAYS} days after the 12th recording goes up</strong>. Another month for someone who still has one continues with the next {CLASSES_PER_MONTH} classes. Companion, Complete and MAX students get 4 months this way automatically.</p>
         <form method="post" action="/admin/evening/access" class="row" style="align-items:flex-end">
           <label class="field" style="flex:2 1 220px">Student email (they must have an account)<input type="email" name="email" required /></label>
           <label class="field" style="flex:1 1 150px">Starts<input type="date" name="start" required value={today} /></label>
@@ -320,17 +313,20 @@ admin.get('/evening', async (c) => {
                   <tr>
                     <td>{g.name}<br /><span class="muted small">{g.email}{g.note ? ` · ${g.note}` : ''}</span></td>
                     <td>
-                      {g.cur_start ? (
-                        <>
-                          {fmtDate(new Date(g.cur_start + 'T00:00:00Z'), { month: 'short', day: 'numeric' })} – {fmtDate(new Date(g.cur_end + 'T00:00:00Z'), { month: 'short', day: 'numeric', year: 'numeric' })}
-                          <br /><span class="muted small">{Math.round((ymdToUtc(g.cur_end) - ymdToUtc(today)) / 86400_000) + 1} day(s) left</span>
-                        </>
-                      ) : g.next_start ? (
-                        <span class="chip chip-sand">Starts {fmtDate(new Date(g.next_start + 'T00:00:00Z'), { month: 'short', day: 'numeric' })}</span>
-                      ) : (
-                        <span class="chip chip-gray">Ended {fmtDate(new Date(g.last_day + 'T00:00:00Z'), { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                      )}
-                      {g.queued > 0 && <><br /><span class="muted small">+{g.queued} more month(s) paid, until {fmtDate(new Date(g.last_day + 'T00:00:00Z'), { month: 'short', day: 'numeric', year: 'numeric' })}</span></>}
+                      {(() => {
+                        const short = (d: string) => fmtDate(new Date(d + 'T00:00:00Z'), { month: 'short', day: 'numeric' });
+                        const cur = g.st.active.sort((x: any, y: any) => (x.start < y.start ? 1 : -1))[0];
+                        if (g.st.pending) return <span class="chip chip-sand">Starts {short(g.start_date)}</span>;
+                        if (cur)
+                          return (
+                            <>
+                              Month {cur.month} of {g.months} · class {cur.sessions.length} of {CLASSES_PER_MONTH}
+                              <br /><span class="muted small">{cur.end ? `Can watch until ${short(cur.end)}` : `Started ${short(cur.start)}`}</span>
+                            </>
+                          );
+                        const last = g.st.blocks[g.st.blocks.length - 1];
+                        return <span class="chip chip-gray">Ended{last?.end ? ` ${short(last.end)}` : ''}</span>;
+                      })()}
                     </td>
                     <td class="row" style="gap:6px">
                       <form method="post" action="/admin/evening/access/extend">
@@ -400,19 +396,19 @@ admin.post('/evening/access', async (c) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return c.redirect('/admin/evening?error=' + encodeURIComponent('Pick a start date.'));
   const u = await c.env.DB.prepare('SELECT id FROM users WHERE lower(email) = ?').bind(email).first<{ id: number }>();
   if (!u) return c.redirect('/admin/evening?error=' + encodeURIComponent(`No account uses ${email}. Ask them to create one first.`));
-  await addEveningMonths(c.env.DB, u.id, start, months, String(f.note ?? '').trim().slice(0, 80) || null);
+  await giveEveningMonths(c.env.DB, u.id, start, months, String(f.note ?? '').trim().slice(0, 80) || null);
   return c.redirect('/admin/evening?ok=1');
 });
 
 admin.post('/evening/access/extend', async (c) => {
   const f = await c.req.parseBody();
-  await addEveningMonths(c.env.DB, Number(f.user_id), todayYmd(), 1, null);
+  await giveEveningMonths(c.env.DB, Number(f.user_id), todayYmd(), 1, null);
   return c.redirect('/admin/evening?ok=1');
 });
 
 admin.post('/evening/access/remove', async (c) => {
   const f = await c.req.parseBody();
-  await c.env.DB.prepare('DELETE FROM evening_periods WHERE user_id = ?').bind(Number(f.user_id)).run();
+  await c.env.DB.prepare('DELETE FROM evening_subscriptions WHERE user_id = ?').bind(Number(f.user_id)).run();
   return c.redirect('/admin/evening?ok=1');
 });
 
@@ -422,7 +418,7 @@ admin.post('/evening/sessions', async (c) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.redirect('/admin/evening');
   const vid = String(f.bunny_video_id ?? '').trim() || null;
   const title = String(f.title ?? '').trim().slice(0, 160) || `Evening Questions · ${fmtDate(new Date(date + 'T00:00:00Z'), { weekday: 'long', month: 'long', day: 'numeric' })}`;
-  const r = await c.env.DB.prepare('INSERT OR IGNORE INTO evening_sessions (session_date, title, bunny_video_id, status) VALUES (?, ?, ?, ?)').bind(date, title, vid, vid ? 'live' : 'processing').run();
+  const r = await c.env.DB.prepare("INSERT OR IGNORE INTO evening_sessions (session_date, title, bunny_video_id, status, live_at) VALUES (?, ?, ?, ?4, CASE WHEN ?4 = 'live' THEN datetime('now') END)").bind(date, title, vid, vid ? 'live' : 'processing').run();
   if (!r.meta.changes) return c.redirect('/admin/evening?error=' + encodeURIComponent('That date already has a session. Edit it in the list below.'));
   return c.redirect('/admin/evening?ok=1');
 });
@@ -431,7 +427,7 @@ admin.post('/evening/sessions/:id', async (c) => {
   const f = await c.req.parseBody();
   const vid = String(f.bunny_video_id ?? '').trim() || null;
   const title = String(f.title ?? '').trim().slice(0, 160);
-  await c.env.DB.prepare("UPDATE evening_sessions SET bunny_video_id = ?, status = ?, title = COALESCE(NULLIF(?, ''), title) WHERE id = ?")
+  await c.env.DB.prepare("UPDATE evening_sessions SET bunny_video_id = ?1, status = ?2, title = COALESCE(NULLIF(?3, ''), title), live_at = CASE WHEN ?2 = 'live' THEN COALESCE(live_at, datetime('now')) END WHERE id = ?4")
     .bind(vid, f.live && vid ? 'live' : 'processing', title, Number(c.req.param('id'))).run();
   return c.redirect('/admin/evening?ok=1');
 });
