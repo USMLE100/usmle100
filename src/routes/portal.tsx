@@ -3,7 +3,7 @@ import type { AppEnv } from '../lib/types';
 import { isStaff } from '../lib/types';
 import { requireEnrolled } from '../lib/auth';
 import { PortalLayout, Eyebrow, Flash } from '../views/layout';
-import { bunnyEmbedUrl, cohortDay, currentCohort, defaultLecturesUntil, dayDate, dayOfDate, fmtDate, dayOffLabel, isClassDate, isOffToday, LETTERS, todayUtc, type Cohort } from '../lib/content';
+import { bunnyEmbedUrl, cohortDay, currentCohort, defaultLecturesUntil, dayDate, dayOfDate, fmtDate, dayOffLabel, isClassDate, isOffToday, LETTERS, todayUtc, ymdToUtc, type Cohort } from '../lib/content';
 import { filterQuestions, questionStatuses, scoresBy, shuffle, type Pools } from '../lib/qbank';
 import { getSettings, isHttpUrl } from '../lib/settings';
 import { CLASSES_PER_MONTH, eveningAccess, GRACE_DAYS, nextStart, type EveningSession } from '../lib/evening';
@@ -132,6 +132,7 @@ portal.get('/dashboard', async (c) => {
         </div>
         {enr && <span class="chip chip-sand">{enr.package_name}</span>}
       </div>
+      <LectureNotice n={lectureNotice(c, cohort)} />
 
       <div class="grid">
         <section class="card card-dark">
@@ -217,6 +218,31 @@ async function lecturesEndedOn(c: Context<AppEnv>, cohort: Cohort | null): Promi
   return today > until ? until : null;
 }
 
+/**
+ * After the 90 lecture days, remind students when their lecture recordings close.
+ * Shown from Day 91 until access ends; not shown to staff.
+ */
+function lectureNotice(c: Context<AppEnv>, cohort: Cohort | null) {
+  const user = c.get('user')!;
+  const enr = c.get('enrollment');
+  if (isStaff(user) || !enr || !cohort || cohortDay(cohort) <= cohort.lecture_days) return null;
+  const until = enr.lectures_until || defaultLecturesUntil(cohort);
+  const daysLeft = Math.round((ymdToUtc(until) - todayUtc()) / 86400_000) + 1;
+  return daysLeft >= 1 ? { until, daysLeft } : null;
+}
+
+function LectureNotice(props: { n: { until: string; daysLeft: number } | null }) {
+  if (!props.n) return null;
+  const date = fmtDate(new Date(props.n.until + 'T00:00:00Z'), { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const soon = props.n.daysLeft <= 14;
+  return (
+    <p class={'flash ' + (soon ? 'flash-error' : 'flash-ok')} role="status">
+      You’ve finished the 90 days of lectures. Your lecture recordings stay available until <strong>{date}</strong>
+      {soon ? <> — only <strong>{props.n.daysLeft} day{props.n.daysLeft === 1 ? '' : 's'} left</strong>.</> : '.'} After that they close.
+    </p>
+  );
+}
+
 function LecturesEnded(props: { user: any; until: string; email: string }) {
   return (
     <PortalLayout title="Lectures" active="lectures" user={props.user}>
@@ -243,6 +269,7 @@ portal.get('/lectures', async (c) => {
     <PortalLayout title="Lectures" active="lectures" user={user}>
       <Eyebrow>Study</Eyebrow>
       <h1>Lectures</h1>
+      <LectureNotice n={lectureNotice(c, cohort)} />
       {!lectures.length && <p class="muted">No lectures yet.</p>}
       {lectures.length > 0 && (
         <div class="table-box">
