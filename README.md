@@ -52,12 +52,50 @@ Public sign-up always creates a **student**. An admin gives faculty or admin rol
 (the last admin cannot be removed). Faculty may only use the admin pages listed in `FACULTY_ALLOWED`
 (`src/lib/auth.ts`): questions, lectures and Evening Questions recordings. Everything else in `/admin` is admin-only.
 
-The very first admin (a new database, or if every admin is lost) is set from the command line by someone
-with Cloudflare access, after that person has signed up:
+### First admin, or recovering admin access
 
-```sh
-npx wrangler d1 execute usmle100 --remote --command "UPDATE users SET role = 'admin' WHERE email = 'you@example.com'"
-```
+Only needed on a new database, or if every admin account is lost or compromised. It must be done by someone who
+controls the Cloudflare account (protect that account with two-factor sign-in). Run the SQL below in
+**Cloudflare → Storage & Databases → D1 → usmle100 → Console** (no API token needed), or with
+`npx wrangler d1 execute usmle100 --remote --command "…"`.
+
+Email addresses are **not verified** when people sign up, so an email alone does not prove who owns an account.
+Always confirm the person and grant access by the account's unique **user ID**:
+
+1. **Confirm the person.** Only promote the business owner, or someone the owner confirms directly (in person or
+   on a phone call to a number you already know). Never act on a request that arrives only by email or chat.
+2. **They sign in now.** While you are on the call, the person creates an account (or uses their existing one) and
+   signs in on the live site with their own password.
+3. **Find the account (read-only).**
+   ```sql
+   SELECT id, email, name, role, created_at FROM users WHERE email = 'owner@example.com';
+   ```
+   There must be exactly one row, with the right name and email. For a new account, `created_at` (UTC) must match
+   when they just signed up. Write down the `id`.
+4. **Check they just signed in (read-only).** Use the `id` from step 3:
+   ```sql
+   SELECT user_id, expires_at FROM sessions WHERE user_id = 123 ORDER BY expires_at DESC LIMIT 1;
+   ```
+   `expires_at` must be about 30 days from now (sessions last 30 days), which shows the sign-in in step 2 was
+   this account. If not, stop.
+5. **Grant admin by user ID.** Both the `id` and the email must match, so a typo changes nothing:
+   ```sql
+   UPDATE users SET role = 'admin' WHERE id = 123 AND email = 'owner@example.com';
+   ```
+   It must report exactly **1** row changed. Never run an `UPDATE` on `users` without `WHERE id = …`.
+6. **Check the result (read-only).**
+   ```sql
+   SELECT id, email, role FROM users WHERE role IN ('admin', 'faculty');
+   ```
+   After that, give any other roles from **Admin → Team**.
+7. **After a suspected break-in**, also remove every admin or faculty account you do not recognise, by ID, and
+   sign it out; then change the Cloudflare and site passwords:
+   ```sql
+   UPDATE users SET role = 'student' WHERE id = 456;
+   DELETE FROM sessions WHERE user_id = 456;
+   ```
+
+With `wrangler`, `--remote` is required; without it the command only changes a local copy of the database.
 
 ## Tests
 
