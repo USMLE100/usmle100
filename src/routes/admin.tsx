@@ -350,6 +350,13 @@ admin.get('/students', async (c) => {
     const co = await currentCohort(db, id as number);
     if (co) cohorts.set(id as number, co);
   }
+  const refunded = (
+    await db.prepare(
+      `SELECT e.id, e.refunded_at, u.name, u.email, p.name AS package_name FROM enrollments e
+       JOIN users u ON u.id = e.user_id JOIN packages p ON p.id = e.package_id
+       WHERE e.status = 'refunded' ORDER BY e.refunded_at DESC LIMIT 50`,
+    ).all<any>()
+  ).results;
   const fallback = await currentCohort(db);
   const today = new Date(todayUtc()).toISOString().slice(0, 10);
   const long = (d: string) => fmtDate(new Date(d + 'T00:00:00Z'), { month: 'short', day: 'numeric', year: 'numeric' });
@@ -400,8 +407,28 @@ admin.get('/students', async (c) => {
           </table>
         </div>
       )}
+      {refunded.length > 0 && (
+        <section class="card">
+          <h2>Refunded programs</h2>
+          <p class="muted small">A full refund issued in Stripe removes that program automatically. If you change your mind, restore it here; a repeat notification from Stripe won’t remove it again.</p>
+          <ul class="plain-list">
+            {refunded.map((r: any) => (
+              <li class="row between">
+                <span><strong>{r.name}</strong> <span class="muted small">{r.email} · {r.package_name}{r.refunded_at ? ` · refunded ${long(r.refunded_at.slice(0, 10))}` : ''}</span></span>
+                <form method="post" action={`/admin/students/${r.id}/restore`}><button class="btn btn-ghost btn-sm" type="submit">Restore access</button></form>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </PortalLayout>,
   );
+});
+
+/** Give a refunded program back (admin decision). Does not touch Stripe. */
+admin.post('/students/:id{[0-9]+}/restore', async (c) => {
+  await c.env.DB.prepare("UPDATE enrollments SET status = 'active' WHERE id = ? AND status = 'refunded'").bind(Number(c.req.param('id'))).run();
+  return c.redirect('/admin/students?ok=1');
 });
 
 /** Make a one-time password reset link for any account and show it once, to send to its owner. */

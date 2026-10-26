@@ -5,7 +5,7 @@ import { Icon } from '../views/icons';
 import { createSession, destroySession, hashPassword, verifyPassword, requireUser } from '../lib/auth';
 import { clearFailures, emailKey, ipKey, lockedFor, recordFailure } from '../lib/ratelimit';
 import { consumeResetToken, resetTokenUser } from '../lib/reset';
-import { activateEnrollment, createCheckoutSession, fulfil, fulfilBookPurchase, retrieveCheckoutSession, verifyWebhook } from '../lib/stripe';
+import { handleRefund, activateEnrollment, createCheckoutSession, fulfil, fulfilBookPurchase, retrieveCheckoutSession, verifyWebhook } from '../lib/stripe';
 import { BOOK_PRICE_CENTS, hasBook } from '../lib/book';
 import { currentCohort, dayDate, fmtDate, money, todayUtc, ymdToUtc } from '../lib/content';
 import { getSettings } from '../lib/settings';
@@ -501,6 +501,7 @@ publicRoutes.post('/sign-out', async (c) => {
 publicRoutes.get('/enroll', requireUser, async (c) => {
   if (c.get('enrollment')) return c.redirect('/dashboard');
   const pkgs = (await c.env.DB.prepare('SELECT * FROM packages ORDER BY sort').all<Pkg>()).results;
+  const contact = (await getSettings(c.env.DB)).contact_email || undefined;
   return c.html(
     <PublicLayout title="Choose your program" user={c.get('user')}>
       <main class="wrap page stack" style="gap:18px;max-width:1000px">
@@ -526,6 +527,7 @@ publicRoutes.get('/enroll', requireUser, async (c) => {
         <p class="small muted">
           Not sure which fits? <a href="/programs">Compare what each includes</a>.
         </p>
+        {contact && <RefundContact email={contact} />}
       </main>
     </PublicLayout>,
   );
@@ -536,6 +538,7 @@ publicRoutes.post('/enroll/:pkg', requireUser, async (c) => {
   if (c.get('enrollment')) return c.redirect('/dashboard');
   const pkg = await c.env.DB.prepare('SELECT * FROM packages WHERE id = ?').bind(c.req.param('pkg')).first<Pkg>();
   if (!pkg) return c.text('Not found', 404);
+  if (!paymentsReady(c)) return c.text('Payments are not set up yet.', 503);
   // The price is saved with the pending enrollment; payment must match it exactly.
   const ins = await c.env.DB.prepare("INSERT INTO enrollments (user_id, package_id, status, amount_cents) VALUES (?, ?, 'pending', ?)").bind(user.id, pkg.id, pkg.price_cents).run();
   const enrollmentId = Number(ins.meta.last_row_id);
@@ -565,7 +568,7 @@ publicRoutes.post('/enroll/:pkg', requireUser, async (c) => {
 
 // ---------- The Course Book on its own ($199) ----------
 
-const BookCheckout = (p: { user: any; owned: boolean; cancelled?: boolean; pending?: boolean; ready: boolean; legal: { terms: boolean; privacy: boolean; refunds: boolean } }) => (
+const BookCheckout = (p: { user: any; owned: boolean; cancelled?: boolean; pending?: boolean; ready: boolean; legal: { terms: boolean; privacy: boolean; refunds: boolean }; contact?: string }) => (
   <PublicLayout title="USMLE100 Course Book" user={p.user} legal={p.legal}>
     <main class="wrap page stack" style="gap:18px;max-width:640px">
       <div class="page-head">
@@ -590,9 +593,15 @@ const BookCheckout = (p: { user: any; owned: boolean; cancelled?: boolean; pendi
         {(p.legal.terms || p.legal.refunds) && !p.owned && (
           <p class="small muted">By paying you agree to the {p.legal.terms && <a href="/terms">Terms of Service</a>}{p.legal.terms && p.legal.refunds && ' and '}{p.legal.refunds && <a href="/refunds">Refund Policy</a>}.</p>
         )}
+        {p.contact && !p.owned && <RefundContact email={p.contact} />}
       </section>
     </main>
   </PublicLayout>
+);
+
+/** Refunds are decided by USMLE100 and issued by hand in Stripe; the site only tells students who to contact. */
+const RefundContact = (p: { email: string }) => (
+  <p class="small muted">To ask for a refund, email <a href={`mailto:${p.email}?subject=${encodeURIComponent('USMLE100: refund request')}`}>{p.email}</a>.</p>
 );
 
 const legalFlags = async (db: D1Database) => {
@@ -604,7 +613,7 @@ const paymentsReady = (c: any) => !!c.env.STRIPE_SECRET_KEY || (c.env.DEV_FAKE_P
 publicRoutes.get('/buy/course-book', requireUser, async (c) => {
   const user = c.get('user')!;
   const owned = await hasBook(c.env.DB, user, c.get('enrollment'));
-  return c.html(<BookCheckout user={user} owned={owned} cancelled={!!c.req.query('cancelled')} pending={!!c.req.query('pending')} ready={paymentsReady(c)} legal={await legalFlags(c.env.DB)} />);
+  return c.html(<BookCheckout user={user} owned={owned} cancelled={!!c.req.query('cancelled')} pending={!!c.req.query('pending')} ready={paymentsReady(c)} legal={await legalFlags(c.env.DB)} contact={(await getSettings(c.env.DB)).contact_email || undefined} />);
 });
 
 publicRoutes.post('/buy/course-book', requireUser, async (c) => {
@@ -668,6 +677,10 @@ publicRoutes.post('/stripe/webhook', async (c) => {
   // delayed methods (bank debits) arrive later as async_payment_succeeded. Each purchase is fulfilled once.
   if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
     await fulfil(c.env.DB, event.data.object);
+  }
+  // Refunds are issued by the owner in the Stripe Dashboard only. A full refund removes that purchase's access.
+  if (event.type === 'charge.refunded') {
+    console.log('stripe refund', event.data.object?.id, await handleRefund(c.env, event.data.object));
   }
   return c.json({ received: true });
 });

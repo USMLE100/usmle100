@@ -9,7 +9,7 @@ Never paste keys into chat, email or GitHub. In Cloudflare, always add keys as t
 2. Add it in Cloudflare → Workers & Pages → usmle100 → Settings → Variables and Secrets, type Secret, named `STRIPE_SECRET_KEY`.
 3. In Stripe → Developers → Webhooks → Add endpoint:
    - **URL:** `https://<site address>/stripe/webhook`. Today that is `https://usmle100.info-usmle100.workers.dev/stripe/webhook`; it becomes `https://usmle100.com/stripe/webhook` once the domain is connected.
-   - **Events:** `checkout.session.completed` and `checkout.session.async_payment_succeeded`.
+   - **Events:** `checkout.session.completed`, `checkout.session.async_payment_succeeded` and `charge.refunded`.
 4. Copy that endpoint's **signing secret** (`whsec_…`) into Cloudflare as Secret `STRIPE_WEBHOOK_SECRET`.
 5. Do one test-mode purchase of a package and one of the Course Book, using Stripe's test card `4242 4242 4242 4242`. Check that:
    - the portal unlocks;
@@ -19,7 +19,12 @@ Never paste keys into chat, email or GitHub. In Cloudflare, always add keys as t
 
 **What the site does:**
 - It gives access only for a fully paid session, in US dollars, for the exact saved price. Each purchase is fulfilled once.
-- **Refunds:** refund in Stripe, then remove access by hand. For the Course Book that is Admin → Course Book → Remove; for a package, set the enrollment to refunded. The site doesn't do this automatically yet.
+- **Refunds are decided and issued only by the owner, in the Stripe Dashboard.** The site has no refund button and never asks Stripe for a refund. Students are told to email the contact address.
+  - When Stripe reports a **full** refund (`charge.refunded`), the site removes the access from that one purchase: the Course Book bought online, or that program (enrollment marked refunded). Admin grants, other purchases and packages that include the book are kept.
+  - **Partial** refunds change nothing.
+  - Each refunded charge is handled once, so repeated notifications are harmless.
+  - To give access back: Course Book → Admin → Course Book → Give access; a program → Admin → Students → Refunded programs → Restore access.
+  - Test it in test mode: refund the test purchase in Stripe, then check that access is gone.
 
 ## 2. Domain (usmle100.com)
 

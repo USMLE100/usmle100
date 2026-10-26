@@ -40,7 +40,7 @@ export async function createCheckoutSession(
 }
 
 /** The fields of a Checkout Session the site relies on. */
-export type PaidSession = { id: string; payment_status: string; amount_total: number; currency: string; client_reference_id: string | null };
+export type PaidSession = { id: string; payment_status: string; amount_total: number; currency: string; client_reference_id: string | null; payment_intent?: string | null };
 
 export async function retrieveCheckoutSession(env: Env, id: string) {
   const res = await fetch(`${API}/checkout/sessions/${encodeURIComponent(id)}`, {
@@ -110,4 +110,76 @@ export async function fulfil(db: D1Database, s: PaidSession) {
   const book = /^book-(\d+)$/.exec(ref);
   if (book) await fulfilBookPurchase(db, s.id, Number(book[1]), s.amount_total);
   else if (/^\d+$/.test(ref)) await activateEnrollment(db, s.id, Number(ref), s.amount_total);
+  // Remember the payment, so a refund issued later in Stripe can be matched to this purchase.
+  if (s.payment_intent) {
+    await db.batch([
+      db.prepare('UPDATE book_purchases SET payment_intent = ? WHERE stripe_session_id = ? AND payment_intent IS NULL').bind(s.payment_intent, s.id),
+      db.prepare('UPDATE enrollments SET payment_intent = ? WHERE stripe_session_id = ? AND payment_intent IS NULL').bind(s.payment_intent, s.id),
+    ]);
+  }
+}
+
+/** The fields of a Stripe Charge used for refunds. */
+export type RefundedCharge = { id: string; payment_intent: string | null; amount: number; amount_refunded: number; refunded: boolean };
+
+/** Checkout Session IDs for a payment, asked from Stripe (only needed for purchases made before payments were remembered). */
+async function sessionsForPayment(env: Env, paymentIntent: string): Promise<string[]> {
+  if (!env.STRIPE_SECRET_KEY) return [];
+  const res = await fetch(`${API}/checkout/sessions?payment_intent=${encodeURIComponent(paymentIntent)}&limit=5`, {
+    headers: { Authorization: `Bearer ${env.STRIPE_SECRET_KEY}` },
+  });
+  if (!res.ok) throw new Error(`Stripe error ${res.status} looking up a refunded payment`);
+  return (((await res.json()) as { data?: { id: string }[] }).data ?? []).map((x) => x.id);
+}
+
+/**
+ * A refund the owner issued in the Stripe Dashboard (the site never starts refunds).
+ * Only a FULL refund removes access, and only the access this one purchase gave:
+ * - a Course Book purchase: marked refunded; its "Bought online" access is removed, but not an admin grant
+ *   or a package that includes the book;
+ * - a package: that enrollment is marked refunded (other enrollments are untouched).
+ * Each charge is handled once, so repeated notifications are harmless and an admin can restore access afterwards.
+ * Returns what happened, for the log.
+ */
+export async function handleRefund(env: Env, ch: RefundedCharge): Promise<string> {
+  const db = env.DB;
+  const full = ch.refunded === true && ch.amount_refunded >= ch.amount && ch.amount > 0;
+  if (!full) return 'partial refund: access kept';
+  if (!ch.payment_intent) return 'no payment to match';
+  if (await db.prepare('SELECT 1 FROM stripe_refunds WHERE charge_id = ?').bind(ch.id).first()) return 'already handled';
+
+  let book = await db.prepare("SELECT id, user_id, status FROM book_purchases WHERE payment_intent = ?").bind(ch.payment_intent).first<{ id: number; user_id: number; status: string }>();
+  let enr = await db.prepare('SELECT id, status FROM enrollments WHERE payment_intent = ?').bind(ch.payment_intent).first<{ id: number; status: string }>();
+  if (!book && !enr) {
+    for (const sid of await sessionsForPayment(env, ch.payment_intent)) {
+      book ??= await db.prepare('SELECT id, user_id, status FROM book_purchases WHERE stripe_session_id = ?').bind(sid).first();
+      enr ??= await db.prepare('SELECT id, status FROM enrollments WHERE stripe_session_id = ?').bind(sid).first();
+    }
+  }
+
+  const steps: D1PreparedStatement[] = [];
+  let result = 'no matching purchase';
+  if (book) {
+    result = `course book purchase ${book.id} refunded`;
+    steps.push(
+      db.prepare("UPDATE book_purchases SET status = 'refunded', refunded_at = datetime('now') WHERE id = ? AND status = 'paid'").bind(book.id),
+      // Only the access this purchase created; an admin grant has its own note and stays.
+      db.prepare('DELETE FROM book_access WHERE user_id = ? AND note = ?').bind(book.user_id, 'Bought online · purchase ' + book.id),
+      // If the student has another paid purchase still standing, its access stays.
+      db
+        .prepare(
+          `INSERT INTO book_access (user_id, note) SELECT user_id, 'Bought online · purchase ' || id FROM book_purchases
+           WHERE user_id = ? AND status = 'paid' ORDER BY id LIMIT 1 ON CONFLICT (user_id) DO NOTHING`,
+        )
+        .bind(book.user_id),
+    );
+  }
+  if (enr) {
+    result = `enrollment ${enr.id} refunded`;
+    steps.push(db.prepare("UPDATE enrollments SET status = 'refunded', refunded_at = datetime('now') WHERE id = ? AND status = 'active'").bind(enr.id));
+  }
+  // Recorded in the same transaction, so a retry after a failure is handled, and a second notification is not.
+  steps.push(db.prepare('INSERT OR IGNORE INTO stripe_refunds (charge_id, payment_intent, result) VALUES (?, ?, ?)').bind(ch.id, ch.payment_intent, result));
+  await db.batch(steps);
+  return result;
 }
