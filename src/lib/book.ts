@@ -3,6 +3,8 @@ import { isStaff } from './types';
 
 /** Packages that include the USMLE100 Comprehensive Course Book (Companion, and everything above it). */
 export const BOOK_PACKAGES = ['companion', 'complete', 'max'];
+/** The Course Book on its own (one-time, US dollars, in cents). */
+export const BOOK_PRICE_CENTS = 19900;
 
 /** Staff, students whose package includes the book, and anyone given it by an admin (the $199 Course Book on its own). */
 export async function hasBook(db: D1Database, user: User, enrollment: Enrollment | null) {

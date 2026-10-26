@@ -553,7 +553,7 @@ community.get('/plans', async (c) => {
               <h3>{i.name}</h3>
               <span class="p">{i.price} <small>{i.unit}</small></span>
               <p>{i.desc}</p>
-              <a class="btn btn-outline" href={ask(i.name)}>Inquire about {i.name}</a>
+              {i.name === 'USMLE100 Course Book' ? <a class="btn btn-primary" href="/buy/course-book">Buy the Course Book</a> : <a class="btn btn-outline" href={ask(i.name)}>Inquire about {i.name}</a>}
             </div>
           ))}
         </div>

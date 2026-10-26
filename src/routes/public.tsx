@@ -5,7 +5,8 @@ import { Icon } from '../views/icons';
 import { createSession, destroySession, hashPassword, verifyPassword, requireUser } from '../lib/auth';
 import { clearFailures, emailKey, ipKey, lockedFor, recordFailure } from '../lib/ratelimit';
 import { consumeResetToken, resetTokenUser } from '../lib/reset';
-import { activateEnrollment, createCheckoutSession, retrieveCheckoutSession, verifyWebhook } from '../lib/stripe';
+import { activateEnrollment, createCheckoutSession, fulfil, fulfilBookPurchase, retrieveCheckoutSession, verifyWebhook } from '../lib/stripe';
+import { BOOK_PRICE_CENTS, hasBook } from '../lib/book';
 import { currentCohort, dayDate, fmtDate, money, todayUtc, ymdToUtc } from '../lib/content';
 import { getSettings } from '../lib/settings';
 
@@ -48,7 +49,7 @@ export const INCLUDES: Record<string, string[]> = {
 export const INDIVIDUAL = [
   { name: 'Evening Questions', price: '$160', unit: 'per month', desc: 'Live, instructor-guided USMLE-style question review. Paid month by month.' },
   { name: 'One-on-one tutoring', price: '$50', unit: 'per 60-minute session', desc: 'Personalised tutoring on your own weak areas, question interpretation and clinical reasoning.' },
-  { name: 'USMLE100 Course Book', price: '$199', unit: 'one-time', desc: 'A structured companion resource supporting organised review of high-yield concepts.' },
+  { name: 'USMLE100 Course Book', price: money(BOOK_PRICE_CENTS), unit: 'one-time', desc: 'A structured companion resource supporting organised review of high-yield concepts.' },
 ];
 
 export const publicRoutes = new Hono<AppEnv>();
@@ -72,7 +73,7 @@ publicRoutes.get('/', async (c) => {
   const pkgs = (await c.env.DB.prepare('SELECT price_cents FROM packages ORDER BY price_cents LIMIT 1').all<{ price_cents: number }>()).results;
   const from = pkgs[0] ? money(pkgs[0].price_cents) : null;
   return c.html(
-    <PublicLayout title="Board prep, taught live by doctors" user={user} legal={{ terms: !!settings.terms_text, privacy: !!settings.privacy_text }}>
+    <PublicLayout title="Board prep, taught live by doctors" user={user} legal={{ terms: !!settings.terms_text, privacy: !!settings.privacy_text, refunds: !!settings.refund_text }}>
       <section class="hero hero-dark">
         <div class="wrap">
           {settings.student_count && <p class="join">Join <strong>{settings.student_count}</strong> students preparing with USMLE100</p>}
@@ -260,7 +261,7 @@ publicRoutes.get('/programs', async (c) => {
             <span class="p">{i.price} <small>{i.unit}</small></span>
             <p>{i.desc}</p>
             {settings.contact_email && (
-              <a class="btn btn-primary" href={`mailto:${settings.contact_email}?subject=${encodeURIComponent('USMLE100: ' + i.name)}`}>Inquire about {i.name}</a>
+              i.name === 'USMLE100 Course Book' ? <a class="btn btn-primary" href="/buy/course-book">Buy the Course Book</a> : <a class="btn btn-primary" href={`mailto:${settings.contact_email}?subject=${encodeURIComponent('USMLE100: ' + i.name)}`}>Inquire about {i.name}</a>
             )}
           </div>
         ))}
@@ -278,7 +279,7 @@ publicRoutes.get('/programs', async (c) => {
     );
   }
   return c.html(
-    <PublicLayout title="Programs" user={null} legal={{ terms: !!settings.terms_text, privacy: !!settings.privacy_text }}>
+    <PublicLayout title="Programs" user={null} legal={{ terms: !!settings.terms_text, privacy: !!settings.privacy_text, refunds: !!settings.refund_text }}>
       <main class="wrap page stack" style="gap:20px;max-width:1000px">{body}</main>
     </PublicLayout>,
   );
@@ -286,12 +287,12 @@ publicRoutes.get('/programs', async (c) => {
 
 // ---------- Terms and Privacy (text set in Admin -> Site settings) ----------
 
-const legalPage = (title: string, key: 'terms_text' | 'privacy_text') => async (c: any) => {
+const legalPage = (title: string, key: 'terms_text' | 'privacy_text' | 'refund_text') => async (c: any) => {
   const settings = await getSettings(c.env.DB);
   const text = settings[key];
   if (!text) return c.notFound();
   return c.html(
-    <PublicLayout title={title} user={c.get('user')} legal={{ terms: !!settings.terms_text, privacy: !!settings.privacy_text }}>
+    <PublicLayout title={title} user={c.get('user')} legal={{ terms: !!settings.terms_text, privacy: !!settings.privacy_text, refunds: !!settings.refund_text }}>
       <main class="wrap page legal">
         <h1>{title}</h1>
         {text.split(/\n\s*\n/).map((p: string) => <p>{p.trim()}</p>)}
@@ -301,6 +302,7 @@ const legalPage = (title: string, key: 'terms_text' | 'privacy_text') => async (
 };
 publicRoutes.get('/terms', legalPage('Terms of Service', 'terms_text'));
 publicRoutes.get('/privacy', legalPage('Privacy Policy', 'privacy_text'));
+publicRoutes.get('/refunds', legalPage('Refund Policy', 'refund_text'));
 
 // ---------- Accounts ----------
 
@@ -366,7 +368,7 @@ const AuthPage = (p: { mode: 'in' | 'up'; error?: string; email?: string; name?:
           <p class="small muted">To reset your password, email us from the address you signed up with and we’ll send you a link.</p>
         )}
         <p class="small" style="text-align:center">
-          {p.mode === 'in' ? <>New here? <a href="/sign-up">Create an account</a></> : <>Already have an account? <a href="/sign-in">Sign in</a></>}
+          {p.mode === 'in' ? <>New here? <a href={p.next ? `/sign-up?next=${encodeURIComponent(p.next)}` : '/sign-up'}>Create an account</a></> : <>Already have an account? <a href={p.next ? `/sign-in?next=${encodeURIComponent(p.next)}` : '/sign-in'}>Sign in</a></>}
         </p>
         <p class="small" style="text-align:center"><a href="/programs">See programs</a> · <a href="/">Home</a></p>
       </main>
@@ -377,13 +379,13 @@ const AuthPage = (p: { mode: 'in' | 'up'; error?: string; email?: string; name?:
 
 const safeNext = (n: unknown) => (typeof n === 'string' && n.startsWith('/') && !n.startsWith('//') ? n : '/dashboard');
 
-publicRoutes.get('/sign-up', (c) => c.html(<AuthPage mode="up" user={c.get('user')} />));
+publicRoutes.get('/sign-up', (c) => c.html(<AuthPage mode="up" user={c.get('user')} next={c.req.query('next')} />));
 publicRoutes.post('/sign-up', async (c) => {
   const f = await c.req.parseBody();
   const name = String(f.name ?? '').trim();
   const email = String(f.email ?? '').trim().toLowerCase();
   const password = String(f.password ?? '');
-  const again = (error: string) => c.html(<AuthPage mode="up" error={error} email={email} name={name} user={null} />, 400);
+  const again = (error: string) => c.html(<AuthPage mode="up" error={error} email={email} name={name} user={null} next={typeof f.next === 'string' ? f.next : undefined} />, 400);
   if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return again('Please enter your name and a valid email.');
   if (password.length < 10) return again('Your password needs at least 10 characters.');
   const exists = await c.env.DB.prepare('SELECT 1 FROM users WHERE email = ?').bind(email).first();
@@ -394,7 +396,8 @@ publicRoutes.post('/sign-up', async (c) => {
     .bind(email, name, hash, salt)
     .run();
   await createSession(c, Number(r.meta.last_row_id));
-  return c.redirect('/enroll');
+  // Someone who signed up to buy something specific (the Course Book) goes back to it.
+  return c.redirect(typeof f.next === 'string' && f.next.startsWith('/buy/') ? safeNext(f.next) : '/enroll');
 });
 
 const contactEmail = async (db: D1Database) => (await getSettings(db)).contact_email || undefined;
@@ -533,7 +536,8 @@ publicRoutes.post('/enroll/:pkg', requireUser, async (c) => {
   if (c.get('enrollment')) return c.redirect('/dashboard');
   const pkg = await c.env.DB.prepare('SELECT * FROM packages WHERE id = ?').bind(c.req.param('pkg')).first<Pkg>();
   if (!pkg) return c.text('Not found', 404);
-  const ins = await c.env.DB.prepare("INSERT INTO enrollments (user_id, package_id, status) VALUES (?, ?, 'pending')").bind(user.id, pkg.id).run();
+  // The price is saved with the pending enrollment; payment must match it exactly.
+  const ins = await c.env.DB.prepare("INSERT INTO enrollments (user_id, package_id, status, amount_cents) VALUES (?, ?, 'pending', ?)").bind(user.id, pkg.id, pkg.price_cents).run();
   const enrollmentId = Number(ins.meta.last_row_id);
 
   const siteUrl = (c.env.SITE_URL || new URL(c.req.url).origin).replace(/\/$/, '');
@@ -546,15 +550,101 @@ publicRoutes.post('/enroll/:pkg', requireUser, async (c) => {
   if (!c.env.STRIPE_SECRET_KEY) return c.text('Payments are not set up yet.', 503);
 
   const session = await createCheckoutSession(c.env, {
-    enrollmentId,
+    ref: String(enrollmentId),
+    kind: 'enrollment',
     email: user.email,
-    name: user.name,
     amountCents: pkg.price_cents,
     productName: pkg.name,
+    successPath: '/enroll/success',
+    cancelPath: '/enroll?cancelled=1',
     siteUrl,
   });
   await c.env.DB.prepare('UPDATE enrollments SET stripe_session_id = ? WHERE id = ?').bind(session.id, enrollmentId).run();
   return c.redirect(session.url, 303);
+});
+
+// ---------- The Course Book on its own ($199) ----------
+
+const BookCheckout = (p: { user: any; owned: boolean; cancelled?: boolean; pending?: boolean; ready: boolean; legal: { terms: boolean; privacy: boolean; refunds: boolean } }) => (
+  <PublicLayout title="USMLE100 Course Book" user={p.user} legal={p.legal}>
+    <main class="wrap page stack" style="gap:18px;max-width:640px">
+      <div class="page-head">
+        <div class="eyebrow">Course Book</div>
+        <h1>USMLE100 Course Book</h1>
+        <p>A structured companion resource supporting organised review of high-yield concepts: written chapters and PDF handouts, read online or downloaded, in your portal.</p>
+      </div>
+      {p.cancelled && <Flash kind="error">Payment was cancelled. You have not been charged.</Flash>}
+      {p.pending && <Flash>We haven’t received confirmation of your payment yet. If you were charged, your book unlocks as soon as Stripe confirms it — refresh in a minute.</Flash>}
+      <section class="card addon tile-sky">
+        <span class="p">{money(BOOK_PRICE_CENTS)} <small>one-time</small></span>
+        <p>Already included with Companion, Complete and MAX.</p>
+        {p.owned ? (
+          <a class="btn btn-primary" href="/course-book">Open the Course Book</a>
+        ) : p.ready ? (
+          <form method="post" action="/buy/course-book">
+            <button class="btn btn-primary btn-block" type="submit">Continue to payment</button>
+          </form>
+        ) : (
+          <p class="small"><strong>Online payment isn’t switched on yet.</strong> Please contact us to buy the Course Book.</p>
+        )}
+        {(p.legal.terms || p.legal.refunds) && !p.owned && (
+          <p class="small muted">By paying you agree to the {p.legal.terms && <a href="/terms">Terms of Service</a>}{p.legal.terms && p.legal.refunds && ' and '}{p.legal.refunds && <a href="/refunds">Refund Policy</a>}.</p>
+        )}
+      </section>
+    </main>
+  </PublicLayout>
+);
+
+const legalFlags = async (db: D1Database) => {
+  const s = await getSettings(db);
+  return { terms: !!s.terms_text, privacy: !!s.privacy_text, refunds: !!s.refund_text };
+};
+const paymentsReady = (c: any) => !!c.env.STRIPE_SECRET_KEY || (c.env.DEV_FAKE_PAYMENTS === '1' && new URL(c.req.url).protocol === 'http:');
+
+publicRoutes.get('/buy/course-book', requireUser, async (c) => {
+  const user = c.get('user')!;
+  const owned = await hasBook(c.env.DB, user, c.get('enrollment'));
+  return c.html(<BookCheckout user={user} owned={owned} cancelled={!!c.req.query('cancelled')} pending={!!c.req.query('pending')} ready={paymentsReady(c)} legal={await legalFlags(c.env.DB)} />);
+});
+
+publicRoutes.post('/buy/course-book', requireUser, async (c) => {
+  const user = c.get('user')!;
+  const db = c.env.DB;
+  if (await hasBook(db, user, c.get('enrollment'))) return c.redirect('/course-book');
+  if (!paymentsReady(c)) return c.redirect('/buy/course-book');
+  const ins = await db.prepare("INSERT INTO book_purchases (user_id, amount_cents) VALUES (?, ?)").bind(user.id, BOOK_PRICE_CENTS).run();
+  const purchaseId = Number(ins.meta.last_row_id);
+  if (!c.env.STRIPE_SECRET_KEY) {
+    // Local development only (DEV_FAKE_PAYMENTS on plain http): pretend Stripe confirmed the payment.
+    const fakeId = 'dev_book_' + purchaseId;
+    await db.prepare('UPDATE book_purchases SET stripe_session_id = ? WHERE id = ?').bind(fakeId, purchaseId).run();
+    await fulfilBookPurchase(db, fakeId, purchaseId, BOOK_PRICE_CENTS);
+    return c.redirect('/course-book');
+  }
+  const session = await createCheckoutSession(c.env, {
+    ref: `book-${purchaseId}`,
+    kind: 'book',
+    email: user.email,
+    amountCents: BOOK_PRICE_CENTS,
+    productName: 'USMLE100 Course Book',
+    successPath: '/buy/course-book/success',
+    cancelPath: '/buy/course-book?cancelled=1',
+    siteUrl: (c.env.SITE_URL || new URL(c.req.url).origin).replace(/\/$/, ''),
+  });
+  await db.prepare('UPDATE book_purchases SET stripe_session_id = ? WHERE id = ?').bind(session.id, purchaseId).run();
+  return c.redirect(session.url, 303);
+});
+
+// Like enrollments, the webhook is the source of truth; this also asks Stripe directly in case the webhook is slow.
+publicRoutes.get('/buy/course-book/success', requireUser, async (c) => {
+  const user = c.get('user')!;
+  const sid = c.req.query('session_id');
+  if (sid && c.env.STRIPE_SECRET_KEY) {
+    const own = await c.env.DB.prepare('SELECT id FROM book_purchases WHERE stripe_session_id = ? AND user_id = ?').bind(sid, user.id).first<{ id: number }>();
+    const s = own ? await retrieveCheckoutSession(c.env, sid) : null;
+    if (s && own && s.client_reference_id === `book-${own.id}`) await fulfil(c.env.DB, s);
+  }
+  return c.redirect((await hasBook(c.env.DB, user, c.get('enrollment'))) ? '/course-book' : '/buy/course-book?pending=1');
 });
 
 // The webhook is the source of truth; this page also checks Stripe directly in case the webhook is slow.
@@ -563,9 +653,7 @@ publicRoutes.get('/enroll/success', requireUser, async (c) => {
   if (sid && c.env.STRIPE_SECRET_KEY) {
     const s = await retrieveCheckoutSession(c.env, sid);
     const enr = await c.env.DB.prepare('SELECT id, user_id FROM enrollments WHERE stripe_session_id = ?').bind(sid).first<{ id: number; user_id: number }>();
-    if (s && enr && enr.user_id === c.get('user')!.id && s.payment_status === 'paid' && String(enr.id) === s.client_reference_id) {
-      await activateEnrollment(c.env.DB, sid, enr.id, s.amount_total);
-    }
+    if (s && enr && enr.user_id === c.get('user')!.id && String(enr.id) === s.client_reference_id) await fulfil(c.env.DB, s);
   }
   return c.redirect('/welcome');
 });
@@ -576,11 +664,10 @@ publicRoutes.post('/stripe/webhook', async (c) => {
   const ok = await verifyWebhook(payload, c.req.header('stripe-signature'), c.env.STRIPE_WEBHOOK_SECRET);
   if (!ok) return c.text('Bad signature', 400);
   const event = JSON.parse(payload);
+  // Access is given only for a fully paid session. Card payments arrive as checkout.session.completed;
+  // delayed methods (bank debits) arrive later as async_payment_succeeded. Each purchase is fulfilled once.
   if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
-    const s = event.data.object;
-    if (s.payment_status === 'paid' && s.client_reference_id) {
-      await activateEnrollment(c.env.DB, s.id, Number(s.client_reference_id), s.amount_total);
-    }
+    await fulfil(c.env.DB, event.data.object);
   }
   return c.json({ received: true });
 });

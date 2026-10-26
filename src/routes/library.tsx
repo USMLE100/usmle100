@@ -32,7 +32,8 @@ async function bookLocked(c: Context<AppEnv>) {
         <Icon name="menu_book" size={36} class="gic" />
         <h1 style="font-size:26px">USMLE100 Book</h1>
         <p>Written syllabus chapters and downloadable PDF handouts. The Course Book is included with <strong>Companion</strong>, <strong>Complete</strong> and <strong>MAX</strong>, or <strong>$199</strong> on its own.</p>
-        <a class="btn btn-primary btn-block" href="/plans">See plans</a>
+        <a class="btn btn-primary btn-block" href="/buy/course-book">Buy the Course Book</a>
+        <a class="btn btn-outline btn-block" href="/plans">See plans</a>
         {settings.contact_email && <a class="btn btn-outline btn-block" href={`mailto:${settings.contact_email}?subject=${encodeURIComponent('USMLE100: Course Book')}`}>Ask about the Course Book</a>}
       </section>
     </PortalLayout>,

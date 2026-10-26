@@ -47,7 +47,7 @@ function Doc(props: { title: string; children: Child; bodyClass?: string }) {
   );
 }
 
-export function PublicLayout(props: { title: string; user: User | null; children: Child; bare?: boolean; plain?: boolean; legal?: { terms: boolean; privacy: boolean } }) {
+export function PublicLayout(props: { title: string; user: User | null; children: Child; bare?: boolean; plain?: boolean; legal?: { terms: boolean; privacy: boolean; refunds?: boolean } }) {
   return (
     <Doc title={props.title}>
       {!props.plain && (
@@ -82,6 +82,7 @@ export function PublicLayout(props: { title: string; user: User | null; children
             <a href="/sign-up">Create account</a>
             {props.legal?.terms && <a href="/terms">Terms</a>}
             {props.legal?.privacy && <a href="/privacy">Privacy</a>}
+            {props.legal?.refunds && <a href="/refunds">Refunds</a>}
           </nav>
           © {new Date().getUTCFullYear()} USMLE100 · Not affiliated with NBME, FSMB or ECFMG.
         </footer>
@@ -222,7 +223,7 @@ export function PortalLayout(props: { title: string; active: string; user: User;
                 <Icon name="chevron_right" class="chev" />
               </a>
             )}
-            <div class="drawer-foot">© {new Date().getUTCFullYear()} USMLE100{s?.terms && <> · <a href="/terms">Terms</a></>}{s?.privacy && <> · <a href="/privacy">Privacy</a></>}</div>
+            <div class="drawer-foot">© {new Date().getUTCFullYear()} USMLE100{s?.terms && <> · <a href="/terms">Terms</a></>}{s?.privacy && <> · <a href="/privacy">Privacy</a></>}{s?.refunds && <> · <a href="/refunds">Refunds</a></>}</div>
           </div>
         </nav>
 

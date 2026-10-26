@@ -120,7 +120,8 @@ export async function sameOrigin(c: Context<AppEnv>, next: Next) {
 }
 
 export async function requireUser(c: Context<AppEnv>, next: Next) {
-  if (!c.get('user')) return c.redirect('/sign-in?next=' + encodeURIComponent(c.req.path));
+  // Keep the query string, so a payment's return link (…?session_id=) still works after signing in.
+  if (!c.get('user')) return c.redirect('/sign-in?next=' + encodeURIComponent(c.req.path + new URL(c.req.url).search));
   await next();
 }
 

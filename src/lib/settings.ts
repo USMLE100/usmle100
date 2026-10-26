@@ -7,6 +7,7 @@ export type Settings = {
   blog_url: string;
   terms_text: string;
   privacy_text: string;
+  refund_text: string;
 };
 
 export const SETTING_FIELDS: { key: keyof Settings; label: string; hint: string; type: 'text' | 'email' | 'url' | 'textarea' }[] = [
@@ -18,11 +19,12 @@ export const SETTING_FIELDS: { key: keyof Settings; label: string; hint: string;
   { key: 'blog_url', label: 'USMLE100 Clinical Blog link', hint: 'Shown in Ask the Room. Leave empty to hide it.', type: 'url' },
   { key: 'terms_text', label: 'Terms of Service', hint: 'Shown at /terms and linked in the menu and footer. Leave empty to hide the page. Blank lines start a new paragraph.', type: 'textarea' },
   { key: 'privacy_text', label: 'Privacy Policy', hint: 'Shown at /privacy and linked in the menu and footer. Leave empty to hide the page.', type: 'textarea' },
+  { key: 'refund_text', label: 'Refund Policy', hint: 'Shown at /refunds, linked in the footer and on checkout pages. Leave empty to hide the page.', type: 'textarea' },
 ];
 
 export async function getSettings(db: D1Database): Promise<Settings> {
   const { results } = await db.prepare('SELECT key, value FROM settings').all<{ key: string; value: string }>();
-  const s: Settings = { student_count: '', contact_email: '', calendly_url: '', practice_test_when: '', practice_test_link: '', blog_url: '', terms_text: '', privacy_text: '' };
+  const s: Settings = { student_count: '', contact_email: '', calendly_url: '', practice_test_when: '', practice_test_link: '', blog_url: '', terms_text: '', privacy_text: '', refund_text: '' };
   for (const r of results) if (r.key in s) (s as any)[r.key] = r.value;
   return s;
 }

@@ -16,10 +16,16 @@ import { activityByDay, ago, GOAL_QUESTIONS, latestActivity, questionsToday, STR
 export const portal = new Hono<AppEnv>();
 portal.use('*', async (c, next) => {
   // Someone who only buys Evening Questions has no program enrollment: let them into that section only.
+  // Someone who only bought the Course Book on its own gets the Course Book pages; with both, both.
   const user = c.get('user');
-  if (user && !isStaff(user) && !c.get('enrollment') && (await eveningAccess(c.env.DB, user))) {
-    if (c.req.path === '/evening' || c.req.path.startsWith('/evening/')) return next();
-    return c.redirect('/evening');
+  if (user && !isStaff(user) && !c.get('enrollment')) {
+    const sections: string[] = [];
+    if (await eveningAccess(c.env.DB, user)) sections.push('/evening');
+    if (await c.env.DB.prepare('SELECT 1 FROM book_access WHERE user_id = ?').bind(user.id).first()) sections.push('/course-book');
+    if (sections.length) {
+      if (sections.some((p) => c.req.path === p || c.req.path.startsWith(p + '/'))) return next();
+      return c.redirect(sections[0]);
+    }
   }
   return requireEnrolled(c, next);
 });

@@ -23,6 +23,14 @@ crons = ["*/5 * * * *"]
 
 [vars]
 BUNNY_LIBRARY_ID = "785730"
-# SITE_URL = "https://usmle100.com"   # set once the domain points here
-# Secrets (set with `wrangler secret put NAME`, never committed):
-# STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, BUNNY_TOKEN_KEY
+# SITE_URL = "https://usmle100.com"   # uncomment once usmle100.com points at this Worker (see LAUNCH.md)
+# Secrets (Cloudflare dashboard → Worker → Settings → Variables and Secrets, type "Secret"; never committed):
+#   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, BUNNY_TOKEN_KEY, BUNNY_API_KEY, ZOOM_WEBHOOK_SECRET
+#   optional: ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET
+# Never set DEV_FAKE_PAYMENTS in production.
+
+# Custom domain (uncomment when connecting usmle100.com; the domain must be on this Cloudflare account):
+# routes = [
+#   { pattern = "usmle100.com", custom_domain = true },
+#   { pattern = "www.usmle100.com", custom_domain = true },
+# ]

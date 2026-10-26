@@ -9,6 +9,7 @@ import m0008 from '../../migrations/0008_evening_classes.sql';
 import m0009 from '../../migrations/0009_lecture_access.sql';
 import m0010 from '../../migrations/0010_login_limits_and_resets.sql';
 import m0011 from '../../migrations/0011_phase2.sql';
+import m0012 from '../../migrations/0012_book_purchases.sql';
 
 /**
  * Database migrations run by the Worker itself on first request, so deploys
@@ -26,6 +27,7 @@ const MIGRATIONS: [string, string][] = [
   ['0009_lecture_access', m0009],
   ['0010_login_limits_and_resets', m0010],
   ['0011_phase2', m0011],
+  ['0012_book_purchases', m0012],
 ];
 
 function statements(sql: string): string[] {
