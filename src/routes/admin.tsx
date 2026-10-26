@@ -183,6 +183,7 @@ admin.get('/lectures', async (c) => {
                         <input type="text" name="bunny_video_id" value={l.bunny_video_id ?? ''} placeholder="Bunny video ID" aria-label={`Bunny video ID for day ${l.day_number}`} style="max-width:220px" />
                         <label class="check"><input type="checkbox" name="live" value="1" checked={l.status === 'live'} /> Live</label>
                         <button class="btn btn-ghost" type="submit">Save</button>
+                        <a class="btn btn-ghost" href={`/admin/lectures/${l.id}`}>Details</a>
                       </form>
                     </td>
                   </tr>
@@ -940,7 +941,7 @@ admin.get('/settings', async (c) => {
           {SETTING_FIELDS.map((f) => (
             <label class="field">
               {f.label}
-              <input type={f.type} name={f.key} value={settings[f.key]} />
+              {f.type === 'textarea' ? <textarea name={f.key} rows={8} maxlength={20000}>{settings[f.key]}</textarea> : <input type={f.type} name={f.key} value={settings[f.key]} />}
               <span class="muted small" style="font-weight:500">{f.hint}</span>
             </label>
           ))}
@@ -966,7 +967,7 @@ admin.post('/settings', async (c) => {
   const bad = (msg: string) => c.redirect('/admin/settings?error=' + encodeURIComponent(msg));
   const values: Record<string, string> = {};
   for (const field of SETTING_FIELDS) {
-    const v = String(f[field.key] ?? '').trim().slice(0, 300);
+    const v = String(f[field.key] ?? '').trim().slice(0, field.type === 'textarea' ? 20000 : 300);
     if (field.type === 'url' && v && !isHttpUrl(v)) return bad(`${field.label} must start with https://`);
     if (field.type === 'email' && v && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return bad('Enter a valid contact email.');
     values[field.key] = v;

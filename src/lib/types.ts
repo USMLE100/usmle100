@@ -25,6 +25,8 @@ export type User = {
   name: string;
   role: 'student' | 'faculty' | 'admin';
   exam_date: string | null;
+  exam?: string | null;
+  onboarded_at?: string | null;
 };
 
 export type Enrollment = {
@@ -40,7 +42,7 @@ export type Enrollment = {
 };
 
 /** Data every portal page shows in its top bar and menu. */
-export type Shell = { streak: number; lecturesDone: number; lecturesTotal: number; contact: string };
+export type Shell = { streak: number; lecturesDone: number; lecturesTotal: number; contact: string; terms: boolean; privacy: boolean };
 
 export type Vars = {
   user: User | null;

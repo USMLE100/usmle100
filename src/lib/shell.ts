@@ -18,5 +18,5 @@ export async function loadShell(db: D1Database, userId: number, cohortId: number
     studyStreak(db, userId),
     getSettings(db),
   ]);
-  return { streak, lecturesDone: done?.n ?? 0, lecturesTotal: cohort?.lecture_days ?? 0, contact: settings.contact_email };
+  return { streak, lecturesDone: done?.n ?? 0, lecturesTotal: cohort?.lecture_days ?? 0, contact: settings.contact_email, terms: !!settings.terms_text, privacy: !!settings.privacy_text };
 }

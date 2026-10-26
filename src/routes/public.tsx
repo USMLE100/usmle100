@@ -9,10 +9,10 @@ import { activateEnrollment, createCheckoutSession, retrieveCheckoutSession, ver
 import { currentCohort, dayDate, fmtDate, money, todayUtc, ymdToUtc } from '../lib/content';
 import { getSettings } from '../lib/settings';
 
-type Pkg = { id: string; name: string; tagline: string; price_cents: number; one_on_one_sessions: number; evening_q_months: number; recommended: number };
+export type Pkg = { id: string; name: string; tagline: string; price_cents: number; one_on_one_sessions: number; evening_q_months: number; recommended: number };
 
 // What each package includes. Kept in code so it is versioned with the site.
-const INCLUDES: Record<string, string[]> = {
+export const INCLUDES: Record<string, string[]> = {
   refresher: [
     '100-day program: 90 days of live lectures, then a 10-day exam window',
     'Live instruction on each scheduled class day',
@@ -45,7 +45,7 @@ const INCLUDES: Record<string, string[]> = {
   ],
 };
 
-const INDIVIDUAL = [
+export const INDIVIDUAL = [
   { name: 'Evening Questions', price: '$160', unit: 'per month', desc: 'Live, instructor-guided USMLE-style question review. Paid month by month.' },
   { name: 'One-on-one tutoring', price: '$50', unit: 'per 60-minute session', desc: 'Personalised tutoring on your own weak areas, question interpretation and clinical reasoning.' },
   { name: 'USMLE100 Course Book', price: '$199', unit: 'one-time', desc: 'A structured companion resource supporting organised review of high-yield concepts.' },
@@ -72,7 +72,7 @@ publicRoutes.get('/', async (c) => {
   const pkgs = (await c.env.DB.prepare('SELECT price_cents FROM packages ORDER BY price_cents LIMIT 1').all<{ price_cents: number }>()).results;
   const from = pkgs[0] ? money(pkgs[0].price_cents) : null;
   return c.html(
-    <PublicLayout title="Board prep, taught live by doctors" user={user}>
+    <PublicLayout title="Board prep, taught live by doctors" user={user} legal={{ terms: !!settings.terms_text, privacy: !!settings.privacy_text }}>
       <section class="hero hero-dark">
         <div class="wrap">
           {settings.student_count && <p class="join">Join <strong>{settings.student_count}</strong> students preparing with USMLE100</p>}
@@ -136,7 +136,7 @@ publicRoutes.get('/', async (c) => {
 });
 
 /** Short line above each package name. */
-const KICKER: Record<string, string> = {
+export const KICKER: Record<string, string> = {
   refresher: 'Comprehensive foundational review',
   companion: 'Comprehensive learning and structured question practice',
   complete: 'Learning plus private tutoring',
@@ -278,11 +278,29 @@ publicRoutes.get('/programs', async (c) => {
     );
   }
   return c.html(
-    <PublicLayout title="Programs" user={null}>
+    <PublicLayout title="Programs" user={null} legal={{ terms: !!settings.terms_text, privacy: !!settings.privacy_text }}>
       <main class="wrap page stack" style="gap:20px;max-width:1000px">{body}</main>
     </PublicLayout>,
   );
 });
+
+// ---------- Terms and Privacy (text set in Admin -> Site settings) ----------
+
+const legalPage = (title: string, key: 'terms_text' | 'privacy_text') => async (c: any) => {
+  const settings = await getSettings(c.env.DB);
+  const text = settings[key];
+  if (!text) return c.notFound();
+  return c.html(
+    <PublicLayout title={title} user={c.get('user')} legal={{ terms: !!settings.terms_text, privacy: !!settings.privacy_text }}>
+      <main class="wrap page legal">
+        <h1>{title}</h1>
+        {text.split(/\n\s*\n/).map((p: string) => <p>{p.trim()}</p>)}
+      </main>
+    </PublicLayout>,
+  );
+};
+publicRoutes.get('/terms', legalPage('Terms of Service', 'terms_text'));
+publicRoutes.get('/privacy', legalPage('Privacy Policy', 'privacy_text'));
 
 // ---------- Accounts ----------
 
@@ -334,9 +352,10 @@ const AuthPage = (p: { mode: 'in' | 'up'; error?: string; email?: string; name?:
           </label>
           <PwField label="Password" name="password" autocomplete={p.mode === 'up' ? 'new-password' : 'current-password'} minlength={p.mode === 'up' ? 10 : undefined} />
           {p.mode === 'up' && <span class="muted small">At least 10 characters.</span>}
-          {p.mode === 'in' && p.contact && (
-            <div class="auth-links" style="justify-content:flex-end">
-              <a href={`mailto:${p.contact}?subject=${encodeURIComponent('USMLE100: password reset')}`}>Forgot your password?</a>
+          {p.mode === 'in' && (
+            <div class="auth-links">
+              <label class="check"><input type="checkbox" name="remember" value="1" checked /> Remember me</label>
+              {p.contact && <a href={`mailto:${p.contact}?subject=${encodeURIComponent('USMLE100: password reset')}`}>Forgot your password?</a>}
             </div>
           )}
           <button class="btn btn-primary btn-block" type="submit">
@@ -403,7 +422,7 @@ publicRoutes.post('/sign-in', async (c) => {
     return c.html(<AuthPage mode="in" error="That email and password don’t match." email={email} user={null} contact={contact} />, 401);
   }
   await clearFailures(c.env.DB, email);
-  await createSession(c, u.id);
+  await createSession(c, u.id, f.remember === '1');
   return c.redirect(safeNext(f.next));
 });
 
@@ -522,7 +541,7 @@ publicRoutes.post('/enroll/:pkg', requireUser, async (c) => {
     const fakeId = 'dev_' + enrollmentId;
     await c.env.DB.prepare('UPDATE enrollments SET stripe_session_id = ? WHERE id = ?').bind(fakeId, enrollmentId).run();
     await activateEnrollment(c.env.DB, fakeId, enrollmentId, pkg.price_cents);
-    return c.redirect('/dashboard');
+    return c.redirect('/welcome');
   }
   if (!c.env.STRIPE_SECRET_KEY) return c.text('Payments are not set up yet.', 503);
 
@@ -548,7 +567,7 @@ publicRoutes.get('/enroll/success', requireUser, async (c) => {
       await activateEnrollment(c.env.DB, sid, enr.id, s.amount_total);
     }
   }
-  return c.redirect('/dashboard');
+  return c.redirect('/welcome');
 });
 
 publicRoutes.post('/stripe/webhook', async (c) => {

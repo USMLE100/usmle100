@@ -4,6 +4,9 @@ import { isStaff } from '../lib/types';
 import { requireEnrolled } from '../lib/auth';
 import { PortalLayout, PageHead, Eyebrow, Flash, initials } from '../views/layout';
 import { Icon, type IconName } from '../views/icons';
+import { lecturesEndedOn, lecturesEndedPage, lectureNotice, LectureNotice } from '../views/lectureAccess';
+import { examCountdown } from '../lib/countdown';
+import { queueSummary } from '../lib/cards';
 import { bunnyEmbedUrl, cohortDay, currentCohort, defaultLecturesUntil, dayDate, dayOfDate, fmtDate, dayOffLabel, isClassDate, isOffToday, LETTERS, todayUtc, ymdToUtc, type Cohort } from '../lib/content';
 import { filterQuestions, questionStatuses, scoresBy, shuffle, type Pools } from '../lib/qbank';
 import { getSettings, isHttpUrl } from '../lib/settings';
@@ -21,9 +24,9 @@ portal.use('*', async (c, next) => {
   return requireEnrolled(c, next);
 });
 
-type Lecture = { id: number; day_number: number; title: string; zoom_url: string | null; bunny_video_id: string | null; status: string; completed_at: string | null; subject_id?: number | null };
+export type Lecture = { id: number; day_number: number; title: string; zoom_url: string | null; bunny_video_id: string | null; status: string; completed_at: string | null; subject_id?: number | null };
 
-async function lecturesFor(db: D1Database, cohortId: number, userId: number) {
+export async function lecturesFor(db: D1Database, cohortId: number, userId: number) {
   const { results } = await db
     .prepare(
       `SELECT l.id, l.day_number, l.title, l.zoom_url, l.bunny_video_id, l.status, l.subject_id, p.completed_at
@@ -42,7 +45,7 @@ const firstName = (u: User) => u.name.split(' ')[0];
 // ---------- Dashboard ----------
 
 /** V12 month cards, Monday first. */
-function Calendar(props: { cohort: Cohort; lectures: Lecture[] }) {
+export function Calendar(props: { cohort: Cohort; lectures: Lecture[] }) {
   const { cohort } = props;
   const byDay = new Map(props.lectures.map((l) => [l.day_number, l]));
   const first = dayDate(cohort, 1);
@@ -161,6 +164,13 @@ portal.get('/dashboard', async (c) => {
     eveningAccess(db, user),
   ]);
   const ended = await lecturesEndedOn(c, cohort);
+  const [chapterRow, articles, faqs] = await Promise.all([
+    db.prepare("SELECT COUNT(*) AS n FROM book_chapters WHERE status = 'live'").first<{ n: number }>(),
+    db.prepare("SELECT id, kicker, title, summary, author FROM articles WHERE status = 'live' ORDER BY sort, id LIMIT 6").all<{ id: number; kicker: string | null; title: string; summary: string | null; author: string | null }>(),
+    db.prepare("SELECT question, answer FROM faqs WHERE status = 'live' ORDER BY sort, id").all<{ question: string; answer: string }>(),
+  ]);
+  const chapterCount = chapterRow?.n ?? 0;
+  const countdown = examCountdown(user.exam ?? null, user.exam_date);
   const todays = lectures.find((l) => l.day_number === today);
   const done = lectures.filter((l) => l.completed_at).length;
   const missed = ended ? [] : lectures.filter((l) => l.day_number < today && l.status === 'live' && !l.completed_at);
@@ -169,7 +179,7 @@ portal.get('/dashboard', async (c) => {
   const wrong = statuses.filter((s) => s.status === 'incorrect').length;
   const qPct = answeredQs.length ? Math.round((correctQs / answeredQs.length) * 100) : 0;
   const lPct = cohort.lecture_days ? Math.round((done / cohort.lecture_days) * 100) : 0;
-  const streak = streakFrom(byDay);
+  const streak = c.get('shell')?.streak ?? streakFrom(byDay);
   const qToday = questionsToday(byDay);
   const classToday = !ended && !weekend && today >= 1 && today <= cohort.lecture_days;
   const todayLectureDone = !!todays?.completed_at;
@@ -204,6 +214,7 @@ portal.get('/dashboard', async (c) => {
           <span class="avatar">{initials(user.name)}</span>
           <h1>Welcome back, {firstName(user)}</h1>
         </div>
+        {countdown && <p class="muted small" style="margin-top:-8px">{countdown}</p>}
         <LectureNotice n={lectureNotice(c, cohort)} />
         {ended && <Flash>Your lecture recordings closed on {fmtDate(new Date(ended + 'T00:00:00Z'), { month: 'long', day: 'numeric', year: 'numeric' })}. The question bank and your progress stay open.</Flash>}
 
@@ -220,12 +231,14 @@ portal.get('/dashboard', async (c) => {
         )}
 
         <div class="tiles">
-          <Tile href="/qbank" tone="warm" icon="bolt" title="Question Bank" sub="Quick blocks & tests" />
+          <Tile href="/warmup" tone="warm" icon="bolt" title="Daily Warmup" sub="10 daily questions" />
           <Tile href="/lectures" tone="green" icon="play_circle" title="Lectures" sub="Video curriculum" />
-          <Tile href="/evening" tone="sky" icon="videocam" title="Evening Questions" sub={evening ? 'Mon · Wed · Fri classes' : 'Live question classes'} />
-          <Tile href="/review" tone="lilac" icon="replay" title="Review" sub="Missed lectures & Qs" />
-          <Tile href="/performance" tone="rose" icon="monitoring" title="Performance" sub="Systems & disciplines" />
+          <Tile href="/course-book" tone="sky" icon="menu_book" title="USMLE100 Book" sub={chapterCount ? `${chapterCount} chapter${chapterCount === 1 ? '' : 's'} & PDFs` : 'Chapters & PDFs'} />
+          <Tile href="/cards" tone="lilac" icon="cards" title="Flash Cards" sub="Active recall deck" />
+          <Tile href="/performance" tone="rose" icon="monitoring" title="Performance" sub="Section analytics" />
           <Tile href="/book" tone="olive" icon="event" title="1-on-1 Tutoring" sub="Book with Dr. Khan" />
+          <Tile href="/evening" tone="sky2" icon="videocam" title="Evening Questions" sub={evening ? 'Mon · Wed · Fri classes' : 'Live question classes'} />
+          <Tile href="/qbank" tone="warm2" icon="quiz" title="Question Bank" sub="Custom tests & blocks" />
         </div>
 
         <h2 class="section-title" id="streak">Today</h2>
@@ -323,6 +336,46 @@ portal.get('/dashboard', async (c) => {
           </>
         )}
 
+        {!isStaff(user) && !user.onboarded_at && (
+          <section class="card card-sage getting-started">
+            <div class="eyebrow" style="color:var(--body)">Getting started</div>
+            <h2>Select your subjects</h2>
+            <p class="small">Tell us your exam and the subjects you want to start with, and your path puts them first.</p>
+            <a class="btn btn-primary btn-block" href="/welcome">Browse subjects <Icon name="arrow_forward" size={18} /></a>
+          </section>
+        )}
+        {articles.results.length > 0 && (
+          <>
+            <h2 class="section-title">Study Strategy</h2>
+            <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))">
+              {articles.results.map((a, i) => (
+                <a class={'card strategy ' + (i % 2 ? 'card-sky' : 'card-cream')} href={`/articles/${a.id}`}>
+                  <span class={'si ' + (i % 2 ? 'sky' : 'gold')}><Icon name={i % 2 ? 'verified' : 'lightbulb'} size={24} /></span>
+                  <span class="txt">
+                    <span class="eyebrow" style="color:var(--body)">{a.kicker ?? 'Study strategy'}</span>
+                    <strong>{a.title}</strong>
+                    {a.summary && <span>{a.summary}</span>}
+                    {a.author && <span class="author"><span class="avatar avatar-sm">{initials(a.author)}</span>{a.author}</span>}
+                  </span>
+                </a>
+              ))}
+            </div>
+          </>
+        )}
+        {faqs.results.length > 0 && (
+          <>
+            <h2 class="section-title">Frequently asked questions</h2>
+            <div class="faq">
+              {faqs.results.map((q) => (
+                <details>
+                  <summary>{q.question}<span class="pl"><Icon name="close" size={16} /></span></summary>
+                  <p>{q.answer}</p>
+                </details>
+              ))}
+            </div>
+          </>
+        )}
+
         <h2 class="section-title">Latest study activity</h2>
         <section class="card">
           {activity.length ? (
@@ -350,215 +403,6 @@ portal.get('/dashboard', async (c) => {
 });
 
 // ---------- Lectures ----------
-
-/** Students can watch lectures until 60 days after Day 100, or the date an admin set for them. Null = still allowed. */
-async function lecturesEndedOn(c: Context<AppEnv>, cohort: Cohort | null): Promise<string | null> {
-  const user = c.get('user')!;
-  const enr = c.get('enrollment');
-  if (isStaff(user) || !enr || !cohort) return null;
-  const until = enr.lectures_until || defaultLecturesUntil(cohort);
-  const today = new Date(todayUtc()).toISOString().slice(0, 10);
-  return today > until ? until : null;
-}
-
-/**
- * After the 90 lecture days, remind students when their lecture recordings close.
- * Shown from Day 91 until access ends; not shown to staff.
- */
-function lectureNotice(c: Context<AppEnv>, cohort: Cohort | null) {
-  const user = c.get('user')!;
-  const enr = c.get('enrollment');
-  if (isStaff(user) || !enr || !cohort || cohortDay(cohort) <= cohort.lecture_days) return null;
-  const until = enr.lectures_until || defaultLecturesUntil(cohort);
-  const daysLeft = Math.round((ymdToUtc(until) - todayUtc()) / 86400_000) + 1;
-  return daysLeft >= 1 ? { until, daysLeft } : null;
-}
-
-function LectureNotice(props: { n: { until: string; daysLeft: number } | null }) {
-  if (!props.n) return null;
-  const date = fmtDate(new Date(props.n.until + 'T00:00:00Z'), { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-  const soon = props.n.daysLeft <= 14;
-  return (
-    <p class={'flash ' + (soon ? 'flash-error' : 'flash-ok')} role="status">
-      You’ve finished the 90 days of lectures. Your lecture recordings stay available until <strong>{date}</strong>
-      {soon ? <> — only <strong>{props.n.daysLeft} day{props.n.daysLeft === 1 ? '' : 's'} left</strong>.</> : '.'} After that they close.
-    </p>
-  );
-}
-
-function lecturesEndedPage(c: Context<AppEnv>, until: string, email: string) {
-  return c.html(
-    <PortalLayout shell={c.get('shell')} title="Lectures" active="lectures" user={c.get('user')!}>
-      <PageHead eyebrow="Study" title="Lectures" />
-      <section class="card">
-        <p>
-          Your access to the lecture recordings ended on {fmtDate(new Date(until + 'T00:00:00Z'), { month: 'long', day: 'numeric', year: 'numeric' })}.
-          {email && <> To ask for more time, email <a href={`mailto:${email}?subject=${encodeURIComponent('USMLE100: more time for lectures')}`}>{email}</a>.</>}
-        </p>
-      </section>
-    </PortalLayout>,
-  );
-}
-
-portal.get('/lectures', async (c) => {
-  const user = c.get('user')!;
-  const db = c.env.DB;
-  const cohort = await currentCohort(db, c.get('enrollment')?.cohort_id);
-  const ended = await lecturesEndedOn(c, cohort);
-  if (ended) return lecturesEndedPage(c, ended, (await getSettings(db)).contact_email);
-  const lectures = cohort ? await lecturesFor(db, cohort.id, user.id) : [];
-  const subjects = (await db.prepare('SELECT id, name FROM subjects ORDER BY sort').all<{ id: number; name: string }>()).results;
-  const usedSubjects = subjects.filter((s) => lectures.some((l) => l.subject_id === s.id));
-  const subj = Number(c.req.query('subject')) || 0;
-  const shown = subj ? lectures.filter((l) => l.subject_id === subj) : lectures;
-  const today = cohort ? cohortDay(cohort) : 0;
-  const done = shown.filter((l) => l.completed_at).length;
-  const next = shown.find((l) => l.status === 'live' && !l.completed_at);
-  // Group by week of the course: Days 1–5, 6–10 …
-  const weeks = new Map<number, Lecture[]>();
-  for (const l of shown) {
-    const w = Math.ceil(l.day_number / 5);
-    weeks.set(w, [...(weeks.get(w) ?? []), l]);
-  }
-  return c.html(
-    <PortalLayout shell={c.get('shell')} title="Lectures" active="lectures" user={user} wide>
-      <section class="card" style="gap:12px">
-        <nav class="crumbs" aria-label="Breadcrumb"><a href="/dashboard">Home</a><Icon name="chevron_right" size={16} />Lectures</nav>
-        <h1>All lectures</h1>
-        <p class="muted">Taught live by licensed MDs. One lecture a day across {cohort?.lecture_days ?? 90} days.</p>
-        {usedSubjects.length > 0 && (
-          <nav class="subj-tabs" aria-label="Subjects">
-            <a href="/lectures" class={subj ? '' : 'on'}>All subjects</a>
-            {usedSubjects.map((s) => (
-              <a href={`/lectures?subject=${s.id}`} class={subj === s.id ? 'on' : ''}>{s.name}</a>
-            ))}
-          </nav>
-        )}
-        <label class="filter-box">
-          <Icon name="filter" size={20} />
-          <span class="sr">Filter lectures</span>
-          <input type="search" id="lecfilter" placeholder="Start typing to filter the lectures" autocomplete="off" />
-        </label>
-      </section>
-      <LectureNotice n={lectureNotice(c, cohort)} />
-      <p class="small"><strong>{done}</strong> of {shown.length} lectures done</p>
-      {next && (
-        <a class="btn btn-primary btn-block" href={`/lectures/${next.id}`}><Icon name="play" size={20} />{done ? 'Continue with the next lecture' : 'Start the first lecture'}</a>
-      )}
-      {!shown.length && <p class="muted">No lectures yet. They appear here after each class.</p>}
-      {[...weeks.entries()].map(([w, ls]) => (
-        <section class="lec-section" data-section>
-          <div class="lec-section-head">
-            <span class="num">{w}</span>
-            <strong>Week {w} · Days {ls[0].day_number}–{ls[ls.length - 1].day_number}</strong>
-          </div>
-          <div class="lec-meta">{ls.filter((l) => l.completed_at).length} of {ls.length} lectures completed</div>
-          <div class="lec-grid">
-            {ls.map((l) => {
-              const live = l.status === 'live';
-              const isToday = l.day_number === today;
-              const missed = live && !l.completed_at && l.day_number < today;
-              return (
-                <article class={'lec-card' + (isToday ? ' today' : '')} data-title={l.title.toLowerCase()}>
-                  <div class="lec-top">
-                    <span class={'dot' + (l.completed_at ? '' : missed ? ' missed' : ' todo')} aria-hidden="true"></span>
-                    <span class="lec-num">Day {l.day_number}</span>
-                    {l.completed_at ? <span class="tag">Watched</span> : !live ? <span class="chip chip-gray">Coming soon</span> : missed ? <span class="chip chip-rust">Missed</span> : isToday ? <span class="chip chip-sand">Today</span> : <span class="tag">Video</span>}
-                  </div>
-                  {live ? <a class="lec-title" href={`/lectures/${l.id}`}>{l.title}</a> : <span class="lec-title">{l.title}</span>}
-                  <span class="lec-date">{cohort ? fmtDate(dayDate(cohort, l.day_number), { weekday: 'long', month: 'long', day: 'numeric' }) : ''}</span>
-                  {live && (
-                    <a class={'btn btn-block ' + (l.completed_at ? 'btn-outline' : 'btn-primary')} href={`/lectures/${l.id}`}>
-                      <Icon name="play" size={18} />{l.completed_at ? 'Watch again' : 'Start'}
-                    </a>
-                  )}
-                </article>
-              );
-            })}
-          </div>
-        </section>
-      ))}
-      <p class="muted small" id="lecnone" hidden>No lectures match that filter.</p>
-      <script
-        dangerouslySetInnerHTML={{
-          __html: `(function(){var i=document.getElementById('lecfilter');if(!i)return;i.addEventListener('input',function(){var q=i.value.trim().toLowerCase(),any=false;document.querySelectorAll('[data-section]').forEach(function(s){var n=0;s.querySelectorAll('[data-title]').forEach(function(a){var ok=!q||a.dataset.title.indexOf(q)>=0;a.hidden=!ok;if(ok)n++;});s.hidden=n===0;if(n)any=true;});document.getElementById('lecnone').hidden=any;});})();`,
-        }}
-      />
-    </PortalLayout>,
-  );
-});
-
-portal.get('/lectures/:id', async (c) => {
-  const user = c.get('user')!;
-  const l = await c.env.DB.prepare(
-    `SELECT l.*, p.completed_at FROM lectures l LEFT JOIN lecture_progress p ON p.lecture_id = l.id AND p.user_id = ? WHERE l.id = ?`,
-  )
-    .bind(user.id, Number(c.req.param('id')))
-    .first<Lecture & { cohort_id: number }>();
-  if (!l || (l.status !== 'live' && !isStaff(user))) return c.notFound();
-  const cohort = await currentCohort(c.env.DB, c.get('enrollment')?.cohort_id);
-  const ended = await lecturesEndedOn(c, cohort);
-  if (ended) return lecturesEndedPage(c, ended, (await getSettings(c.env.DB)).contact_email);
-  const src = l.bunny_video_id ? await bunnyEmbedUrl(c.env, l.bunny_video_id) : null;
-  const [prev, next] = await Promise.all([
-    c.env.DB.prepare("SELECT id, day_number, title FROM lectures WHERE cohort_id = ? AND day_number < ? AND status = 'live' ORDER BY day_number DESC LIMIT 1").bind(l.cohort_id, l.day_number).first<{ id: number; day_number: number; title: string }>(),
-    c.env.DB.prepare("SELECT id, day_number, title FROM lectures WHERE cohort_id = ? AND day_number > ? AND status = 'live' ORDER BY day_number LIMIT 1").bind(l.cohort_id, l.day_number).first<{ id: number; day_number: number; title: string }>(),
-  ]);
-  const lc = await c.env.DB.prepare('SELECT * FROM cohorts WHERE id = ?').bind(l.cohort_id).first<Cohort>();
-  return c.html(
-    <PortalLayout shell={c.get('shell')} title={l.title} active="lectures" user={user}>
-      <nav class="crumbs" aria-label="Breadcrumb"><a href="/dashboard">Home</a><Icon name="chevron_right" size={16} /><a href="/lectures">Lectures</a><Icon name="chevron_right" size={16} />Day {l.day_number}</nav>
-      <div class="stack" style="gap:6px">
-        <Eyebrow>Day {l.day_number}{lc ? ` · ${fmtDate(dayDate({ ...lc, daysOff: cohort?.id === lc.id ? cohort.daysOff : undefined }, l.day_number), { weekday: 'long', month: 'long', day: 'numeric' })}` : ''}</Eyebrow>
-        <h1>{l.title}</h1>
-      </div>
-      {src ? (
-        <div class="video-wrap">
-          <iframe src={src} title={l.title} loading="lazy" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
-          <span class="watermark" aria-hidden="true">{user.email}</span>
-        </div>
-      ) : (
-        <Flash kind="error">{l.bunny_video_id ? 'This video can’t be played right now. Please try again later.' : 'The video for this lecture isn’t uploaded yet.'}</Flash>
-      )}
-      <section class="card" style="flex-direction:row;align-items:center;flex-wrap:wrap">
-        {l.completed_at ? (
-          <span class="tag" style="font-size:13px;padding:6px 12px"><Icon name="check_circle" size={16} />&nbsp;Watched</span>
-        ) : (
-          <form method="post" action={`/lectures/${l.id}/done`}>
-            <button class="btn btn-primary" type="submit"><Icon name="check" size={18} />Mark as watched</button>
-          </form>
-        )}
-        <a class="btn btn-ghost" href="/lectures">All lectures</a>
-      </section>
-      <div class="grid">
-        {prev && (
-          <a class="card continue" href={`/lectures/${prev.id}`} style="text-decoration:none">
-            <span class="ci"><Icon name="arrow_back" /></span>
-            <span class="txt"><small>Previous · Day {prev.day_number}</small><strong>{prev.title}</strong></span>
-          </a>
-        )}
-        {next && (
-          <a class="card continue" href={`/lectures/${next.id}`} style="text-decoration:none">
-            <span class="txt"><small>Next · Day {next.day_number}</small><strong>{next.title}</strong></span>
-            <span class="ci"><Icon name="arrow_forward" /></span>
-          </a>
-        )}
-      </div>
-    </PortalLayout>,
-  );
-});
-
-portal.post('/lectures/:id/done', async (c) => {
-  const user = c.get('user')!;
-  const id = Number(c.req.param('id'));
-  await c.env.DB.prepare(
-    `INSERT INTO lecture_progress (user_id, lecture_id, completed_at) VALUES (?, ?, datetime('now'))
-     ON CONFLICT (user_id, lecture_id) DO UPDATE SET completed_at = COALESCE(completed_at, datetime('now')), updated_at = datetime('now')`,
-  )
-    .bind(user.id, id)
-    .run();
-  return c.redirect(`/lectures/${id}`);
-});
 
 // ---------- Evening Questions (Mon/Wed/Fri recordings, own access) ----------
 
@@ -631,6 +475,7 @@ portal.get('/evening/:id', async (c) => {
   // Only the classes in the student's current month.
   if (!acc.staff && !acc.visible.has(e.id)) return c.redirect('/evening');
   const src = e.bunny_video_id ? await bunnyEmbedUrl(c.env, e.bunny_video_id) : null;
+  const watched = await c.env.DB.prepare('SELECT 1 FROM evening_progress WHERE user_id = ? AND session_id = ?').bind(user.id, e.id).first();
   return c.html(
     <PortalLayout shell={c.get('shell')} title={e.title} active="evening" user={user}>
       <nav class="crumbs" aria-label="Breadcrumb"><a href="/dashboard">Home</a><Icon name="chevron_right" size={16} /><a href="/evening">Evening Questions</a></nav>
@@ -646,7 +491,14 @@ portal.get('/evening/:id', async (c) => {
       ) : (
         <Flash kind="error">{e.bunny_video_id ? 'This video can’t be played right now. Please try again later.' : 'The video for this session isn’t ready yet.'}</Flash>
       )}
-      <a class="btn btn-ghost" href="/evening" style="align-self:flex-start">All evening sessions</a>
+      <section class="card" style="flex-direction:row;align-items:center;flex-wrap:wrap;gap:10px">
+        {watched ? (
+          <span class="tag" style="font-size:13px;padding:6px 12px"><Icon name="check_circle" size={16} />&nbsp;Watched</span>
+        ) : (
+          <form method="post" action={`/evening/${e.id}/done`}><button class="btn btn-primary" type="submit"><Icon name="check" size={18} />Mark as watched</button></form>
+        )}
+        <a class="btn btn-ghost" href="/evening">All evening sessions</a>
+      </section>
     </PortalLayout>,
   );
 });
@@ -823,7 +675,9 @@ async function loadTest(c: Context<AppEnv>, id: number) {
   return { test, items };
 }
 
-const modeName = (m: string) => (m === 'timed' ? 'Timed' : m === 'untimed' ? 'Untimed' : m === 'warmup' ? 'Warmup' : 'Tutor');
+const modeName = (m: string) => (m === 'timed' ? 'Timed' : m === 'untimed' ? 'Untimed' : m === 'warmup' ? 'Daily Warmup' : 'Tutor');
+/** Tutor and Daily Warmup show the answer straight after each question and lock the first answer. */
+const instant = (m: string) => m === 'tutor' || m === 'warmup';
 
 portal.get('/tests/:id/:pos{[0-9]+}', async (c) => {
   const user = c.get('user')!;
@@ -840,7 +694,7 @@ portal.get('/tests/:id/:pos{[0-9]+}', async (c) => {
   const choices: string[] = JSON.parse(q.choices_json);
   const wrongEx: Record<string, string> = q.wrong_explanations_json ? JSON.parse(q.wrong_explanations_json) : {};
   const answered = item.chosen_index != null;
-  const reveal = !!test.finished_at || (test.mode === 'tutor' && answered);
+  const reveal = !!test.finished_at || (instant(test.mode) && answered);
   const total = items.length;
   const deadline = test.mode === 'timed' && !test.finished_at ? Date.parse(test.created_at.replace(' ', 'T') + 'Z') + total * 90_000 : null;
 
@@ -850,9 +704,10 @@ portal.get('/tests/:id/:pos{[0-9]+}', async (c) => {
       <section class="card qhead">
         <div class="qbar">
           <a class="x" href={test.finished_at ? `/tests/${id}/results` : '/qbank'} aria-label={test.finished_at ? 'Back to results' : 'Leave the test (your answers are saved)'}><Icon name="close" /></a>
-          <strong>{test.finished_at ? 'Review' : `${modeName(test.mode)} test`}</strong>
+          <strong>{test.finished_at ? 'Review' : test.mode === 'warmup' ? 'Daily Warmup' : `${modeName(test.mode)} test`}</strong>
           <span class="pos">{pos} / {total}</span>
           {deadline && <span class="clock" id="timer" data-deadline={String(deadline)} data-finish={`/tests/${id}/finish`}>–:––</span>}
+          {test.mode === 'warmup' && !test.finished_at && <span class="clock" id="elapsed" data-start={String(Date.parse(test.created_at.replace(' ', 'T') + 'Z'))}>0:00</span>}
         </div>
         <div class="bar thin"><i style={`width:${Math.round((items.filter((i) => i.chosen_index != null).length / total) * 100)}%`}></i></div>
       </section>
@@ -861,7 +716,7 @@ portal.get('/tests/:id/:pos{[0-9]+}', async (c) => {
           {items.map((i) => (
             <a
               href={`/tests/${id}/${i.position}`}
-              class={i.position === pos ? 'on' : (test.finished_at || test.mode === 'tutor') && i.chosen_index != null ? (i.is_correct ? 'ans' : 'wrong') : i.chosen_index != null ? 'ans' : ''}
+              class={i.position === pos ? 'on' : (test.finished_at || instant(test.mode)) && i.chosen_index != null ? (i.is_correct ? 'ans' : 'wrong') : i.chosen_index != null ? 'ans' : ''}
               aria-current={i.position === pos ? 'true' : undefined}
             >
               {i.position}{i.flagged ? '⚑' : ''}
@@ -885,7 +740,7 @@ portal.get('/tests/:id/:pos{[0-9]+}', async (c) => {
             );
           })}
           {!reveal && (
-            <button class="btn btn-primary btn-block" type="submit">{test.mode === 'tutor' ? 'Submit answer' : 'Save and next'}</button>
+            <><input type="hidden" name="secs" value="" data-secs /><button class="btn btn-primary btn-block" type="submit">{instant(test.mode) ? 'Submit answer' : 'Save and next'}</button></>
           )}
         </form>
         <div class="row">
@@ -912,6 +767,11 @@ portal.get('/tests/:id/:pos{[0-9]+}', async (c) => {
           {q.bottom_line && <p class="bl"><strong>Bottom line:</strong> {q.bottom_line}</p>}
         </section>
       )}
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `(function(){var t0=Date.now();document.querySelectorAll('[data-secs]').forEach(function(i){i.form.addEventListener('submit',function(){i.value=Math.round((Date.now()-t0)/1000)})});var e=document.getElementById('elapsed');if(e){var s0=+e.dataset.start;(function tick(){var s=Math.max(0,Math.round((Date.now()-s0)/1000));e.textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0');setTimeout(tick,1000)})()}})();`,
+        }}
+      />
       {deadline && (
         <script
           dangerouslySetInnerHTML={{
@@ -935,11 +795,13 @@ portal.post('/tests/:id/:pos{[0-9]+}', async (c) => {
   const q = await c.env.DB.prepare('SELECT correct_index, choices_json FROM questions WHERE id = ?').bind(item.question_id).first<{ correct_index: number; choices_json: string }>();
   if (!q || !Number.isInteger(choice) || choice < 0 || choice >= JSON.parse(q.choices_json).length) return c.redirect(`/tests/${id}/${pos}`);
   // Tutor mode locks the first answer; timed/untimed allow changes until the test ends.
-  if (loaded.test.mode === 'tutor' && item.chosen_index != null) return c.redirect(`/tests/${id}/${pos}`);
-  await c.env.DB.prepare(`UPDATE test_items SET chosen_index = ?, is_correct = ?, answered_at = datetime('now') WHERE test_id = ? AND position = ?`)
-    .bind(choice, choice === q.correct_index ? 1 : 0, id, pos)
+  if (instant(loaded.test.mode) && item.chosen_index != null) return c.redirect(`/tests/${id}/${pos}`);
+  // Seconds on this question, measured in the page (for Performance: seconds per question). Kept within 1–900.
+  const secs = Math.round(Number(f.secs));
+  await c.env.DB.prepare(`UPDATE test_items SET chosen_index = ?, is_correct = ?, answered_at = datetime('now'), seconds = COALESCE(seconds, 0) + ? WHERE test_id = ? AND position = ?`)
+    .bind(choice, choice === q.correct_index ? 1 : 0, Number.isFinite(secs) && secs > 0 ? Math.min(900, secs) : null, id, pos)
     .run();
-  const next = loaded.test.mode === 'tutor' ? pos : Math.min(pos + 1, loaded.items.length);
+  const next = instant(loaded.test.mode) ? pos : Math.min(pos + 1, loaded.items.length);
   return c.redirect(`/tests/${id}/${next}`);
 });
 
@@ -1008,11 +870,11 @@ portal.get('/performance', async (c) => {
   const user = c.get('user')!;
   const range = RANGES.find((r) => r.key === c.req.query('range')) ?? RANGES[3];
   const since = range.days ? new Date(Date.now() - range.days * 86400_000).toISOString().slice(0, 19).replace('T', ' ') : undefined;
-  const [bySystem, byDiscipline, tests, omitted] = await Promise.all([
+  const [bySystem, byDiscipline, tests, pace] = await Promise.all([
     scoresBy(c.env.DB, user.id, 'perf_system', since),
     scoresBy(c.env.DB, user.id, 'discipline', since),
     c.env.DB.prepare('SELECT COUNT(*) AS n FROM tests WHERE user_id = ? AND finished_at IS NOT NULL AND (? IS NULL OR finished_at >= ?)').bind(user.id, since ?? null, since ?? null).first<{ n: number }>(),
-    c.env.DB.prepare('SELECT COUNT(*) AS n FROM test_items ti JOIN tests t ON t.id = ti.test_id WHERE t.user_id = ? AND t.finished_at IS NOT NULL AND ti.chosen_index IS NULL AND (? IS NULL OR t.finished_at >= ?)').bind(user.id, since ?? null, since ?? null).first<{ n: number }>(),
+    c.env.DB.prepare('SELECT AVG(ti.seconds) AS s FROM test_items ti JOIN tests t ON t.id = ti.test_id WHERE t.user_id = ? AND ti.seconds IS NOT NULL AND (? IS NULL OR ti.answered_at >= ?)').bind(user.id, since ?? null, since ?? null).first<{ s: number | null }>(),
   ]);
   const total = bySystem.reduce((a, s) => a + s.answered, 0);
   const right = bySystem.reduce((a, s) => a + s.correct, 0);
@@ -1045,7 +907,7 @@ portal.get('/performance', async (c) => {
         <div class="stat s1"><b>{total ? Math.round((right / total) * 100) : 0}%</b><span>correct</span></div>
         <div class="stat s2"><b>{total}</b><span>answered</span></div>
         <div class="stat s3"><b>{tests?.n ?? 0}</b><span>tests</span></div>
-        <div class="stat s4"><b>{omitted?.n ?? 0}</b><span>omitted</span></div>
+        <div class="stat s4"><b>{Math.round(pace?.s ?? 0)}s</b><span>per question</span></div>
       </div>
       <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));align-items:start;gap:20px">
         <List title={`Performance by System (${bySystem.length})`} rows={bySystem} />
@@ -1069,6 +931,7 @@ portal.get('/review', async (c) => {
   const rows = await questionStatuses(c.env.DB, user.id);
   const wrong = rows.filter((r) => r.status === 'incorrect').length;
   const flagged = rows.filter((r) => r.flagged).length;
+  const cardQ = await queueSummary(c.env.DB, user.id);
   const RetryForm = (p: { pool: string; n: number; label: string }) => (
     <form method="post" action="/create-test">
       <input type="hidden" name="mode" value="tutor" />
@@ -1124,6 +987,17 @@ portal.get('/review', async (c) => {
             <span class="txt"><strong>{flagged} flagged question{flagged === 1 ? '' : 's'}</strong><span>You marked these for later.</span></span>
             <RetryForm pool="custom" n={flagged} label="Practice" />
           </div>
+        )}
+      </section>
+      <section class="card catch">
+        <div class="catch-head"><Icon name="cards" size={20} />Flashcard Recall Queue</div>
+        {cardQ.due ? (
+          <div class="catch-item alert">
+            <span class="txt"><strong>{cardQ.due} card{cardQ.due === 1 ? '' : 's'} to review</strong><span>Due today from the lectures you’ve watched.</span></span>
+            <a class="btn btn-primary btn-sm" href="/cards">Review</a>
+          </div>
+        ) : (
+          <div class="catch-item"><span class="txt"><strong>Cards up to date</strong><span>0 cards scheduled.{cardQ.next ? ` Next batch arrives ${fmtDate(new Date(cardQ.next + 'T00:00:00Z'), { weekday: 'long', month: 'short', day: 'numeric' })}.` : ''}</span></span><span class="okic"><Icon name="check_circle" /></span></div>
         )}
       </section>
       <div class="row between">
@@ -1208,6 +1082,7 @@ portal.get('/book', async (c) => {
   const settings = await getSettings(c.env.DB);
   const enr = c.get('enrollment');
   const booking = isHttpUrl(settings.calendly_url) ? settings.calendly_url : null;
+  const used = (await c.env.DB.prepare('SELECT COUNT(*) AS n FROM tutoring_sessions WHERE user_id = ?').bind(c.get('user')!.id).first<{ n: number }>())?.n ?? 0;
   return c.html(
     <PortalLayout shell={c.get('shell')} title="1-on-1 Tutoring" active="book" user={c.get('user')!}>
       <PageHead eyebrow="1-on-1 Tutoring" title="Schedule a 1-on-1 Session" sub="Book a 60-minute private tutoring session with Dr. Khan over Zoom to review weak areas, NBME blocks, and exam strategy." />
@@ -1219,7 +1094,8 @@ portal.get('/book', async (c) => {
           <span class="row" style="gap:10px"><Icon name="videocam" size={20} class="gic" />Live over Zoom</span>
         </div>
         <p class="small">Bring a topic, a failed block, or a stem you cannot crack. One hour, one student, no script.</p>
-        {enr && enr.one_on_one_sessions > 0 && <p class="small"><strong>Your program includes {enr.one_on_one_sessions} sessions.</strong></p>}
+        {enr && enr.one_on_one_sessions > 0 && <p class="small"><strong>Your program includes {enr.one_on_one_sessions} sessions.</strong> You’ve had {used} so far{enr.one_on_one_sessions - used > 0 ? `, so ${enr.one_on_one_sessions - used} ${enr.one_on_one_sessions - used === 1 ? 'is' : 'are'} left` : ''}.</p>}
+        {(!enr || !enr.one_on_one_sessions) && used > 0 && <p class="small">You’ve had {used} session{used === 1 ? '' : 's'}.</p>}
         {booking ? (
           <a class="btn btn-primary btn-2line" href={booking} rel="noopener" style="align-self:flex-start"><Icon name="event" size={24} /><span><strong>Open Booking Calendar</strong><small>60 min with Dr. Khan</small></span></a>
         ) : (

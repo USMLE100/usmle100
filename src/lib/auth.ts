@@ -51,9 +51,10 @@ export async function verifyPassword(password: string, hash: string, salt: strin
   return safeEqual(res.hash, hash);
 }
 
-export async function createSession(c: Context<AppEnv>, userId: number) {
+/** Sign in. With "Remember me" off, the cookie ends when the browser closes and the session expires within a day. */
+export async function createSession(c: Context<AppEnv>, userId: number, remember = true) {
   const raw = toB64(crypto.getRandomValues(new Uint8Array(32))).replace(/[+/=]/g, (m) => ({ '+': '-', '/': '_', '=': '' })[m]!);
-  const expires = new Date(Date.now() + SESSION_DAYS * 86400_000);
+  const expires = new Date(Date.now() + (remember ? SESSION_DAYS * 86400_000 : 86400_000));
   await c.env.DB.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
     .bind(await sha256Hex(raw), userId, expires.toISOString())
     .run();
@@ -62,7 +63,7 @@ export async function createSession(c: Context<AppEnv>, userId: number) {
     secure: new URL(c.req.url).protocol === 'https:',
     sameSite: 'Lax',
     path: '/',
-    expires,
+    ...(remember ? { expires } : {}),
   });
 }
 
@@ -79,7 +80,7 @@ export async function loadUser(c: Context<AppEnv>, next: Next) {
   const raw = getCookie(c, COOKIE);
   if (raw) {
     const user = await c.env.DB.prepare(
-      `SELECT u.id, u.email, u.name, u.role, u.exam_date FROM sessions s JOIN users u ON u.id = s.user_id
+      `SELECT u.id, u.email, u.name, u.role, u.exam_date, u.exam, u.onboarded_at FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token_hash = ? AND s.expires_at > ?`,
     )
       .bind(await sha256Hex(raw), new Date().toISOString())
@@ -154,6 +155,13 @@ const FACULTY_ALLOWED: [method: string, path: RegExp][] = [
   // Evening Questions recordings (not who can watch)
   ['GET', /^\/admin\/evening$/],
   ['POST', /^\/admin\/evening\/sessions(\/\d+)?$/],
+  // Phase 2 teaching content: lecture details, sections and flash cards.
+  ['GET', /^\/admin\/lectures\/\d+$/],
+  ['POST', /^\/admin\/lectures\/\d+\/details$/],
+  ['GET', /^\/admin\/sections$/],
+  ['POST', /^\/admin\/sections(\/\d+(\/delete)?)?$/],
+  ['GET', /^\/admin\/cards(\/\d+)?$/],
+  ['POST', /^\/admin\/cards(\/bulk|\/\d+(\/status)?)?$/],
 ];
 
 export const facultyMay = (method: string, path: string) =>

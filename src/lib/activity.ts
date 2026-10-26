@@ -41,22 +41,51 @@ export async function activityByDay(db: D1Database, userId: number, days = 400) 
 }
 
 const counts = (v?: DayCount) => !!v && (v.lectures > 0 || v.questions >= STREAK_MIN_QUESTIONS);
+/** A day keeps the streak alive if it counts, or a streak freeze covers it. */
+const keeps = (map: Map<string, DayCount>, frozen: Set<string>, ymdStr: string) => counts(map.get(ymdStr)) || frozen.has(ymdStr);
 
 /** Consecutive study days ending today; if today doesn't count yet, the streak from yesterday is still alive. */
-export function streakFrom(map: Map<string, DayCount>) {
+export function streakFrom(map: Map<string, DayCount>, frozen: Set<string> = new Set()) {
   let t = todayUtc();
-  if (!counts(map.get(ymd(t)))) t -= DAY;
+  if (!keeps(map, frozen, ymd(t))) t -= DAY;
   let n = 0;
-  while (counts(map.get(ymd(t)))) {
+  while (keeps(map, frozen, ymd(t))) {
     n++;
     t -= DAY;
   }
   return n;
 }
 
-export async function studyStreak(db: D1Database, userId: number) {
-  return streakFrom(await activityByDay(db, userId, 400));
+/** The longest run of study days in the period covered by `map`. */
+export function longestStreak(map: Map<string, DayCount>, frozen: Set<string> = new Set(), days = 400) {
+  let best = 0;
+  let run = 0;
+  for (let t = todayUtc() - days * DAY; t <= todayUtc(); t += DAY) {
+    run = keeps(map, frozen, ymd(t)) ? run + 1 : 0;
+    best = Math.max(best, run);
+  }
+  return best;
 }
+
+/** Study days that continue a streak (the day before also counted). Each earns streak XP. */
+export function streakDays(map: Map<string, DayCount>, frozen: Set<string> = new Set(), days = 400) {
+  let n = 0;
+  for (let t = todayUtc() - days * DAY + DAY; t <= todayUtc(); t += DAY) {
+    if (counts(map.get(ymd(t))) && keeps(map, frozen, ymd(t - DAY))) n++;
+  }
+  return n;
+}
+
+export const frozenDays = async (db: D1Database, userId: number) =>
+  new Set((await db.prepare('SELECT day FROM streak_freezes WHERE user_id = ?').bind(userId).all<{ day: string }>()).results.map((r) => r.day));
+
+export async function studyStreak(db: D1Database, userId: number) {
+  const [map, frozen] = await Promise.all([activityByDay(db, userId, 400), frozenDays(db, userId)]);
+  return streakFrom(map, frozen);
+}
+
+export const ymdOfDay = ymd;
+export const DAY_MS = DAY;
 
 export type ActivityItem = { kind: 'lecture' | 'test'; at: string; title: string; detail: string; href: string };
 

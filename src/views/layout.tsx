@@ -47,7 +47,7 @@ function Doc(props: { title: string; children: Child; bodyClass?: string }) {
   );
 }
 
-export function PublicLayout(props: { title: string; user: User | null; children: Child; bare?: boolean; plain?: boolean }) {
+export function PublicLayout(props: { title: string; user: User | null; children: Child; bare?: boolean; plain?: boolean; legal?: { terms: boolean; privacy: boolean } }) {
   return (
     <Doc title={props.title}>
       {!props.plain && (
@@ -80,6 +80,8 @@ export function PublicLayout(props: { title: string; user: User | null; children
             <a href="/programs">Programs</a>
             <a href="/sign-in">Sign in</a>
             <a href="/sign-up">Create account</a>
+            {props.legal?.terms && <a href="/terms">Terms</a>}
+            {props.legal?.privacy && <a href="/privacy">Privacy</a>}
           </nav>
           © {new Date().getUTCFullYear()} USMLE100 · Not affiliated with NBME, FSMB or ECFMG.
         </footer>
@@ -95,24 +97,33 @@ const groups = (staff: boolean, admin: boolean): { label: string; items: NavItem
   {
     label: 'Help',
     items: [
+      { key: 'ask', label: 'Ask the Room', href: '/ask', icon: 'forum' },
       { key: 'book', label: '1-on-1 Tutoring', href: '/book', icon: 'event' },
       { key: 'programs', label: 'Programs', href: '/programs', icon: 'premium' },
+      { key: 'plans', label: 'Plans', href: '/plans', icon: 'description' },
+      { key: 'map', label: 'Portal Map', href: '/map', icon: 'apps' },
     ],
   },
   {
     label: 'Study',
     items: [
       { key: 'lectures', label: 'Lectures', href: '/lectures', icon: 'play_circle' },
-      { key: 'evening', label: 'Evening Questions', href: '/evening', icon: 'videocam' },
+      { key: 'topics', label: 'Topics', href: '/topics', icon: 'menu_book' },
+      { key: 'book-library', label: 'USMLE100 Book', href: '/course-book', icon: 'book' },
+      { key: 'warmup', label: 'Daily Warmup', href: '/warmup', icon: 'bolt' },
       { key: 'qbank', label: 'Question Bank', href: '/qbank', icon: 'quiz' },
       { key: 'create', label: 'Create a Test', href: '/create-test', icon: 'filter' },
-      { key: 'review', label: 'Review', href: '/review', icon: 'replay' },
+      { key: 'cards', label: 'Flash Cards', href: '/cards', icon: 'cards' },
+      { key: 'review', label: 'Review', href: '/review', icon: 'psychology' },
+      { key: 'evening', label: 'Evening Questions', href: '/evening', icon: 'videocam' },
     ],
   },
   {
     label: 'Progress',
     items: [
       { key: 'performance', label: 'Performance', href: '/performance', icon: 'monitoring' },
+      { key: 'rewards', label: 'Rewards', href: '/rewards', icon: 'trophy' },
+      { key: 'notes', label: 'My Notes', href: '/notes', icon: 'edit_note' },
       { key: 'exam', label: 'Exam Window', href: '/exam-window', icon: 'calendar' },
     ],
   },
@@ -122,10 +133,15 @@ const groups = (staff: boolean, admin: boolean): { label: string; items: NavItem
           label: 'Admin',
           items: [
             { key: 'admin-lectures', label: 'Lectures admin', href: '/admin/lectures', icon: 'school' as IconName },
+            { key: 'admin-sections', label: 'Topics & sections', href: '/admin/sections', icon: 'menu_book' as IconName },
+            { key: 'admin-cards', label: 'Flash cards admin', href: '/admin/cards', icon: 'cards' as IconName },
             { key: 'admin-evening', label: 'Evening Questions admin', href: '/admin/evening', icon: 'videocam' as IconName },
             { key: 'admin-questions', label: 'Questions admin', href: '/admin/questions', icon: 'quiz' as IconName },
             ...(admin
               ? [
+                  { key: 'admin-book', label: 'Course Book admin', href: '/admin/book', icon: 'book' as IconName },
+                  { key: 'admin-tutoring', label: 'Tutoring sessions', href: '/admin/tutoring', icon: 'event' as IconName },
+                  { key: 'admin-home', label: 'Home page content', href: '/admin/home-content', icon: 'home' as IconName },
                   { key: 'admin-students', label: 'Students', href: '/admin/students', icon: 'person' as IconName },
                   { key: 'admin-settings', label: 'Site settings', href: '/admin/settings', icon: 'info' as IconName },
                   { key: 'admin-team', label: 'Team', href: '/admin/team', icon: 'groups' as IconName },
@@ -140,12 +156,12 @@ const groups = (staff: boolean, admin: boolean): { label: string; items: NavItem
 const BOTTOM: NavItem[] = [
   { key: 'home', label: 'Home', href: '/dashboard', icon: 'home' },
   { key: 'lectures', label: 'Lectures', href: '/lectures', icon: 'play_circle' },
+  { key: 'book-library', label: 'Book', href: '/course-book', icon: 'menu_book' },
   { key: 'qbank', label: 'Qbank', href: '/qbank', icon: 'quiz' },
-  { key: 'review', label: 'Review', href: '/review', icon: 'replay' },
-  { key: 'performance', label: 'Progress', href: '/performance', icon: 'monitoring' },
+  { key: 'ask', label: 'Ask', href: '/ask', icon: 'forum' },
 ];
 /** Pages that light up a bottom-nav tab other than their own key. */
-const BOTTOM_ALIAS: Record<string, string> = { create: 'qbank', test: 'qbank', results: 'qbank' };
+const BOTTOM_ALIAS: Record<string, string> = { create: 'qbank', test: 'qbank', results: 'qbank', warmup: 'qbank', topics: 'lectures', book: 'book-tutoring' };
 
 export function PortalLayout(props: { title: string; active: string; user: User; shell?: Shell; children: Child; wide?: boolean }) {
   const s = props.shell;
@@ -206,7 +222,7 @@ export function PortalLayout(props: { title: string; active: string; user: User;
                 <Icon name="chevron_right" class="chev" />
               </a>
             )}
-            <div class="drawer-foot">© {new Date().getUTCFullYear()} USMLE100</div>
+            <div class="drawer-foot">© {new Date().getUTCFullYear()} USMLE100{s?.terms && <> · <a href="/terms">Terms</a></>}{s?.privacy && <> · <a href="/privacy">Privacy</a></>}</div>
           </div>
         </nav>
 
@@ -217,12 +233,13 @@ export function PortalLayout(props: { title: string; active: string; user: User;
           <a href="/dashboard" class="tb-btn tb-btn-plain" aria-label="USMLE100 home">
             <LogoMark />
           </a>
+          <a href="/search" class="tb-btn" aria-label="Search">
+            <Icon name="search" size={24} />
+          </a>
           <span class="tb-spacer"></span>
-          <form method="post" action="/qbank/quick">
-            <button type="submit" class="tb-btn tb-green" aria-label="Start a quick 10-question block" title="Quick 10-question block">
-              <Icon name="bolt" size={22} />
-            </button>
-          </form>
+          <a href="/warmup" class="tb-btn tb-green" aria-label="Daily Warmup: 10 questions" title="Daily Warmup">
+            <Icon name="bolt" size={22} />
+          </a>
           {s && (
             <a href="/dashboard#streak" class={'tb-streak' + (s.streak ? ' on' : '')} aria-label={`Study streak: ${s.streak} day${s.streak === 1 ? '' : 's'}`}>
               <Icon name="fire" size={20} />

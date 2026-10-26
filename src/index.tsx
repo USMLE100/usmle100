@@ -11,6 +11,10 @@ import { ensureMigrated } from './lib/migrate';
 import { publicRoutes } from './routes/public';
 import { portal } from './routes/portal';
 import { admin } from './routes/admin';
+import { learn } from './routes/learn';
+import { content } from './routes/content';
+import { library } from './routes/library';
+import { community } from './routes/community';
 import { PublicLayout } from './views/layout';
 
 const app = new Hono<AppEnv>();
@@ -46,7 +50,11 @@ app.use('*', async (c, next) => {
 app.route('/', publicRoutes);
 app.route('/zoom', zoom);
 app.route('/admin', admin);
+app.route('/admin', content);
 app.route('/', portal);
+app.route('/', learn);
+app.route('/', library);
+app.route('/', community);
 
 app.notFound((c) =>
   c.html(
