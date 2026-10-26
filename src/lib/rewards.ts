@@ -72,7 +72,7 @@ export async function rewards(db: D1Database, userId: number, cohort: { id: numb
     b('book', 'Cover to Cover', 'Complete the USMLE100 Book', 'book', book?.total ? pct(book.read, book.total) : 0),
     b('memory', 'Memory Machine', 'Review 500 flashcards', 'cards', pct(cards?.n ?? 0, 500)),
     b('qbank', 'QBank Conqueror', 'Complete 1,000 practice questions', 'quiz', pct(answered, 1000)),
-    b('maker', 'Think Like the Test Maker', 'Achieve at least 80% accuracy across 100 practice questions', 'trophy', answered < 100 ? pct(answered, 100) / 2 : accuracy >= 80 ? 100 : 50 + Math.floor(pct(accuracy, 80) / 2)),
+    b('maker', 'Think Like the Test Maker', 'Achieve at least 80% accuracy across 100 practice questions', 'trophy', answered < 100 ? Math.floor(pct(answered, 100) / 2) : accuracy >= 80 ? 100 : 50 + Math.floor(pct(accuracy, 80) / 2)),
   ];
   const others = list.filter((x) => x.earned).length;
   list.push(b('max', 'USMLE100 MAX Scholar', 'Earn every other milestone across all USMLE100 learning modalities', 'star', pct(others, list.length)));
