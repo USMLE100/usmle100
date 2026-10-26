@@ -1,11 +1,12 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../lib/types';
-import { PublicLayout, Flash, Eyebrow } from '../views/layout';
+import { PublicLayout, PortalLayout, Flash, LogoMark } from '../views/layout';
+import { Icon } from '../views/icons';
 import { createSession, destroySession, hashPassword, verifyPassword, requireUser } from '../lib/auth';
 import { clearFailures, emailKey, ipKey, lockedFor, recordFailure } from '../lib/ratelimit';
 import { consumeResetToken, resetTokenUser } from '../lib/reset';
 import { activateEnrollment, createCheckoutSession, retrieveCheckoutSession, verifyWebhook } from '../lib/stripe';
-import { money } from '../lib/content';
+import { currentCohort, dayDate, fmtDate, money, todayUtc, ymdToUtc } from '../lib/content';
 import { getSettings } from '../lib/settings';
 
 type Pkg = { id: string; name: string; tagline: string; price_cents: number; one_on_one_sessions: number; evening_q_months: number; recommended: number };
@@ -52,99 +53,272 @@ const INDIVIDUAL = [
 
 export const publicRoutes = new Hono<AppEnv>();
 
+/** Simple flat portrait used on the audience cards (original drawing, no photos). */
+const Bust = (p: { skin: string; hair: string; shirt: string; bg: string; long?: boolean }) => (
+  <svg viewBox="0 0 200 150" class="bust" aria-hidden="true" style={`background:${p.bg}`}>
+    {p.long && <path d="M62 52c0-30 18-44 38-44s38 14 38 44v58H62z" fill={p.hair} />}
+    <path d="M40 150c4-34 28-52 60-52s56 18 60 52z" fill={p.shirt} />
+    <rect x="88" y="78" width="24" height="30" rx="10" fill={p.skin} filter="brightness(.9)" />
+    <ellipse cx="100" cy="58" rx="28" ry="32" fill={p.skin} />
+    {!p.long && <path d="M72 54c-2-26 14-36 28-36s30 10 28 36c-6-12-16-16-28-16s-22 4-28 16z" fill={p.hair} />}
+    {p.long && <path d="M72 58c0-24 12-34 28-34s28 10 28 34c-8-14-18-18-28-18s-20 4-28 18z" fill={p.hair} />}
+    <path d="M90 104l10 10 10-10" fill="#fff" opacity=".9" />
+  </svg>
+);
+
 publicRoutes.get('/', async (c) => {
   const user = c.get('user');
   const settings = await getSettings(c.env.DB);
+  const pkgs = (await c.env.DB.prepare('SELECT price_cents FROM packages ORDER BY price_cents LIMIT 1').all<{ price_cents: number }>()).results;
+  const from = pkgs[0] ? money(pkgs[0].price_cents) : null;
   return c.html(
     <PublicLayout title="Board prep, taught live by doctors" user={user}>
-      <section class="hero">
+      <section class="hero hero-dark">
         <div class="wrap">
-          <Eyebrow>USMLE Step 1 · COMLEX · CBSE</Eyebrow>
-          <h1>Board prep, taught live by doctors.</h1>
-          <p>{settings.student_count ? `Join ${settings.student_count} students preparing with USMLE100. ` : ''}A live structured review course, daily question practice and one-on-one help, in one 100-day program.</p>
+          {settings.student_count && <p class="join">Join <strong>{settings.student_count}</strong> students preparing with USMLE100</p>}
+          <h1>Board prep, <em>taught live</em> by doctors.</h1>
+          <p class="exams">USMLE Step 1 · COMLEX · CBSE</p>
+          <p class="lead">Daily live classes. One-on-one tutoring. No endless video library. No guessing what to study next.</p>
           <div class="row">
             <a class="btn btn-gold" href="/programs">See programs</a>
-            <a class="btn btn-ghost" style="color:#fff;border-color:#5C8A75" href="/sign-up">Create account</a>
+            <a class="btn btn-ghost-light" href={user ? '/dashboard' : '/sign-up'}>{user ? 'Open portal' : 'Create account'}</a>
           </div>
+        </div>
+      </section>
+
+      <section class="aud-wrap" aria-label="Who it is for">
+        <div class="aud">
+          <a href="/programs"><Bust bg="#deece0" skin="#e9c39f" hair="#3a2a20" shirt="#2e936f" /><span class="lbl">Medical students <Icon name="arrow_forward" class="gic" /></span></a>
+          <a href="/programs"><Bust bg="#e3ecf2" skin="#c98c62" hair="#1f1a17" shirt="#8cb0b2" long /><span class="lbl">IMGs &amp; FMGs <Icon name="arrow_forward" class="gic" /></span></a>
+          <a href="/programs"><Bust bg="#f2e6ec" skin="#8a5a3b" hair="#2b1d16" shirt="#9b6bb0" /><span class="lbl">Repeat takers <Icon name="arrow_forward" class="gic" /></span></a>
+        </div>
+      </section>
+
+      <div class="trust">
+        <span><Icon name="verified" size={20} />Taught by doctors</span>
+        <span><Icon name="videocam" size={20} />Live daily</span>
+        <span><Icon name="monitoring" size={20} />Progress tracking</span>
+        <span><Icon name="premium" size={20} />One price</span>
+      </div>
+
+      <section class="pass">
+        <div class="wrap">
+          <h2>Pass your boards without teaching yourself.</h2>
+          <ul>
+            <li><Icon name="check" />90 days of live lectures on weekdays, then a 10-day exam window</li>
+            <li><Icon name="check" /><span><strong>Every class is recorded</strong>, so you can catch up or rewatch</span></li>
+            <li><Icon name="check" />A question bank that tracks your results by system and discipline</li>
+            <li><Icon name="check" />Evening question sessions and private one-on-one tutoring</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="ways">
+        <div class="wrap">
+          <h2>Three ways in</h2>
+          <div class="addons">
+            <a class="addon tile-green" href="/programs"><span class="ti"><Icon name="school" size={22} /></span><h3>100-day programs</h3><p>Live lectures, recordings and the question bank, with Evening Questions and tutoring in the larger packages.</p>{from && <span class="p">From {from} <small>one-time</small></span>}</a>
+            <a class="addon tile-sky" href="/programs#addons"><span class="ti"><Icon name="videocam" size={22} /></span><h3>Evening Questions</h3><p>Live question sessions on Monday, Wednesday and Friday evenings.</p><span class="p">$160 <small>per month</small></span></a>
+            <a class="addon tile-warm" href="/programs#addons"><span class="ti"><Icon name="person" size={22} /></span><h3>One-on-one tutoring</h3><p>A private hour on your own weak areas, over Zoom.</p><span class="p">$50 <small>per session</small></span></a>
+          </div>
+        </div>
+      </section>
+
+      <section class="wrap" style="padding-bottom:56px">
+        <div class="cta-band">
+          <h2>Ready to start?</h2>
+          <p>Pick a program, and your portal opens as soon as payment goes through.</p>
+          <a class="btn btn-primary" href="/programs">See programs</a>
         </div>
       </section>
     </PublicLayout>,
   );
 });
 
+/** Short line above each package name. */
+const KICKER: Record<string, string> = {
+  refresher: 'Comprehensive foundational review',
+  companion: 'Comprehensive learning and structured question practice',
+  complete: 'Learning plus private tutoring',
+  max: 'Our most complete program',
+};
+/** How many lines of the package list show before "Show full feature list". */
+const SHOW = 4;
+
+type Row = { label: string; cells: (string | boolean)[] };
+const COMPARE: Row[] = [
+  { label: '90 days of live lectures + 10-day exam window', cells: [true, true, true, true] },
+  { label: 'Lecture recordings for review', cells: [true, true, true, true] },
+  { label: 'USMLE-style question interpretation and clinical reasoning', cells: [true, true, true, true] },
+  { label: 'Group practice test in the exam window', cells: [true, true, true, true] },
+  { label: 'Live Evening Q’s', cells: [false, '4 months', '4 months', '4 months'] },
+  { label: 'USMLE100 Comprehensive Course Book', cells: [false, true, true, true] },
+  { label: 'Private one-on-one sessions (60 min)', cells: [false, false, '10', '40'] },
+  { label: 'Personalised study planning and test-day strategy', cells: [false, false, false, true] },
+];
+
+const FAQ = (p: { start: string | null }) => {
+  const qa: [string, string][] = [
+    ['Are these one-time payments?', 'Yes. Each package is a one-time enrollment price, not a subscription. Evening Questions bought on its own is paid month by month.'],
+    ['How long is the program?', `100 days: 90 weekday lecture days, then a 10-weekday exam window.${p.start ? ` The next cohort starts on ${p.start}.` : ''}`],
+    ['How long can I watch the lecture recordings?', 'Until 60 days after the last day of your program (Day 100).'],
+    ['How do Evening Questions work?', 'Live question sessions on Monday, Wednesday and Friday evenings. Each month covers the next 12 classes from your start date, and you can rewatch them until 2 days after the 12th class goes up. Companion, Complete and MAX include 4 months.'],
+    ['How many tutoring sessions are included?', 'Complete includes 10 private one-on-one sessions and MAX includes 40, each 60 minutes. Extra sessions are $50 each.'],
+    ['Can I buy tutoring, Evening Questions or the Course Book separately?', 'Yes: one-on-one tutoring is $50 per session, Evening Questions is $160 per month and the Course Book is $199. Use the buttons above to ask us.'],
+  ];
+  return (
+    <div class="faq">
+      {qa.map(([q, a]) => (
+        <details>
+          <summary>{q}<span class="pl"><Icon name="close" size={16} /></span></summary>
+          <p>{a}</p>
+        </details>
+      ))}
+    </div>
+  );
+};
+
 publicRoutes.get('/programs', async (c) => {
+  const user = c.get('user');
   const pkgs = (await c.env.DB.prepare('SELECT * FROM packages ORDER BY sort').all<Pkg>()).results;
   const settings = await getSettings(c.env.DB);
-  return c.html(
-    <PublicLayout title="Programs" user={c.get('user')}>
-      <section class="hero">
-        <div class="wrap">
-          <Eyebrow>Programs</Eyebrow>
-          <h1>Find Your Path to USMLE Success</h1>
-          <p>Comprehensive medical education, structured exam preparation and personalised academic support, built to help you strengthen clinical reasoning and prepare for your licensing examinations.</p>
-        </div>
-      </section>
-      <main class="wrap page stack">
-        <p>
-          Every package is a <strong>one-time enrolment price</strong>, not a subscription. Click to know more details about each package.
-        </p>
-        {pkgs.map((p) => (
-          <details class="pkg" data-recommended={p.recommended ? '' : undefined} open={!!p.recommended}>
-            <summary>
-              <span class="grow">
-                <span class="row">
-                  <span class="name">{p.name}</span>
-                  {p.recommended ? <span class="chip chip-sand">Recommended</span> : null}
-                </span>
-                <span class="muted small">{p.tagline}</span>
-              </span>
-              <span class="price">
-                {money(p.price_cents)} <span class="muted small">one-time</span>
-              </span>
-              <span class="plus" aria-hidden="true"></span>
-            </summary>
-            <div class="body">
-              <ul>
-                {(INCLUDES[p.id] ?? []).map((i) => (
-                  <li>{i}</li>
-                ))}
+  const cohort = await currentCohort(c.env.DB);
+  const start = cohort && ymdToUtc(cohort.start_date) >= todayUtc() ? fmtDate(dayDate(cohort, 1), { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : null;
+  const short = (n: string) => n.replace('USMLE100 MedSchool ', '');
+  const enrolled = !!c.get('enrollment');
+  const body = (
+    <>
+      <div class="page-head">
+        <div class="eyebrow">Programs &amp; tuition</div>
+        <h1>Preparation Packages</h1>
+        <p>Structured live instruction, question review and one-on-one tutoring. Every package is a one-time enrollment fee.</p>
+      </div>
+      <div class="pkgs">
+        {pkgs.map((p) => {
+          const list = INCLUDES[p.id] ?? [];
+          return (
+            <section class={'card pkg' + (p.recommended ? ' rec' : '')}>
+              {p.recommended ? <span class="badge">Recommended</span> : p.id === 'max' ? <span class="badge badge-soft">Most comprehensive</span> : null}
+              {KICKER[p.id] && <div class="kick">{KICKER[p.id]}</div>}
+              <h2>{p.name}</h2>
+              <p class="desc">{p.tagline}</p>
+              <div class="price"><b>{money(p.price_cents)}</b><span>one-time enrollment</span></div>
+              {(p.one_on_one_sessions > 0 || p.evening_q_months > 0) && (
+                <div class="counts">
+                  {p.evening_q_months > 0 && <span><Icon name="videocam" size={18} />{p.evening_q_months} months of Evening Q’s</span>}
+                  {p.one_on_one_sessions > 0 && <span><Icon name="person" size={18} />{p.one_on_one_sessions} one-on-one sessions</span>}
+                </div>
+              )}
+              <div class="checks-label">{list[0]?.startsWith('Everything') ? list[0].replace(/,? plus:$/, ', plus') : 'Core curriculum includes'}</div>
+              <ul class="checks">
+                {list.filter((i) => !i.startsWith('Everything')).slice(0, SHOW).map((i) => <li><Icon name="check_circle" size={20} />{i}</li>)}
               </ul>
-              <form method="post" action={`/enroll/${p.id}`}>
-                <button class="btn btn-primary" type="submit">
-                  Enroll in {p.name.replace('USMLE100 MedSchool ', '')}
-                </button>
-              </form>
-            </div>
-          </details>
+              {list.filter((i) => !i.startsWith('Everything')).length > SHOW && (
+                <details class="more">
+                  <summary>Show full feature list <Icon name="down" size={18} /></summary>
+                  <ul class="checks">
+                    {list.filter((i) => !i.startsWith('Everything')).slice(SHOW).map((i) => <li><Icon name="check_circle" size={20} />{i}</li>)}
+                  </ul>
+                </details>
+              )}
+              {!enrolled && (
+                <form method="post" action={`/enroll/${p.id}`}>
+                  <button class={'btn btn-block ' + (p.recommended ? 'btn-primary' : 'btn-outline')} type="submit">Enroll in {short(p.name)}</button>
+                </form>
+              )}
+            </section>
+          );
+        })}
+      </div>
+
+      <h2 class="section-title">Side-by-Side Comparison</h2>
+      <div class="compare" role="region" aria-label="Package comparison" tabindex={0}>
+        <table>
+          <thead>
+            <tr><th scope="col">Included feature</th>{pkgs.map((p) => <th scope="col">{short(p.name)}</th>)}</tr>
+          </thead>
+          <tbody>
+            {COMPARE.map((r) => (
+              <tr>
+                <td>{r.label}</td>
+                {pkgs.map((_, i) => {
+                  const v = r.cells[i];
+                  return <td>{v === true ? <Icon name="check_circle" size={22} label="Included" /> : v === false || v == null ? <span class="dash" aria-label="Not included">–</span> : v}</td>;
+                })}
+              </tr>
+            ))}
+            <tr><td><strong>Tuition (one-time)</strong></td>{pkgs.map((p) => <td><strong>{money(p.price_cents)}</strong></td>)}</tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="section-title" id="addons">Standalone Courses &amp; Add-Ons</h2>
+      <div class="addons">
+        {INDIVIDUAL.map((i, k) => (
+          <div class={'addon ' + ['tile-olive', 'tile-warm', 'tile-sky'][k % 3]}>
+            <h3>{i.name}</h3>
+            <span class="p">{i.price} <small>{i.unit}</small></span>
+            <p>{i.desc}</p>
+            {settings.contact_email && (
+              <a class="btn btn-primary" href={`mailto:${settings.contact_email}?subject=${encodeURIComponent('USMLE100: ' + i.name)}`}>Inquire about {i.name}</a>
+            )}
+          </div>
         ))}
-        <h2 style="margin-top:12px">Need something more specific?</h2>
-        <div class="grid">
-          {INDIVIDUAL.map((i) => (
-            <div class="card">
-              <h3>{i.name}</h3>
-              <p>
-                <strong style="font-size:26px">{i.price}</strong> <span class="muted small">{i.unit}</span>
-              </p>
-              <p class="muted small">{i.desc}</p>
-              <a class="btn btn-outline" href={`mailto:${settings.contact_email}?subject=${encodeURIComponent('USMLE100: ' + i.name)}`}>
-                Ask about {i.name}
-              </a>
-            </div>
-          ))}
-        </div>
-      </main>
+      </div>
+
+      <h2 class="section-title">Frequently Asked Questions</h2>
+      <FAQ start={start} />
+    </>
+  );
+  if (user) {
+    return c.html(
+      <PortalLayout shell={c.get('shell')} title="Programs" active="programs" user={user} wide>
+        {body}
+      </PortalLayout>,
+    );
+  }
+  return c.html(
+    <PublicLayout title="Programs" user={null}>
+      <main class="wrap page stack" style="gap:20px;max-width:1000px">{body}</main>
     </PublicLayout>,
   );
 });
 
 // ---------- Accounts ----------
 
+const AuthBrand = () => (
+  <aside class="auth-brand">
+    <a href="/" class="lw" style="color:#fff;text-decoration:none" aria-label="USMLE100 home"><LogoMark size={44} light /><b>USMLE<span>100</span></b></a>
+    <div class="auth-tag">Get In. Get Out. Get Licensed.</div>
+    <h2>Everything you need for your boards, in one place.</h2>
+    <ul>
+      <li><Icon name="play_circle" /><span><strong>Live video lectures</strong><span>A class every weekday, recorded so you can rewatch.</span></span></li>
+      <li><Icon name="quiz" /><span><strong>Question bank</strong><span>Tutor, timed and untimed tests with explanations.</span></span></li>
+      <li><Icon name="videocam" /><span><strong>Evening Questions</strong><span>Live question sessions on Monday, Wednesday and Friday.</span></span></li>
+      <li><Icon name="event" /><span><strong>One-on-one tutoring</strong><span>Private sessions on your weakest areas.</span></span></li>
+      <li><Icon name="monitoring" /><span><strong>Progress that means something</strong><span>See what’s left, not just what exists.</span></span></li>
+    </ul>
+  </aside>
+);
+
+const PwField = (p: { label: string; name: string; autocomplete: string; minlength?: number }) => (
+  <label class="field">
+    {p.label}
+    <span class="pw-wrap">
+      <input type="password" name={p.name} required minlength={p.minlength} autocomplete={p.autocomplete} />
+      <button type="button" class="pw-eye" aria-label="Show password" data-eye><Icon name="visibility" size={22} /></button>
+    </span>
+  </label>
+);
+const EYE_JS = `document.querySelectorAll('[data-eye]').forEach(function(b){b.addEventListener('click',function(){var i=b.previousElementSibling,show=i.type==='password';i.type=show?'text':'password';b.setAttribute('aria-label',show?'Hide password':'Show password');b.classList.toggle('on',show);});});`;
+
 const AuthPage = (p: { mode: 'in' | 'up'; error?: string; email?: string; name?: string; next?: string; user: any; contact?: string }) => (
-  <PublicLayout title={p.mode === 'in' ? 'Sign in' : 'Create account'} user={p.user}>
-    <main class="wrap">
-      <div class="card auth-card">
+  <PublicLayout title={p.mode === 'in' ? 'Sign in' : 'Create account'} user={p.user} plain>
+    <div class="auth">
+      <AuthBrand />
+      <main class="auth-form">
         <h1>{p.mode === 'in' ? 'Welcome back' : 'Create your account'}</h1>
-        <p class="muted">{p.mode === 'in' ? 'Sign in to pick up where you left off.' : 'Create an account, then choose your program to unlock the portal.'}</p>
+        <p class="sub">{p.mode === 'in' ? 'Sign in to pick up where you left off.' : 'Create an account, then choose your program to unlock the portal.'}</p>
         {p.error && <Flash kind="error">{p.error}</Flash>}
         <form method="post" class="stack" style="gap:14px">
           {p.next && <input type="hidden" name="next" value={p.next} />}
@@ -158,34 +332,27 @@ const AuthPage = (p: { mode: 'in' | 'up'; error?: string; email?: string; name?:
             Email
             <input type="email" name="email" required autocomplete="email" value={p.email ?? ''} />
           </label>
-          <label class="field">
-            Password
-            <input type="password" name="password" required minlength={p.mode === 'up' ? 10 : undefined} autocomplete={p.mode === 'up' ? 'new-password' : 'current-password'} />
-          </label>
+          <PwField label="Password" name="password" autocomplete={p.mode === 'up' ? 'new-password' : 'current-password'} minlength={p.mode === 'up' ? 10 : undefined} />
           {p.mode === 'up' && <span class="muted small">At least 10 characters.</span>}
+          {p.mode === 'in' && p.contact && (
+            <div class="auth-links" style="justify-content:flex-end">
+              <a href={`mailto:${p.contact}?subject=${encodeURIComponent('USMLE100: password reset')}`}>Forgot your password?</a>
+            </div>
+          )}
           <button class="btn btn-primary btn-block" type="submit">
             {p.mode === 'in' ? 'Sign in' : 'Create account'}
           </button>
         </form>
-        <p class="small">
-          {p.mode === 'in' ? (
-            <>
-              New here? <a href="/sign-up">Create an account</a>
-              {p.contact && (
-                <>
-                  <br />
-                  Forgot your password? Email <a href={`mailto:${p.contact}?subject=${encodeURIComponent('USMLE100: password reset')}`}>{p.contact}</a> from the address you signed up with, and we’ll send you a reset link.
-                </>
-              )}
-            </>
-          ) : (
-            <>
-              Already have an account? <a href="/sign-in">Sign in</a>
-            </>
-          )}
+        {p.mode === 'in' && p.contact && (
+          <p class="small muted">To reset your password, email us from the address you signed up with and we’ll send you a link.</p>
+        )}
+        <p class="small" style="text-align:center">
+          {p.mode === 'in' ? <>New here? <a href="/sign-up">Create an account</a></> : <>Already have an account? <a href="/sign-in">Sign in</a></>}
         </p>
-      </div>
-    </main>
+        <p class="small" style="text-align:center"><a href="/programs">See programs</a> · <a href="/">Home</a></p>
+      </main>
+    </div>
+    <script dangerouslySetInnerHTML={{ __html: EYE_JS }} />
   </PublicLayout>
 );
 
@@ -243,9 +410,10 @@ publicRoutes.post('/sign-in', async (c) => {
 // ---------- Password reset (one-time links made by an admin) ----------
 
 const ResetPage = (p: { token?: string; name?: string; error?: string; invalid?: boolean }) => (
-  <PublicLayout title="Reset password" user={null}>
-    <main class="wrap">
-      <div class="card auth-card">
+  <PublicLayout title="Reset password" user={null} plain>
+    <div class="auth">
+      <AuthBrand />
+      <main class="auth-form">
         <h1>Choose a new password</h1>
         {p.invalid ? (
           <>
@@ -254,19 +422,20 @@ const ResetPage = (p: { token?: string; name?: string; error?: string; invalid?:
           </>
         ) : (
           <>
-            <p class="muted">For {p.name}. This link works once and expires 1 hour after it was made.</p>
+            <p class="sub">For {p.name}. This link works once and expires 1 hour after it was made.</p>
             {p.error && <Flash kind="error">{p.error}</Flash>}
             <form method="post" action="/reset-password" class="stack" style="gap:14px">
               <input type="hidden" name="token" value={p.token} />
-              <label class="field">New password<input type="password" name="password" required minlength={10} autocomplete="new-password" /></label>
-              <label class="field">Type it again<input type="password" name="again" required minlength={10} autocomplete="new-password" /></label>
+              <PwField label="New password" name="password" autocomplete="new-password" minlength={10} />
+              <PwField label="Type it again" name="again" autocomplete="new-password" minlength={10} />
               <span class="muted small">At least 10 characters.</span>
               <button class="btn btn-primary btn-block" type="submit">Save new password</button>
             </form>
           </>
         )}
-      </div>
-    </main>
+      </main>
+    </div>
+    <script dangerouslySetInnerHTML={{ __html: EYE_JS }} />
   </PublicLayout>
 );
 
@@ -312,20 +481,21 @@ publicRoutes.get('/enroll', requireUser, async (c) => {
   const pkgs = (await c.env.DB.prepare('SELECT * FROM packages ORDER BY sort').all<Pkg>()).results;
   return c.html(
     <PublicLayout title="Choose your program" user={c.get('user')}>
-      <main class="wrap page stack">
-        <h1>Choose your program</h1>
-        <p class="muted">Your portal unlocks as soon as payment goes through. Every package is a one-time payment.</p>
+      <main class="wrap page stack" style="gap:18px;max-width:1000px">
+        <div class="page-head">
+          <div class="eyebrow">Enrollment</div>
+          <h1>Choose your program</h1>
+          <p>Your portal unlocks as soon as payment goes through. Every package is a one-time payment.</p>
+        </div>
         {c.req.query('cancelled') && <Flash kind="error">Payment was cancelled. You have not been charged.</Flash>}
-        <div class="grid">
+        <div class="pkgs">
           {pkgs.map((p) => (
-            <form method="post" action={`/enroll/${p.id}`} class="card" style={p.recommended ? 'border:2px solid var(--gold)' : ''}>
-              {p.recommended ? <span class="chip chip-sand" style="align-self:flex-start">Recommended</span> : null}
+            <form method="post" action={`/enroll/${p.id}`} class={'card pkg' + (p.recommended ? ' rec' : '')}>
+              {p.recommended ? <span class="badge">Recommended</span> : null}
               <h2>{p.name}</h2>
-              <p class="muted small">{p.tagline}</p>
-              <p>
-                <strong style="font-size:26px">{money(p.price_cents)}</strong> <span class="muted small">one-time</span>
-              </p>
-              <button class="btn btn-primary" type="submit">
+              <p class="desc">{p.tagline}</p>
+              <div class="price"><b>{money(p.price_cents)}</b><span>one-time</span></div>
+              <button class={'btn btn-block ' + (p.recommended ? 'btn-primary' : 'btn-outline')} type="submit">
                 Continue to payment
               </button>
             </form>

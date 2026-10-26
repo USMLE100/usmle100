@@ -11,6 +11,7 @@ import { ensureMigrated } from './lib/migrate';
 import { publicRoutes } from './routes/public';
 import { portal } from './routes/portal';
 import { admin } from './routes/admin';
+import { PublicLayout } from './views/layout';
 
 const app = new Hono<AppEnv>();
 
@@ -47,7 +48,19 @@ app.route('/zoom', zoom);
 app.route('/admin', admin);
 app.route('/', portal);
 
-app.notFound((c) => c.text('Page not found', 404));
+app.notFound((c) =>
+  c.html(
+    <PublicLayout title="Page not found" user={c.get('user') ?? null}>
+      <main class="wrap page" style="text-align:center;padding-top:72px;padding-bottom:96px">
+        <div class="eyebrow">404</div>
+        <h1 style="margin:10px 0 12px">We can’t find that page</h1>
+        <p class="muted" style="margin-bottom:22px">The link may be old or mistyped.</p>
+        <a class="btn btn-primary" href={c.get('user') ? '/dashboard' : '/'}>{c.get('user') ? 'Back to the portal' : 'Go to the home page'}</a>
+      </main>
+    </PublicLayout>,
+    404,
+  ),
+);
 app.onError((err, c) => {
   console.error(err);
   return c.text('Something went wrong. Please try again.', 500);

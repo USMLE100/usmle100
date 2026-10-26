@@ -47,9 +47,10 @@ function Doc(props: { title: string; children: Child; bodyClass?: string }) {
   );
 }
 
-export function PublicLayout(props: { title: string; user: User | null; children: Child; bare?: boolean }) {
+export function PublicLayout(props: { title: string; user: User | null; children: Child; bare?: boolean; plain?: boolean }) {
   return (
     <Doc title={props.title}>
+      {!props.plain && (
       <header class="pub-top">
         <div class="wrap">
           <Wordmark />
@@ -70,9 +71,11 @@ export function PublicLayout(props: { title: string; user: User | null; children
           </nav>
         </div>
       </header>
+      )}
       {props.children}
-      {!props.bare && (
+      {!props.bare && !props.plain && (
         <footer class="footer">
+          <a href="/" class="logo" aria-label="USMLE100 home" style="justify-content:center;margin-bottom:14px"><LogoMark /><span class="logo-word">USMLE<span>100</span></span></a>
           <nav aria-label="Footer">
             <a href="/programs">Programs</a>
             <a href="/sign-in">Sign in</a>
@@ -165,7 +168,7 @@ export function PortalLayout(props: { title: string; active: string; user: User;
             </label>
           </div>
           <div class="drawer-body">
-            {s && s.lecturesTotal > 0 && (
+            {s && s.lecturesTotal > 0 && !isStaff(props.user) && (
               <div class="progress-card">
                 <span class="num">
                   <b>{s.lecturesDone}</b> of {s.lecturesTotal} lectures

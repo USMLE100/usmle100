@@ -420,9 +420,6 @@ portal.get('/lectures', async (c) => {
   }
   return c.html(
     <PortalLayout shell={c.get('shell')} title="Lectures" active="lectures" user={user} wide>
-      <div class="tabs" role="tablist" aria-label="Lecture views">
-        <a class="on" role="tab" aria-selected="true" href="/lectures">Browse</a>
-      </div>
       <section class="card" style="gap:12px">
         <nav class="crumbs" aria-label="Breadcrumb"><a href="/dashboard">Home</a><Icon name="chevron_right" size={16} />Lectures</nav>
         <h1>All lectures</h1>
@@ -848,13 +845,16 @@ portal.get('/tests/:id/:pos{[0-9]+}', async (c) => {
   return c.html(
     <PortalLayout shell={c.get('shell')} title={`Question ${pos} of ${total}`} active="test" user={user}>
       <h1 class="sr">Question {pos} of {total}</h1>
-      <section class="card qcard">
+      <section class="card qhead">
         <div class="qbar">
           <a class="x" href={test.finished_at ? `/tests/${id}/results` : '/qbank'} aria-label={test.finished_at ? 'Back to results' : 'Leave the test (your answers are saved)'}><Icon name="close" /></a>
           <strong>{test.finished_at ? 'Review' : `${modeName(test.mode)} test`}</strong>
           <span class="pos">{pos} / {total}</span>
           {deadline && <span class="clock" id="timer" data-deadline={String(deadline)} data-finish={`/tests/${id}/finish`}>–:––</span>}
         </div>
+        <div class="bar thin"><i style={`width:${Math.round((items.filter((i) => i.chosen_index != null).length / total) * 100)}%`}></i></div>
+      </section>
+      <section class="card qcard">
         <nav class="qnav" aria-label="Questions">
           {items.map((i) => (
             <a
@@ -1032,6 +1032,7 @@ portal.get('/performance', async (c) => {
   );
   return c.html(
     <PortalLayout shell={c.get('shell')} title="Performance" active="performance" user={user} wide>
+      <section class="card page-card">
       <PageHead eyebrow="Progress" title="Performance" sub="Your actual completed question performance mapped by System and Discipline." />
       <nav class="pills" aria-label="Time range">
         {RANGES.map((r) => (
@@ -1049,6 +1050,7 @@ portal.get('/performance', async (c) => {
         <List title={`Performance by Discipline (${byDiscipline.length})`} rows={byDiscipline} />
       </div>
       <p class="muted small">Scores under 60% show in amber.</p>
+      </section>
     </PortalLayout>,
   );
 });
@@ -1075,12 +1077,16 @@ portal.get('/review', async (c) => {
   );
   return c.html(
     <PortalLayout shell={c.get('shell')} title="Review" active="review" user={user}>
-      <PageHead title="Review & Daily Catch-Up" sub="Keep your study run solid by reviewing missed lectures and questions." />
+      <section class="card page-card">
+      <div class="page-head with-ic">
+        <span class="phi"><Icon name="replay" size={28} /></span>
+        <div><h1>Review &amp; Daily Catch-Up</h1><p>Keep your study run solid by reviewing missed lectures and questions.</p></div>
+      </div>
       <section class="card catch">
         <div class="catch-head"><Icon name="play_circle" size={20} />Lectures &amp; daily classes</div>
         {todays && todays.status === 'live' && !todays.completed_at ? (
           <div class="catch-item alert">
-            <span class="txt"><strong>Today’s lecture is waiting</strong><span>{todays.title}</span></span>
+            <span class="txt"><strong>Today’s lecture is pending</strong><span>{todays.title}</span><span>Keep your {c.get('shell')?.streak ?? 0}-day streak alive before midnight.</span></span>
             <a class="btn btn-primary btn-sm" href={`/lectures/${todays.id}`}>Watch today</a>
           </div>
         ) : (
@@ -1122,6 +1128,7 @@ portal.get('/review', async (c) => {
         <a class="link-btn" href="/dashboard">Back to Dashboard</a>
         <a class="btn btn-primary" href="/lectures">Browse all lectures</a>
       </div>
+      </section>
     </PortalLayout>,
   );
 });
@@ -1205,14 +1212,14 @@ portal.get('/book', async (c) => {
       <section class="card card-sage">
         <h2>1-on-1 Tutoring</h2>
         <div class="stack" style="gap:8px">
-          <span class="row" style="gap:10px"><Icon name="person" size={20} class="muted" />Dr. Khan</span>
-          <span class="row" style="gap:10px"><Icon name="schedule" size={20} class="muted" />60 minutes</span>
-          <span class="row" style="gap:10px"><Icon name="videocam" size={20} class="muted" />Live over Zoom</span>
+          <span class="row" style="gap:10px"><Icon name="person" size={20} class="gic" />Dr. Khan</span>
+          <span class="row" style="gap:10px"><Icon name="schedule" size={20} class="gic" />60 minutes</span>
+          <span class="row" style="gap:10px"><Icon name="videocam" size={20} class="gic" />Live over Zoom</span>
         </div>
         <p class="small">Bring a topic, a failed block, or a stem you cannot crack. One hour, one student, no script.</p>
         {enr && enr.one_on_one_sessions > 0 && <p class="small"><strong>Your program includes {enr.one_on_one_sessions} sessions.</strong></p>}
         {booking ? (
-          <a class="btn btn-primary" href={booking} rel="noopener" style="align-self:flex-start"><Icon name="calendar" size={18} />Open booking calendar</a>
+          <a class="btn btn-primary btn-2line" href={booking} rel="noopener" style="align-self:flex-start"><Icon name="event" size={24} /><span><strong>Open Booking Calendar</strong><small>60 min with Dr. Khan</small></span></a>
         ) : (
           <p>Online booking opens soon. Until then, email <a href={`mailto:${settings.contact_email}?subject=${encodeURIComponent('USMLE100: 1-on-1 session')}`}>{settings.contact_email}</a> to book.</p>
         )}
