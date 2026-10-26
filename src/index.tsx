@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { secureHeaders } from 'hono/secure-headers';
 import type { AppEnv, Env } from './lib/types';
 import { syncImports } from './lib/zoom';
+import { syncDurations } from './lib/catalog';
 import { pruneLoginAttempts } from './lib/ratelimit';
 import { pruneResetTokens } from './lib/reset';
 import { zoom } from './routes/zoom';
@@ -79,7 +80,7 @@ export default {
   /** Every few minutes: link Zoom recordings that Bunny has copied and put finished ones live. */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(
-      ensureMigrated(env.DB).then(() => Promise.all([syncImports(env), pruneLoginAttempts(env.DB), pruneResetTokens(env.DB)])),
+      ensureMigrated(env.DB).then(() => Promise.all([syncImports(env).then(() => syncDurations(env)), pruneLoginAttempts(env.DB), pruneResetTokens(env.DB)])),
     );
   },
 };
