@@ -347,7 +347,7 @@ learn.get('/lectures/path', async (c) => {
                     return (
                       <div class={'path-row' + (complete ? ' done' : '')}>
                         {g.section ? <a href={`/topics/${g.section.id}`} class="pr-t">{g.title}</a> : <span class="pr-t">{g.title}</span>}
-                        <span class="pr-m">{g.lectures.length}{hasLength(g.lectures) ? ` · ${Math.round(seconds(g.lectures) / 60)} minutes` : ''}</span>
+                        <span class="pr-m">{g.lectures.length}{hasLength(g.lectures) ? ` · ${seconds(g.lectures) >= 5400 ? runtime(seconds(g.lectures)) : `${Math.round(seconds(g.lectures) / 60)} minutes`}` : ''}</span>
                         {complete ? (
                           <span class="okic" aria-label="Completed"><Icon name="check_circle" size={26} /></span>
                         ) : g.section ? (
