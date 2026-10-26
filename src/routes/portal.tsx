@@ -1,12 +1,14 @@
 import { Hono, type Context } from 'hono';
-import type { AppEnv } from '../lib/types';
+import type { AppEnv, User } from '../lib/types';
 import { isStaff } from '../lib/types';
 import { requireEnrolled } from '../lib/auth';
-import { PortalLayout, Eyebrow, Flash } from '../views/layout';
+import { PortalLayout, PageHead, Eyebrow, Flash, initials } from '../views/layout';
+import { Icon, type IconName } from '../views/icons';
 import { bunnyEmbedUrl, cohortDay, currentCohort, defaultLecturesUntil, dayDate, dayOfDate, fmtDate, dayOffLabel, isClassDate, isOffToday, LETTERS, todayUtc, ymdToUtc, type Cohort } from '../lib/content';
 import { filterQuestions, questionStatuses, scoresBy, shuffle, type Pools } from '../lib/qbank';
 import { getSettings, isHttpUrl } from '../lib/settings';
 import { CLASSES_PER_MONTH, eveningAccess, GRACE_DAYS, nextStart, type EveningSession } from '../lib/evening';
+import { activityByDay, ago, GOAL_QUESTIONS, latestActivity, questionsToday, STREAK_MIN_QUESTIONS, streakFrom } from '../lib/activity';
 
 export const portal = new Hono<AppEnv>();
 portal.use('*', async (c, next) => {
@@ -19,12 +21,12 @@ portal.use('*', async (c, next) => {
   return requireEnrolled(c, next);
 });
 
-type Lecture = { id: number; day_number: number; title: string; zoom_url: string | null; bunny_video_id: string | null; status: string; completed_at: string | null };
+type Lecture = { id: number; day_number: number; title: string; zoom_url: string | null; bunny_video_id: string | null; status: string; completed_at: string | null; subject_id?: number | null };
 
 async function lecturesFor(db: D1Database, cohortId: number, userId: number) {
   const { results } = await db
     .prepare(
-      `SELECT l.id, l.day_number, l.title, l.zoom_url, l.bunny_video_id, l.status, p.completed_at
+      `SELECT l.id, l.day_number, l.title, l.zoom_url, l.bunny_video_id, l.status, l.subject_id, p.completed_at
        FROM lectures l LEFT JOIN lecture_progress p ON p.lecture_id = l.id AND p.user_id = ?
        WHERE l.cohort_id = ? ORDER BY l.day_number`,
     )
@@ -33,23 +35,31 @@ async function lecturesFor(db: D1Database, cohortId: number, userId: number) {
   return results;
 }
 
+const longDate = (t: number | Date) => fmtDate(new Date(t), { month: 'long', day: 'numeric' });
+const shortMonth = (t: number) => fmtDate(new Date(t), { month: 'short', day: 'numeric' });
+const firstName = (u: User) => u.name.split(' ')[0];
+
 // ---------- Dashboard ----------
 
-function Calendar(props: { cohort: Cohort; today: number; lectures: Lecture[] }) {
-  const { cohort, today } = props;
+/** V12 month cards, Monday first. */
+function Calendar(props: { cohort: Cohort; lectures: Lecture[] }) {
+  const { cohort } = props;
   const byDay = new Map(props.lectures.map((l) => [l.day_number, l]));
   const first = dayDate(cohort, 1);
   const last = dayDate(cohort, cohort.total_days);
+  const todayT = todayUtc();
+  // Start at this month when the course hasn't begun yet, so today is always on the calendar.
+  const from = new Date(Math.min(first.getTime(), todayT));
   const months: { y: number; m: number }[] = [];
-  for (let y = first.getUTCFullYear(), m = first.getUTCMonth(); y < last.getUTCFullYear() || (y === last.getUTCFullYear() && m <= last.getUTCMonth()); m === 11 ? (y++, (m = 0)) : m++) months.push({ y, m });
+  for (let y = from.getUTCFullYear(), m = from.getUTCMonth(); y < last.getUTCFullYear() || (y === last.getUTCFullYear() && m <= last.getUTCMonth()); m === 11 ? (y++, (m = 0)) : m++) months.push({ y, m });
   return (
     <div class="months">
       {months.map(({ y, m }) => {
-        const lead = new Date(Date.UTC(y, m, 1)).getUTCDay();
+        const lead = (new Date(Date.UTC(y, m, 1)).getUTCDay() + 6) % 7;
         const days = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+        const isCurrent = new Date(todayT).getUTCFullYear() === y && new Date(todayT).getUTCMonth() === m;
         const cells = [];
-        for (let i = 0; i < lead; i++) cells.push(<span></span>);
-        const todayT = todayUtc();
+        for (let i = 0; i < lead; i++) cells.push(<span class="day blank" aria-hidden="true"></span>);
         for (let d = 1; d <= days; d++) {
           const t = Date.UTC(y, m, d);
           const off = !isClassDate(cohort, t);
@@ -57,152 +67,283 @@ function Calendar(props: { cohort: Cohort; today: number; lectures: Lecture[] })
           const n = dayOfDate(cohort, t);
           const lec = off ? undefined : byDay.get(n);
           let cls = 'day day-up';
-          let label = `${fmtDate(new Date(t))}`;
+          let label = fmtDate(new Date(t));
           if (holiday) (cls = 'day day-holiday'), (label += `, ${holiday}, no class`);
-          else if (off) (cls = 'day day-out'), (label += t === todayT ? ', today, weekend' : ', weekend');
+          else if (t === todayT) (cls = 'day day-today'), (label += off ? ', today' : `, today, day ${n}`);
+          else if (off) (cls = 'day day-out'), (label += ', weekend');
           else if (t < first.getTime() || t > last.getTime()) cls = 'day day-out';
-          else if (t === todayT) (cls = 'day day-today'), (label += `, today, day ${n}`);
-          else if (lec?.completed_at) (cls = 'day day-done'), (label += ', done');
+          else if (lec?.completed_at) (cls = 'day day-done'), (label += ', completed');
           else if (t < todayT && lec?.status === 'live') (cls = 'day day-missed'), (label += ', missed');
           else if (n > cohort.lecture_days) (cls = 'day day-exam'), (label += ', exam window');
           cells.push(
             lec && lec.status === 'live' ? (
-              <a href={`/lectures/${lec.id}`} class={cls} aria-label={label}>
-                {d}
-              </a>
+              <a href={`/lectures/${lec.id}`} class={cls} aria-label={label}>{d}</a>
             ) : (
-              <span class={cls} aria-label={label}>
-                {d}
-              </span>
+              <span class={cls} aria-label={label}>{d}</span>
             ),
           );
         }
         return (
-          <div class="stack" style="gap:10px">
-            <strong style="color:var(--forest)">{new Date(Date.UTC(y, m, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })}</strong>
+          <section class={'month' + (isCurrent ? ' current' : '')}>
+            <div class="month-head">
+              <h3>{new Date(Date.UTC(y, m, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })}</h3>
+              <span class="chip">{isCurrent ? `Today · ${shortMonth(todayT)}` : `${fmtDate(new Date(Date.UTC(y, m, 1)), { month: 'short' })} 1–${days}`}</span>
+            </div>
             <div class="month-grid">
-              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((h) => (
-                <span class="dow" aria-hidden="true">
-                  {h}
-                </span>
+              {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((h) => (
+                <span class="dow" aria-hidden="true">{h}</span>
               ))}
               {cells}
             </div>
-          </div>
+          </section>
         );
       })}
     </div>
   );
 }
 
+const Tile = (p: { href: string; tone: string; icon: IconName; title: string; sub: string }) => (
+  <a class={`tile tile-${p.tone}`} href={p.href}>
+    <span class="ti"><Icon name={p.icon} size={20} /></span>
+    <strong>{p.title}</strong>
+    <span class="sub">{p.sub}</span>
+  </a>
+);
+
+const Ring = (p: { pct: number; color?: string; label: string }) => (
+  <div class="ring" style={`--p:${Math.max(0, Math.min(100, p.pct))};${p.color ? `--c:${p.color}` : ''}`} role="img" aria-label={p.label}>
+    <b>{p.pct}%</b>
+  </div>
+);
+
 portal.get('/dashboard', async (c) => {
   const user = c.get('user')!;
   const enr = c.get('enrollment');
-  const cohort = await currentCohort(c.env.DB, enr?.cohort_id);
+  const db = c.env.DB;
+  const cohort = await currentCohort(db, enr?.cohort_id);
   if (!cohort) {
     return c.html(
-      <PortalLayout title="Home" active="home" user={user}>
-        <h1>Welcome, {user.name.split(' ')[0]}.</h1>
+      <PortalLayout shell={c.get('shell')} title="Home" active="home" user={user}>
+        <div class="welcome"><span class="avatar">{initials(user.name)}</span><h1>Welcome back, {firstName(user)}</h1></div>
         <Flash kind="error">No cohort is scheduled yet. {isStaff(user) ? <a href="/admin/lectures">Create one in Admin → Lectures.</a> : 'Your start date will appear here soon.'}</Flash>
       </PortalLayout>,
     );
   }
   const today = cohortDay(cohort);
-  const lectures = await lecturesFor(c.env.DB, cohort.id, user.id);
-  const todays = lectures.find((l) => l.day_number === today);
-  const missed = lectures.filter((l) => l.day_number < today && l.status === 'live' && !l.completed_at);
-  const statuses = await questionStatuses(c.env.DB, user.id);
-  const wrong = statuses.filter((s) => s.status === 'incorrect').length;
-  const done = lectures.filter((l) => l.completed_at).length;
+  const todayT = todayUtc();
   const weekend = isOffToday(cohort);
-  const phase = today < 1
-    ? `Starts ${fmtDate(dayDate(cohort, 1), { weekday: 'long', month: 'long', day: 'numeric' })}`
-    : today > cohort.total_days
-      ? 'Program complete'
+  const [lectures, statuses, byDay, activity, openTest, subjectRows, evening] = await Promise.all([
+    lecturesFor(db, cohort.id, user.id),
+    questionStatuses(db, user.id),
+    activityByDay(db, user.id),
+    latestActivity(db, user.id, 5),
+    db
+      .prepare(
+        `SELECT t.id, t.mode, COUNT(ti.position) AS n, MIN(CASE WHEN ti.chosen_index IS NULL THEN ti.position END) AS next
+         FROM tests t JOIN test_items ti ON ti.test_id = t.id
+         WHERE t.user_id = ? AND t.finished_at IS NULL GROUP BY t.id HAVING next IS NOT NULL ORDER BY t.id DESC LIMIT 1`,
+      )
+      .bind(user.id)
+      .first<{ id: number; mode: string; n: number; next: number }>(),
+    db
+      .prepare(
+        `SELECT s.id, s.name,
+           (SELECT COUNT(*) FROM lectures l WHERE l.cohort_id = ?1 AND l.subject_id = s.id) AS lectures,
+           (SELECT COUNT(*) FROM lectures l JOIN lecture_progress p ON p.lecture_id = l.id AND p.user_id = ?2 AND p.completed_at IS NOT NULL
+              WHERE l.cohort_id = ?1 AND l.subject_id = s.id) AS watched,
+           (SELECT COUNT(*) FROM questions q WHERE q.subject_id = s.id AND q.status = 'approved') AS questions,
+           (SELECT COUNT(DISTINCT ti.question_id) FROM test_items ti JOIN tests t ON t.id = ti.test_id JOIN questions q ON q.id = ti.question_id
+              WHERE t.user_id = ?2 AND q.subject_id = s.id AND ti.chosen_index IS NOT NULL) AS answered
+         FROM subjects s ORDER BY s.sort`,
+      )
+      .bind(cohort.id, user.id)
+      .all<{ id: number; name: string; lectures: number; watched: number; questions: number; answered: number }>(),
+    eveningAccess(db, user),
+  ]);
+  const todays = lectures.find((l) => l.day_number === today);
+  const done = lectures.filter((l) => l.completed_at).length;
+  const missed = lectures.filter((l) => l.day_number < today && l.status === 'live' && !l.completed_at);
+  const answeredQs = statuses.filter((s) => s.status === 'correct' || s.status === 'incorrect');
+  const correctQs = statuses.filter((s) => s.status === 'correct').length;
+  const wrong = statuses.filter((s) => s.status === 'incorrect').length;
+  const qPct = answeredQs.length ? Math.round((correctQs / answeredQs.length) * 100) : 0;
+  const lPct = cohort.lecture_days ? Math.round((done / cohort.lecture_days) * 100) : 0;
+  const streak = streakFrom(byDay);
+  const qToday = questionsToday(byDay);
+  const classToday = !weekend && today >= 1 && today <= cohort.lecture_days;
+  const todayLectureDone = !!todays?.completed_at;
+
+  // Continue where you left off: an unfinished test first, then today's or the oldest missed lecture.
+  const nextLecture = todays && todays.status === 'live' && !todays.completed_at ? todays : missed[0];
+  const cont = openTest
+    ? { href: `/tests/${openTest.id}/${openTest.next}`, icon: 'quiz' as IconName, kicker: 'Continue your test', title: `${openTest.mode === 'timed' ? 'Timed' : openTest.mode === 'untimed' ? 'Untimed' : 'Tutor'} test · question ${openTest.next} of ${openTest.n}`, sub: 'Pick up where you stopped' }
+    : nextLecture
+      ? { href: `/lectures/${nextLecture.id}`, icon: 'play_circle' as IconName, kicker: nextLecture === todays ? "Today's lecture" : 'Catch up', title: nextLecture.title, sub: `Day ${nextLecture.day_number} · ${fmtDate(dayDate(cohort, nextLecture.day_number), { weekday: 'long', month: 'long', day: 'numeric' })}` }
+      : null;
+
+  const todayMsg = today < 1
+    ? `Classes start ${fmtDate(dayDate(cohort, 1), { weekday: 'long', month: 'long', day: 'numeric' })}`
+    : today > cohort.lecture_days
+      ? 'Lectures are done. Time to book your exam.'
       : weekend
-        ? `Weekend · Day ${today} of ${cohort.total_days} done`
-        : `Day ${today} of ${cohort.total_days}`;
+        ? `${dayOffLabel(cohort, todayT) ?? 'Weekend'} · no class today`
+        : todays?.completed_at
+          ? `Day ${today} lecture done`
+          : todays?.status === 'live'
+            ? `Day ${today}: ${todays.title}`
+            : done
+              ? `Day ${today} · the recording appears here after class`
+              : 'Complete your first lecture to start the calendar';
+  const subjects = subjectRows.results.filter((s) => s.lectures > 0 || s.questions > 0);
 
-  return c.html(
-    <PortalLayout title="Home" active="home" user={user}>
-      <div class="row between">
-        <div class="stack" style="gap:6px">
-          <Eyebrow>{phase}</Eyebrow>
-          <h1>Welcome back, {user.name.split(' ')[0]}.</h1>
+  return (
+    c.html(
+      <PortalLayout shell={c.get('shell')} title="Home" active="home" user={user} wide>
+        <div class="welcome">
+          <span class="avatar">{initials(user.name)}</span>
+          <h1>Welcome back, {firstName(user)}</h1>
         </div>
-        {enr && <span class="chip chip-sand">{enr.package_name}</span>}
-      </div>
-      <LectureNotice n={lectureNotice(c, cohort)} />
+        <LectureNotice n={lectureNotice(c, cohort)} />
 
-      <div class="grid">
-        <section class="card card-dark">
-          <Eyebrow>{today > cohort.lecture_days ? 'Exam window' : weekend ? dayOffLabel(cohort, todayUtc()) ?? 'Weekend' : today < 1 ? 'First class' : `Today's lecture · Day ${today}`}</Eyebrow>
-          {today < 1 ? (
-            <h2>Classes start {fmtDate(dayDate(cohort, 1), { weekday: 'long', month: 'long', day: 'numeric' })}.</h2>
-          ) : weekend && today <= cohort.lecture_days ? (
-            <>
-              <h2>No class today. A good time to catch up.</h2>
-              <a class="btn btn-gold" href="/create-test" style="align-self:flex-start">Practice questions</a>
-            </>
-          ) : today > cohort.lecture_days ? (
-            <>
-              <h2>Lectures are done. Time to book your exam.</h2>
-              <a class="btn btn-gold" href="/exam-window" style="align-self:flex-start">
-                Open the exam window
-              </a>
-            </>
-          ) : todays ? (
-            <>
-              <h2>{todays.title}</h2>
-              <div class="row">
-                {todays.status === 'live' && (
-                  <a class="btn btn-gold" href={`/lectures/${todays.id}`}>
-                    Watch the recording
-                  </a>
-                )}
-                {todays.zoom_url && todays.status !== 'live' && <p>The recording appears here after class.</p>}
+        {cont && (
+          <a class="card continue" href={cont.href} style="text-decoration:none">
+            <span class="ci"><Icon name={cont.icon} size={26} /></span>
+            <span class="txt">
+              <small>{cont.kicker}</small>
+              <strong>{cont.title}</strong>
+              <span>{cont.sub}</span>
+            </span>
+            <Icon name="chevron_right" />
+          </a>
+        )}
+
+        <div class="tiles">
+          <Tile href="/qbank" tone="warm" icon="bolt" title="Question Bank" sub="Quick blocks & tests" />
+          <Tile href="/lectures" tone="green" icon="play_circle" title="Lectures" sub="Video curriculum" />
+          <Tile href="/evening" tone="sky" icon="videocam" title="Evening Questions" sub={evening ? 'Mon · Wed · Fri classes' : 'Live question classes'} />
+          <Tile href="/review" tone="lilac" icon="replay" title="Review" sub="Missed lectures & Qs" />
+          <Tile href="/performance" tone="rose" icon="monitoring" title="Performance" sub="Systems & disciplines" />
+          <Tile href="/book" tone="olive" icon="event" title="1-on-1 Tutoring" sub="Book with Dr. Khan" />
+        </div>
+
+        <h2 class="section-title" id="streak">Today</h2>
+        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));align-items:stretch">
+          <section class="card">
+            <h3>Today’s study goal</h3>
+            {classToday ? (
+              <div class={'goal-row' + (todayLectureDone ? ' done' : '')}>
+                <span class="gi"><Icon name={todayLectureDone ? 'check' : 'play_circle'} size={20} /></span>
+                <span class="gt">
+                  <strong>Watch today’s lecture</strong>
+                  <span>{todays ? (todays.status === 'live' ? todays.title : 'Recording appears after class') : 'Not posted yet'}</span>
+                </span>
+                {todays?.status === 'live' && !todayLectureDone && <a class="btn btn-outline btn-sm" href={`/lectures/${todays.id}`}>Watch</a>}
               </div>
-            </>
-          ) : (
-            <p>No lecture is scheduled for today yet.</p>
-          )}
-        </section>
-        <section class="card">
-          <div class="row between">
-            <h2>Catch up</h2>
-          </div>
-          <a class="row" href="/lectures" style="text-decoration:none;color:inherit">
-            <span class="chip chip-rust">{missed.length}</span> Missed lectures to watch
-          </a>
-          <a class="row" href="/create-test?pool=incorrect" style="text-decoration:none;color:inherit">
-            <span class="chip chip-sand">{wrong}</span> Questions you got wrong
-          </a>
-          <span class="row muted">
-            <span class="chip chip-gray">{done}</span> Lectures completed
-          </span>
-        </section>
-      </div>
+            ) : null}
+            <div class={'goal-row' + (qToday >= GOAL_QUESTIONS ? ' done' : '')}>
+              <span class="gi"><Icon name={qToday >= GOAL_QUESTIONS ? 'check' : 'quiz'} size={20} /></span>
+              <span class="gt">
+                <strong>Answer {GOAL_QUESTIONS} questions</strong>
+                <span>{Math.min(qToday, GOAL_QUESTIONS)} of {GOAL_QUESTIONS} today</span>
+              </span>
+              {qToday < GOAL_QUESTIONS && (
+                <form method="post" action="/qbank/quick"><button class="btn btn-outline btn-sm" type="submit">Start</button></form>
+              )}
+            </div>
+            <div class="bar"><i style={`width:${Math.min(100, Math.round((Math.min(qToday, GOAL_QUESTIONS) / GOAL_QUESTIONS) * 100))}%`}></i></div>
+          </section>
+          <section class="card card-cream">
+            <h3>Study streak</h3>
+            <div class="streak-big"><Icon name="fire" size={30} class={streak ? '' : 'muted'} />{streak}<small>day{streak === 1 ? '' : 's'}</small></div>
+            <p class="small">A day counts when you watch a lecture or answer at least {STREAK_MIN_QUESTIONS} questions.</p>
+          </section>
+        </div>
 
-      <section class="card">
-        <div class="row between">
-          <div class="stack" style="gap:4px">
-            <h2>Your {cohort.total_days}-day plan</h2>
-            <span class="muted small">
-              {cohort.lecture_days} teaching days, Monday to Friday{cohort.daysOff?.size ? ` (holidays off)` : ''}, then a {cohort.total_days - cohort.lecture_days}-weekday exam window · {cohort.name}
+        <div class="stats-2">
+          <a class="ring-card" href="/lectures" style="text-decoration:none">
+            <Ring pct={lPct} label={`${lPct}% of lectures completed`} />
+            <span class="lbl">Lecture completion</span>
+            <span class="sub">{done} of {cohort.lecture_days} lectures</span>
+          </a>
+          <a class="ring-card" href="/performance" style="text-decoration:none">
+            <Ring pct={qPct} color={qPct && qPct < 60 ? '#c9a14a' : undefined} label={`${qPct}% of questions correct`} />
+            <span class="lbl">Qbank performance</span>
+            <span class="sub">{answeredQs.length ? `${correctQs} of ${answeredQs.length} correct` : 'No questions answered yet'}</span>
+          </a>
+        </div>
+
+        <h2 class="section-title">Study Schedule</h2>
+        <section class="card">
+          <div class="sched-head">
+            <span class="sched-num">{done}<small>/{cohort.lecture_days}</small></span>
+            <span>
+              <strong>Lectures completed</strong>
+              <span>{cohort.lecture_days}-day structured study schedule</span>
             </span>
           </div>
+          <div class="today-pill"><b>Today: {longDate(todayT)}</b><span>· {todayMsg}</span></div>
+          <div class="bar"><i style={`width:${lPct}%`}></i></div>
           <div class="cal-legend">
-            <span><i class="sw day-done"></i>Done</span>
-            <span><i class="sw day-missed"></i>Missed</span>
-            <span><i class="sw day-today"></i>Today</span>
-            <span><i class="sw day-up"></i>Upcoming</span>
-            <span><i class="sw day-exam"></i>Exam window</span>
-            <span><i class="sw day-holiday"></i>Holiday</span>
+            <span><i class="sw today"></i>Today ({shortMonth(todayT)})</span>
+            <span><i class="sw done"></i>Completed</span>
+            <span><i class="sw missed"></i>Missed</span>
+            <span><i class="sw up"></i>Upcoming</span>
+            <span><i class="sw exam"></i>Exam window</span>
+            {cohort.daysOff?.size ? <span><i class="sw holiday"></i>Holiday</span> : null}
           </div>
-        </div>
-        <Calendar cohort={cohort} today={today} lectures={lectures} />
-      </section>
-    </PortalLayout>,
+          <Calendar cohort={cohort} lectures={lectures} />
+        </section>
+
+        {subjects.length > 0 && (
+          <>
+            <h2 class="section-title">Subjects</h2>
+            <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
+              {subjects.map((s) => (
+                <section class="card subject">
+                  <div class="subject-top">
+                    <span class="subject-ic"><Icon name="school" size={22} /></span>
+                    <div>
+                      <strong>{s.name}</strong>
+                      <span>{s.lectures} lecture{s.lectures === 1 ? '' : 's'} · {s.questions} question{s.questions === 1 ? '' : 's'}</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="bar"><i style={`width:${s.questions ? Math.round((s.answered / s.questions) * 100) : 0}%`}></i></div>
+                    <div class="bar-label">{s.answered} of {s.questions} questions answered</div>
+                  </div>
+                  <div>
+                    <div class="bar"><i style={`width:${s.lectures ? Math.round((s.watched / s.lectures) * 100) : 0}%`}></i></div>
+                    <div class="bar-label">{s.watched} of {s.lectures} lectures completed</div>
+                  </div>
+                </section>
+              ))}
+            </div>
+          </>
+        )}
+
+        <h2 class="section-title">Latest study activity</h2>
+        <section class="card">
+          {activity.length ? (
+            <ul class="activity">
+              {activity.map((a) => (
+                <li>
+                  <span class={'ai' + (a.kind === 'test' ? ' q' : '')}><Icon name={a.kind === 'test' ? 'quiz' : 'play_circle'} size={18} /></span>
+                  <a href={a.href} style="text-decoration:none;flex:1">
+                    <strong>{a.title}</strong>
+                    <span>{a.detail} · {ago(a.at)}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p class="muted">Nothing yet. Watched lectures and finished tests will show here.</p>
+          )}
+        </section>
+        {wrong > 0 && (
+          <p class="small muted">You have {wrong} question{wrong === 1 ? '' : 's'} to retry in <a href="/review">Review</a>.</p>
+        )}
+      </PortalLayout>,
+    )
   );
 });
 
@@ -243,55 +384,107 @@ function LectureNotice(props: { n: { until: string; daysLeft: number } | null })
   );
 }
 
-function LecturesEnded(props: { user: any; until: string; email: string }) {
-  return (
-    <PortalLayout title="Lectures" active="lectures" user={props.user}>
-      <Eyebrow>Study</Eyebrow>
-      <h1>Lectures</h1>
+function lecturesEndedPage(c: Context<AppEnv>, until: string, email: string) {
+  return c.html(
+    <PortalLayout shell={c.get('shell')} title="Lectures" active="lectures" user={c.get('user')!}>
+      <PageHead eyebrow="Study" title="Lectures" />
       <section class="card">
-        <p style="margin:0">
-          Your access to the lecture recordings ended on {fmtDate(new Date(props.until + 'T00:00:00Z'), { month: 'long', day: 'numeric', year: 'numeric' })}.
-          {props.email && <> To ask for more time, email <a href={`mailto:${props.email}?subject=${encodeURIComponent('USMLE100: more time for lectures')}`}>{props.email}</a>.</>}
+        <p>
+          Your access to the lecture recordings ended on {fmtDate(new Date(until + 'T00:00:00Z'), { month: 'long', day: 'numeric', year: 'numeric' })}.
+          {email && <> To ask for more time, email <a href={`mailto:${email}?subject=${encodeURIComponent('USMLE100: more time for lectures')}`}>{email}</a>.</>}
         </p>
       </section>
-    </PortalLayout>
+    </PortalLayout>,
   );
 }
 
 portal.get('/lectures', async (c) => {
   const user = c.get('user')!;
-  const cohort = await currentCohort(c.env.DB, c.get('enrollment')?.cohort_id);
+  const db = c.env.DB;
+  const cohort = await currentCohort(db, c.get('enrollment')?.cohort_id);
   const ended = await lecturesEndedOn(c, cohort);
-  if (ended) return c.html(<LecturesEnded user={user} until={ended} email={(await getSettings(c.env.DB)).contact_email} />);
-  const lectures = cohort ? await lecturesFor(c.env.DB, cohort.id, user.id) : [];
+  if (ended) return lecturesEndedPage(c, ended, (await getSettings(db)).contact_email);
+  const lectures = cohort ? await lecturesFor(db, cohort.id, user.id) : [];
+  const subjects = (await db.prepare('SELECT id, name FROM subjects ORDER BY sort').all<{ id: number; name: string }>()).results;
+  const usedSubjects = subjects.filter((s) => lectures.some((l) => l.subject_id === s.id));
+  const subj = Number(c.req.query('subject')) || 0;
+  const shown = subj ? lectures.filter((l) => l.subject_id === subj) : lectures;
   const today = cohort ? cohortDay(cohort) : 0;
+  const done = shown.filter((l) => l.completed_at).length;
+  const next = shown.find((l) => l.status === 'live' && !l.completed_at);
+  // Group by week of the course: Days 1–5, 6–10 …
+  const weeks = new Map<number, Lecture[]>();
+  for (const l of shown) {
+    const w = Math.ceil(l.day_number / 5);
+    weeks.set(w, [...(weeks.get(w) ?? []), l]);
+  }
   return c.html(
-    <PortalLayout title="Lectures" active="lectures" user={user}>
-      <Eyebrow>Study</Eyebrow>
-      <h1>Lectures</h1>
+    <PortalLayout shell={c.get('shell')} title="Lectures" active="lectures" user={user} wide>
+      <div class="tabs" role="tablist" aria-label="Lecture views">
+        <a class="on" role="tab" aria-selected="true" href="/lectures">Browse</a>
+      </div>
+      <section class="card" style="gap:12px">
+        <nav class="crumbs" aria-label="Breadcrumb"><a href="/dashboard">Home</a><Icon name="chevron_right" size={16} />Lectures</nav>
+        <h1>All lectures</h1>
+        <p class="muted">Taught live by licensed MDs. One lecture a day across {cohort?.lecture_days ?? 90} days.</p>
+        {usedSubjects.length > 0 && (
+          <nav class="subj-tabs" aria-label="Subjects">
+            <a href="/lectures" class={subj ? '' : 'on'}>All subjects</a>
+            {usedSubjects.map((s) => (
+              <a href={`/lectures?subject=${s.id}`} class={subj === s.id ? 'on' : ''}>{s.name}</a>
+            ))}
+          </nav>
+        )}
+        <label class="filter-box">
+          <Icon name="filter" size={20} />
+          <span class="sr">Filter lectures</span>
+          <input type="search" id="lecfilter" placeholder="Start typing to filter the lectures" autocomplete="off" />
+        </label>
+      </section>
       <LectureNotice n={lectureNotice(c, cohort)} />
-      {!lectures.length && <p class="muted">No lectures yet.</p>}
-      {lectures.length > 0 && (
-        <div class="table-box">
-          <table class="t">
-            <thead>
-              <tr><th scope="col">Day</th><th scope="col">Date</th><th scope="col">Lecture</th><th scope="col">Status</th></tr>
-            </thead>
-            <tbody>
-              {lectures.map((l) => (
-                <tr>
-                  <td><strong>Day {l.day_number}</strong></td>
-                  <td class="muted">{fmtDate(dayDate(cohort!, l.day_number))}</td>
-                  <td>{l.status === 'live' ? <a href={`/lectures/${l.id}`}>{l.title}</a> : l.title}</td>
-                  <td>
-                    {l.completed_at ? <span class="chip">Watched</span> : l.status !== 'live' ? <span class="chip chip-gray">Coming soon</span> : l.day_number < today ? <span class="chip chip-rust">Missed</span> : <span class="chip chip-sand">To watch</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <p class="small"><strong>{done}</strong> of {shown.length} lectures done</p>
+      {next && (
+        <a class="btn btn-primary btn-block" href={`/lectures/${next.id}`}><Icon name="play" size={20} />{done ? 'Continue with the next lecture' : 'Start the first lecture'}</a>
       )}
+      {!shown.length && <p class="muted">No lectures yet. They appear here after each class.</p>}
+      {[...weeks.entries()].map(([w, ls]) => (
+        <section class="lec-section" data-section>
+          <div class="lec-section-head">
+            <span class="num">{w}</span>
+            <strong>Week {w} · Days {ls[0].day_number}–{ls[ls.length - 1].day_number}</strong>
+          </div>
+          <div class="lec-meta">{ls.filter((l) => l.completed_at).length} of {ls.length} lectures completed</div>
+          <div class="lec-grid">
+            {ls.map((l) => {
+              const live = l.status === 'live';
+              const isToday = l.day_number === today;
+              const missed = live && !l.completed_at && l.day_number < today;
+              return (
+                <article class={'lec-card' + (isToday ? ' today' : '')} data-title={l.title.toLowerCase()}>
+                  <div class="lec-top">
+                    <span class={'dot' + (l.completed_at ? '' : missed ? ' missed' : ' todo')} aria-hidden="true"></span>
+                    <span class="lec-num">Day {l.day_number}</span>
+                    {l.completed_at ? <span class="tag">Watched</span> : !live ? <span class="chip chip-gray">Coming soon</span> : missed ? <span class="chip chip-rust">Missed</span> : isToday ? <span class="chip chip-sand">Today</span> : <span class="tag">Video</span>}
+                  </div>
+                  {live ? <a class="lec-title" href={`/lectures/${l.id}`}>{l.title}</a> : <span class="lec-title">{l.title}</span>}
+                  <span class="lec-date">{cohort ? fmtDate(dayDate(cohort, l.day_number), { weekday: 'long', month: 'long', day: 'numeric' }) : ''}</span>
+                  {live && (
+                    <a class={'btn btn-block ' + (l.completed_at ? 'btn-outline' : 'btn-primary')} href={`/lectures/${l.id}`}>
+                      <Icon name="play" size={18} />{l.completed_at ? 'Watch again' : 'Start'}
+                    </a>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+      <p class="muted small" id="lecnone" hidden>No lectures match that filter.</p>
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `(function(){var i=document.getElementById('lecfilter');if(!i)return;i.addEventListener('input',function(){var q=i.value.trim().toLowerCase(),any=false;document.querySelectorAll('[data-section]').forEach(function(s){var n=0;s.querySelectorAll('[data-title]').forEach(function(a){var ok=!q||a.dataset.title.indexOf(q)>=0;a.hidden=!ok;if(ok)n++;});s.hidden=n===0;if(n)any=true;});document.getElementById('lecnone').hidden=any;});})();`,
+        }}
+      />
     </PortalLayout>,
   );
 });
@@ -302,15 +495,24 @@ portal.get('/lectures/:id', async (c) => {
     `SELECT l.*, p.completed_at FROM lectures l LEFT JOIN lecture_progress p ON p.lecture_id = l.id AND p.user_id = ? WHERE l.id = ?`,
   )
     .bind(user.id, Number(c.req.param('id')))
-    .first<Lecture>();
+    .first<Lecture & { cohort_id: number }>();
   if (!l || (l.status !== 'live' && !isStaff(user))) return c.notFound();
-  const ended = await lecturesEndedOn(c, await currentCohort(c.env.DB, c.get('enrollment')?.cohort_id));
-  if (ended) return c.html(<LecturesEnded user={user} until={ended} email={(await getSettings(c.env.DB)).contact_email} />);
+  const cohort = await currentCohort(c.env.DB, c.get('enrollment')?.cohort_id);
+  const ended = await lecturesEndedOn(c, cohort);
+  if (ended) return lecturesEndedPage(c, ended, (await getSettings(c.env.DB)).contact_email);
   const src = l.bunny_video_id ? await bunnyEmbedUrl(c.env, l.bunny_video_id) : null;
+  const [prev, next] = await Promise.all([
+    c.env.DB.prepare("SELECT id, day_number, title FROM lectures WHERE cohort_id = ? AND day_number < ? AND status = 'live' ORDER BY day_number DESC LIMIT 1").bind(l.cohort_id, l.day_number).first<{ id: number; day_number: number; title: string }>(),
+    c.env.DB.prepare("SELECT id, day_number, title FROM lectures WHERE cohort_id = ? AND day_number > ? AND status = 'live' ORDER BY day_number LIMIT 1").bind(l.cohort_id, l.day_number).first<{ id: number; day_number: number; title: string }>(),
+  ]);
+  const lc = await c.env.DB.prepare('SELECT * FROM cohorts WHERE id = ?').bind(l.cohort_id).first<Cohort>();
   return c.html(
-    <PortalLayout title={l.title} active="lectures" user={user}>
-      <Eyebrow>Day {l.day_number}</Eyebrow>
-      <h1>{l.title}</h1>
+    <PortalLayout shell={c.get('shell')} title={l.title} active="lectures" user={user}>
+      <nav class="crumbs" aria-label="Breadcrumb"><a href="/dashboard">Home</a><Icon name="chevron_right" size={16} /><a href="/lectures">Lectures</a><Icon name="chevron_right" size={16} />Day {l.day_number}</nav>
+      <div class="stack" style="gap:6px">
+        <Eyebrow>Day {l.day_number}{lc ? ` · ${fmtDate(dayDate({ ...lc, daysOff: cohort?.id === lc.id ? cohort.daysOff : undefined }, l.day_number), { weekday: 'long', month: 'long', day: 'numeric' })}` : ''}</Eyebrow>
+        <h1>{l.title}</h1>
+      </div>
       {src ? (
         <div class="video-wrap">
           <iframe src={src} title={l.title} loading="lazy" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
@@ -319,15 +521,29 @@ portal.get('/lectures/:id', async (c) => {
       ) : (
         <Flash kind="error">{l.bunny_video_id ? 'This video can’t be played right now. Please try again later.' : 'The video for this lecture isn’t uploaded yet.'}</Flash>
       )}
-      <div class="row">
+      <section class="card" style="flex-direction:row;align-items:center;flex-wrap:wrap">
         {l.completed_at ? (
-          <span class="chip">Watched</span>
+          <span class="tag" style="font-size:13px;padding:6px 12px"><Icon name="check_circle" size={16} />&nbsp;Watched</span>
         ) : (
           <form method="post" action={`/lectures/${l.id}/done`}>
-            <button class="btn btn-primary" type="submit">Mark as watched</button>
+            <button class="btn btn-primary" type="submit"><Icon name="check" size={18} />Mark as watched</button>
           </form>
         )}
         <a class="btn btn-ghost" href="/lectures">All lectures</a>
+      </section>
+      <div class="grid">
+        {prev && (
+          <a class="card continue" href={`/lectures/${prev.id}`} style="text-decoration:none">
+            <span class="ci"><Icon name="arrow_back" /></span>
+            <span class="txt"><small>Previous · Day {prev.day_number}</small><strong>{prev.title}</strong></span>
+          </a>
+        )}
+        {next && (
+          <a class="card continue" href={`/lectures/${next.id}`} style="text-decoration:none">
+            <span class="txt"><small>Next · Day {next.day_number}</small><strong>{next.title}</strong></span>
+            <span class="ci"><Icon name="arrow_forward" /></span>
+          </a>
+        )}
       </div>
     </PortalLayout>,
   );
@@ -354,19 +570,17 @@ portal.get('/evening', async (c) => {
     const settings = await getSettings(c.env.DB);
     const next = { d: await nextStart(c.env.DB, user.id) };
     return c.html(
-      <PortalLayout title="Evening Questions" active="evening" user={user}>
-        <Eyebrow>Study</Eyebrow>
-        <h1>Evening Questions</h1>
-        <section class="card">
-          {next?.d && <Flash>Your next month of Evening Questions starts on {fmtDate(new Date(next.d + 'T00:00:00Z'), { weekday: 'long', month: 'long', day: 'numeric' })}.</Flash>}
-          <p>Live question sessions on Monday, Wednesday and Friday evenings. Each month covers {CLASSES_PER_MONTH} classes, and you can rewatch them until {GRACE_DAYS} days after the 12th recording goes up.</p>
+      <PortalLayout shell={c.get('shell')} title="Evening Questions" active="evening" user={user}>
+        <PageHead eyebrow="Evening Questions" title="Live question sessions" sub="Monday, Wednesday and Friday evenings with your instructor." />
+        {next?.d && <Flash>Your next month of Evening Questions starts on {fmtDate(new Date(next.d + 'T00:00:00Z'), { weekday: 'long', month: 'long', day: 'numeric' })}.</Flash>}
+        <section class="card card-sage">
+          <h2>Evening Questions</h2>
+          <p>Each month covers {CLASSES_PER_MONTH} classes, and you can rewatch them until {GRACE_DAYS} days after the 12th recording goes up.</p>
           <p>Included for 4 months with the <strong>Companion</strong>, <strong>Complete</strong> and <strong>MAX</strong> programs, or on its own for <strong>$160 a month</strong>.</p>
-          <div class="row">
-            <a class="btn btn-primary" href="/programs">See programs</a>
-            {settings.contact_email && (
-              <a class="btn btn-outline" href={`mailto:${settings.contact_email}?subject=${encodeURIComponent('USMLE100: Evening Questions')}`}>Ask about Evening Questions</a>
-            )}
-          </div>
+          <a class="btn btn-primary btn-block" href="/programs">See programs</a>
+          {settings.contact_email && (
+            <a class="btn btn-outline btn-block" href={`mailto:${settings.contact_email}?subject=${encodeURIComponent('USMLE100: Evening Questions')}`}>Ask about Evening Questions</a>
+          )}
         </section>
       </PortalLayout>,
     );
@@ -376,14 +590,16 @@ portal.get('/evening', async (c) => {
   const long = (d: string) => fmtDate(new Date(d + 'T00:00:00Z'), { weekday: 'long', month: 'long', day: 'numeric' });
   const cur = acc.staff ? null : acc.current;
   return c.html(
-    <PortalLayout title="Evening Questions" active="evening" user={user}>
-      <Eyebrow>Study</Eyebrow>
-      <h1>Evening Questions</h1>
-      <p class="muted">Monday, Wednesday and Friday evening recordings.</p>
+    <PortalLayout shell={c.get('shell')} title="Evening Questions" active="evening" user={user}>
+      <PageHead eyebrow="Evening Questions" title="Evening recordings" sub="Monday, Wednesday and Friday evening question sessions." />
       {cur && (
-        <section class="card">
-          <p style="margin:0">
-            <strong>Month {cur.month}{cur.months > 1 ? ` of ${cur.months}` : ''}</strong> · class {cur.sessions.length} of {CLASSES_PER_MONTH} so far.{' '}
+        <section class="card card-sage">
+          <div class="row between">
+            <strong style="font:700 17px var(--display);color:var(--ink)">Month {cur.month}{cur.months > 1 ? ` of ${cur.months}` : ''}</strong>
+            <span class="chip">Class {cur.sessions.length} of {CLASSES_PER_MONTH}</span>
+          </div>
+          <div class="bar"><i style={`width:${Math.round((cur.sessions.length / CLASSES_PER_MONTH) * 100)}%`}></i></div>
+          <p class="small">
             {cur.end
               ? <>All {CLASSES_PER_MONTH} classes are up. You can watch them until the end of <strong>{long(cur.end)}</strong>.</>
               : <>You can watch this month’s classes until {GRACE_DAYS} days after class {CLASSES_PER_MONTH} goes up.</>}
@@ -393,18 +609,14 @@ portal.get('/evening', async (c) => {
       {!sessions.length ? (
         <p class="muted">No recordings for this month yet. They appear here after each evening class.</p>
       ) : (
-        <div class="table-box">
-          <table class="t">
-            <thead><tr><th scope="col">Date</th><th scope="col">Session</th></tr></thead>
-            <tbody>
-              {sessions.map((e) => (
-                <tr>
-                  <td class="muted">{fmtDate(new Date(e.session_date + 'T00:00:00Z'), { weekday: 'short', month: 'short', day: 'numeric' })}</td>
-                  <td><a href={`/evening/${e.id}`}>{e.title}</a></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div class="lec-grid">
+          {sessions.map((e) => (
+            <article class="lec-card">
+              <div class="lec-top"><span class="dot" aria-hidden="true"></span><span class="lec-num">{fmtDate(new Date(e.session_date + 'T00:00:00Z'), { weekday: 'short', month: 'short', day: 'numeric' })}</span><span class="tag">Video</span></div>
+              <a class="lec-title" href={`/evening/${e.id}`}>{e.title}</a>
+              <a class="btn btn-primary btn-block" href={`/evening/${e.id}`}><Icon name="play" size={18} />Watch</a>
+            </article>
+          ))}
         </div>
       )}
     </PortalLayout>,
@@ -421,9 +633,12 @@ portal.get('/evening/:id', async (c) => {
   if (!acc.staff && !acc.visible.has(e.id)) return c.redirect('/evening');
   const src = e.bunny_video_id ? await bunnyEmbedUrl(c.env, e.bunny_video_id) : null;
   return c.html(
-    <PortalLayout title={e.title} active="evening" user={user}>
-      <Eyebrow>Evening Questions</Eyebrow>
-      <h1>{e.title}</h1>
+    <PortalLayout shell={c.get('shell')} title={e.title} active="evening" user={user}>
+      <nav class="crumbs" aria-label="Breadcrumb"><a href="/dashboard">Home</a><Icon name="chevron_right" size={16} /><a href="/evening">Evening Questions</a></nav>
+      <div class="stack" style="gap:6px">
+        <Eyebrow>{fmtDate(new Date(e.session_date + 'T00:00:00Z'), { weekday: 'long', month: 'long', day: 'numeric' })}</Eyebrow>
+        <h1>{e.title}</h1>
+      </div>
       {src ? (
         <div class="video-wrap">
           <iframe src={src} title={e.title} loading="lazy" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
@@ -432,9 +647,51 @@ portal.get('/evening/:id', async (c) => {
       ) : (
         <Flash kind="error">{e.bunny_video_id ? 'This video can’t be played right now. Please try again later.' : 'The video for this session isn’t ready yet.'}</Flash>
       )}
-      <div class="row"><a class="btn btn-ghost" href="/evening">All evening sessions</a></div>
+      <a class="btn btn-ghost" href="/evening" style="align-self:flex-start">All evening sessions</a>
     </PortalLayout>,
   );
+});
+
+// ---------- Question Bank ----------
+
+portal.get('/qbank', async (c) => {
+  const user = c.get('user')!;
+  const rows = await questionStatuses(c.env.DB, user.id);
+  const n = (k: string) => rows.filter((r) => r.status === k).length;
+  return c.html(
+    <PortalLayout shell={c.get('shell')} title="Question Bank" active="qbank" user={user}>
+      {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
+      <section class="card hero-block">
+        <span class="hi"><Icon name="quiz" size={40} /></span>
+        <h1 style="font-size:24px">Ready for a Question Block?</h1>
+        <p>Start a quick 10-question tutor block immediately or build a custom test filtered by pool, subject, and system.</p>
+        <form method="post" action="/qbank/quick" style="display:contents">
+          <button class="btn btn-primary" type="submit" disabled={!rows.length}><Icon name="bolt" size={18} />Start quick 10-Q block</button>
+        </form>
+        <a class="btn btn-outline" href="/create-test"><Icon name="filter" size={18} />Custom test builder</a>
+      </section>
+      <div class="stat-tiles">
+        <div class="stat s1"><b>{n('unused')}</b><span>unused</span></div>
+        <div class="stat s2"><b>{n('correct')}</b><span>correct</span></div>
+        <div class="stat s4"><b>{n('incorrect')}</b><span>incorrect</span></div>
+        <div class="stat s3"><b>{rows.filter((r) => r.flagged).length}</b><span>flagged</span></div>
+      </div>
+      {!rows.length && <p class="muted">No questions are in the bank yet.</p>}
+    </PortalLayout>,
+  );
+});
+
+/** A 10-question tutor block: unused questions first, then ones answered wrong, then anything. */
+portal.post('/qbank/quick', async (c) => {
+  const user = c.get('user')!;
+  const rows = await questionStatuses(c.env.DB, user.id);
+  const order = ['unused', 'incorrect', 'omitted', 'correct'];
+  const picked = order.flatMap((k) => shuffle(rows.filter((r) => r.status === k))).slice(0, 10);
+  if (!picked.length) return c.redirect('/qbank?error=' + encodeURIComponent('No questions are in the bank yet.'));
+  const t = await c.env.DB.prepare("INSERT INTO tests (user_id, mode) VALUES (?, 'tutor')").bind(user.id).run();
+  const testId = Number(t.meta.last_row_id);
+  await c.env.DB.batch(picked.map((q, i) => c.env.DB.prepare('INSERT INTO test_items (test_id, position, question_id) VALUES (?, ?, ?)').bind(testId, i + 1, q.id)));
+  return c.redirect(`/tests/${testId}/1`);
 });
 
 // ---------- Create a test ----------
@@ -457,60 +714,77 @@ portal.get('/create-test', async (c) => {
   const count = (k: keyof Pools) => (k === 'custom' ? rows.filter((r) => r.flagged).length : rows.filter((r) => r.status === k).length);
   const pre = c.req.query('pool') ?? 'unused';
   const err = c.req.query('error');
+  const max = Math.max(1, Math.min(40, rows.length || 1));
   return c.html(
-    <PortalLayout title="Create a test" active="create" user={user}>
-      <Eyebrow>Practice</Eyebrow>
-      <h1>Create a test</h1>
+    <PortalLayout shell={c.get('shell')} title="Create a test" active="create" user={user}>
+      <PageHead title="Create a test" sub="Configure your custom exam session using question activity and subject filters." />
       {err && <Flash kind="error">{err}</Flash>}
-      <form method="post" class="stack">
-        <fieldset class="card">
-          <legend><h2>How should it grade you?</h2></legend>
-          {[
-            ['tutor', 'Tutor', 'Answer and explanation shown as you go'],
-            ['timed', 'Timed', '90 seconds per question, exam conditions'],
-            ['untimed', 'Untimed', 'No clock, graded at the end'],
-          ].map(([v, l, s], i) => (
-            <label class="check">
-              <input type="radio" name="mode" value={v} checked={i === 0} /> <span><strong>{l}</strong> <span class="muted small">· {s}</span></span>
-            </label>
-          ))}
+      <form method="post" class="stack" id="builder">
+        <fieldset class="card" style="border:1px solid var(--line);margin:0">
+          <legend class="sr">Grading mode</legend>
+          <h2>How should it grade you?</h2>
+          <div class="opt-list">
+            {[
+              ['tutor', 'Tutor', 'Answer shown as you go'],
+              ['timed', 'Timed', 'Clock on, exam conditions'],
+              ['untimed', 'Untimed', 'No clock, graded at the end'],
+            ].map(([v, l, s], i) => (
+              <label class="opt opt-radio">
+                <input type="radio" name="mode" value={v} checked={i === 0} />
+                <span class="ot"><strong>{l}</strong><span>{s}</span></span>
+              </label>
+            ))}
+          </div>
         </fieldset>
-        <fieldset class="card">
-          <legend><h2>Which questions?</h2></legend>
-          <p class="muted small">Pick one or more.</p>
-          {POOLS.map((p) => (
-            <label class="check">
-              <input type="checkbox" name="pool" value={p.key} checked={p.key === pre} /> <span><strong>{p.label}</strong> <span class="muted small">· {p.sub} · {count(p.key)}</span></span>
-            </label>
-          ))}
+        <fieldset class="card" style="border:1px solid var(--line);margin:0">
+          <legend class="sr">Question pools</legend>
+          <h2>Which Questions?</h2>
+          <div class="opt-list">
+            {POOLS.map((p) => (
+              <label class="opt">
+                <input type="checkbox" name="pool" value={p.key} checked={p.key === pre} data-count={String(count(p.key))} />
+                <span class="ot"><strong>{p.label}</strong><span>{p.sub}</span></span>
+                <span class="count">{count(p.key)}</span>
+              </label>
+            ))}
+          </div>
         </fieldset>
-        <fieldset class="card">
-          <legend><h2>Select subjects <span class="muted small">(13)</span></h2></legend>
-          <p class="muted small">Leave all unticked to include every subject.</p>
-          <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:0 16px">
+        <section class="card">
+          <div class="row between">
+            <h2>Select Subjects</h2>
+            <button type="button" class="sel-all" id="selall"><Icon name="check_circle" size={18} /><span>Select All Subjects</span></button>
+          </div>
+          <div class="tabs" role="tablist">
+            <button type="button" class="on" role="tab" aria-selected="true" data-pane="subjects">Subjects ({subjects.results.length})</button>
+            <button type="button" role="tab" aria-selected="false" data-pane="systems">Systems ({systems.results.length})</button>
+          </div>
+          <p class="muted small">Leave all unticked to include everything.</p>
+          <div class="pane opt-grid" id="pane-subjects">
             {subjects.results.map((s) => (
-              <label class="check"><input type="checkbox" name="subject" value={String(s.id)} /> {s.name}</label>
+              <label class="pick"><input type="checkbox" name="subject" value={String(s.id)} />{s.name}</label>
             ))}
           </div>
-        </fieldset>
-        <fieldset class="card">
-          <legend><h2>Select systems <span class="muted small">(26)</span></h2></legend>
-          <p class="muted small">Leave all unticked to include every system.</p>
-          <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:0 16px">
+          <div class="pane opt-grid" id="pane-systems" hidden>
             {systems.results.map((s) => (
-              <label class="check"><input type="checkbox" name="system" value={String(s.id)} /> {s.name}</label>
+              <label class="pick"><input type="checkbox" name="system" value={String(s.id)} />{s.name}</label>
             ))}
           </div>
-        </fieldset>
-        <div class="card">
-          <label class="field" style="max-width:220px">
-            How many questions?
-            <input type="number" name="count" min="1" max="40" value="10" />
-          </label>
-          <p class="muted small">{rows.length} approved questions in the bank.</p>
-          <button class="btn btn-primary" type="submit" style="align-self:flex-start">Start test</button>
-        </div>
+        </section>
+        <section class="card">
+          <h2>How many questions?</h2>
+          <div class="count-row">
+            <input type="number" name="count" id="qcount" min="1" max={String(max)} value={String(Math.min(10, max))} aria-label="Number of questions" />
+            <input type="range" id="qrange" min="1" max={String(max)} value={String(Math.min(10, max))} aria-label="Number of questions" />
+          </div>
+          <span class="small" style="color:var(--green);font-weight:600">{rows.length} available</span>
+        </section>
+        <button class="btn btn-primary btn-block" type="submit" id="startbtn"><Icon name="play" size={18} /><span>Start {Math.min(10, max)}-question test</span></button>
       </form>
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `(function(){var n=document.getElementById('qcount'),r=document.getElementById('qrange'),b=document.querySelector('#startbtn span');function set(v){n.value=v;r.value=v;b.textContent='Start '+v+'-question test';}n.addEventListener('input',function(){set(n.value)});r.addEventListener('input',function(){set(r.value)});var tabs=document.querySelectorAll('[data-pane]'),cur='subjects',sa=document.getElementById('selall');function boxes(){return document.querySelectorAll('#pane-'+cur+' input[type=checkbox]')}function label(){var all=[].every.call(boxes(),function(x){return x.checked});sa.querySelector('span').textContent=(all?'Clear all ':'Select all ')+(cur==='subjects'?'subjects':'systems');}tabs.forEach(function(t){t.addEventListener('click',function(){cur=t.dataset.pane;tabs.forEach(function(x){var on=x===t;x.classList.toggle('on',on);x.setAttribute('aria-selected',on);document.getElementById('pane-'+x.dataset.pane).hidden=!on;});label();});});sa.addEventListener('click',function(){var bs=boxes(),all=[].every.call(bs,function(x){return x.checked});bs.forEach(function(x){x.checked=!all});label();});document.getElementById('builder').addEventListener('change',label);label();})();`,
+        }}
+      />
     </PortalLayout>,
   );
 });
@@ -540,7 +814,7 @@ portal.post('/create-test', async (c) => {
 // ---------- Test runner ----------
 
 type Item = { position: number; question_id: number; chosen_index: number | null; is_correct: number | null; flagged: number };
-type Q = { id: number; stem: string; choices_json: string; correct_index: number; explanation: string; wrong_explanations_json: string | null; bottom_line: string | null; image_url: string | null };
+type Q = { id: number; stem: string; choices_json: string; correct_index: number; explanation: string; wrong_explanations_json: string | null; bottom_line: string | null; image_url: string | null; subject_id: number | null; system_id: number | null };
 
 async function loadTest(c: Context<AppEnv>, id: number) {
   const user = c.get('user')!;
@@ -549,6 +823,8 @@ async function loadTest(c: Context<AppEnv>, id: number) {
   const items = (await c.env.DB.prepare('SELECT position, question_id, chosen_index, is_correct, flagged FROM test_items WHERE test_id = ? ORDER BY position').bind(id).all<Item>()).results;
   return { test, items };
 }
+
+const modeName = (m: string) => (m === 'timed' ? 'Timed' : m === 'untimed' ? 'Untimed' : m === 'warmup' ? 'Warmup' : 'Tutor');
 
 portal.get('/tests/:id/:pos{[0-9]+}', async (c) => {
   const user = c.get('user')!;
@@ -561,6 +837,7 @@ portal.get('/tests/:id/:pos{[0-9]+}', async (c) => {
   if (!item) return c.notFound();
   const q = await c.env.DB.prepare('SELECT * FROM questions WHERE id = ?').bind(item.question_id).first<Q>();
   if (!q) return c.notFound();
+  const tags = await c.env.DB.prepare('SELECT (SELECT name FROM subjects WHERE id = ?) AS subject, (SELECT name FROM systems WHERE id = ?) AS system').bind(q.subject_id, q.system_id).first<{ subject: string | null; system: string | null }>();
   const choices: string[] = JSON.parse(q.choices_json);
   const wrongEx: Record<string, string> = q.wrong_explanations_json ? JSON.parse(q.wrong_explanations_json) : {};
   const answered = item.chosen_index != null;
@@ -569,73 +846,74 @@ portal.get('/tests/:id/:pos{[0-9]+}', async (c) => {
   const deadline = test.mode === 'timed' && !test.finished_at ? Date.parse(test.created_at.replace(' ', 'T') + 'Z') + total * 90_000 : null;
 
   return c.html(
-    <PortalLayout title={`Question ${pos} of ${total}`} active="create" user={user}>
-      <div class="row between">
-        <div class="stack" style="gap:4px">
-          <Eyebrow>{test.finished_at ? 'Review' : test.mode === 'tutor' ? 'Tutor mode' : test.mode === 'timed' ? 'Timed' : 'Untimed'}</Eyebrow>
-          <h1>Question {pos} of {total}</h1>
+    <PortalLayout shell={c.get('shell')} title={`Question ${pos} of ${total}`} active="test" user={user}>
+      <h1 class="sr">Question {pos} of {total}</h1>
+      <section class="card qcard">
+        <div class="qbar">
+          <a class="x" href={test.finished_at ? `/tests/${id}/results` : '/qbank'} aria-label={test.finished_at ? 'Back to results' : 'Leave the test (your answers are saved)'}><Icon name="close" /></a>
+          <strong>{test.finished_at ? 'Review' : `${modeName(test.mode)} test`}</strong>
+          <span class="pos">{pos} / {total}</span>
+          {deadline && <span class="clock" id="timer" data-deadline={String(deadline)} data-finish={`/tests/${id}/finish`}>–:––</span>}
         </div>
-        {deadline && (
-          <span class="chip chip-sand" id="timer" data-deadline={String(deadline)} data-finish={`/tests/${id}/finish`}>Time left</span>
-        )}
-      </div>
-      <nav class="qnav" aria-label="Questions">
-        {items.map((i) => (
-          <a href={`/tests/${id}/${i.position}`} class={(i.position === pos ? 'on' : i.chosen_index != null ? 'ans' : '') } aria-current={i.position === pos ? 'true' : undefined}>
-            {i.position}{i.flagged ? '⚑' : ''}
-          </a>
-        ))}
-      </nav>
-      <section class="card">
+        <nav class="qnav" aria-label="Questions">
+          {items.map((i) => (
+            <a
+              href={`/tests/${id}/${i.position}`}
+              class={i.position === pos ? 'on' : (test.finished_at || test.mode === 'tutor') && i.chosen_index != null ? (i.is_correct ? 'ans' : 'wrong') : i.chosen_index != null ? 'ans' : ''}
+              aria-current={i.position === pos ? 'true' : undefined}
+            >
+              {i.position}{i.flagged ? '⚑' : ''}
+            </a>
+          ))}
+        </nav>
         <p class="stem">{q.stem}</p>
-        {q.image_url && <img src={q.image_url} alt="Question image" />}
+        {q.image_url && <img src={q.image_url} alt="Question image" style="max-width:100%;border-radius:12px" />}
+        {(tags?.subject || tags?.system) && <p class="qtags">{[tags?.subject, tags?.system].filter(Boolean).join(' · ')}</p>}
         <form method="post" action={`/tests/${id}/${pos}`} class="stack" style="gap:10px">
           {choices.map((ch, idx) => {
-            let cls = 'choice';
+            let cls = 'choice' + (reveal ? ' locked' : '');
             if (reveal && idx === q.correct_index) cls += ' choice-correct';
             else if (reveal && idx === item.chosen_index) cls += ' choice-wrong';
             return (
               <label class={cls}>
                 <input type="radio" name="choice" value={String(idx)} checked={item.chosen_index === idx} disabled={reveal} required />
-                <span class="letter">{LETTERS[idx]}.</span>
+                <span class="letter">{LETTERS[idx]}</span>
                 <span>{ch}</span>
               </label>
             );
           })}
           {!reveal && (
-            <div class="row">
-              <button class="btn btn-primary" type="submit">{test.mode === 'tutor' ? 'Submit answer' : 'Save and next'}</button>
-            </div>
+            <button class="btn btn-primary btn-block" type="submit">{test.mode === 'tutor' ? 'Submit answer' : 'Save and next'}</button>
           )}
         </form>
         <div class="row">
           <form method="post" action={`/tests/${id}/${pos}/flag`}>
-            <button class="btn btn-ghost" type="submit">{item.flagged ? 'Unflag' : 'Flag for later'}</button>
+            <button class="btn btn-ghost btn-sm" type="submit"><Icon name={item.flagged ? 'flag' : 'flag_outline'} size={18} />{item.flagged ? 'Unflag' : 'Flag for later'}</button>
           </form>
-          {pos > 1 && <a class="btn btn-ghost" href={`/tests/${id}/${pos - 1}`}>Previous</a>}
-          {pos < total && <a class="btn btn-ghost" href={`/tests/${id}/${pos + 1}`}>Next</a>}
+          {pos > 1 && <a class="btn btn-ghost btn-sm" href={`/tests/${id}/${pos - 1}`}>Previous</a>}
+          {pos < total && <a class="btn btn-ghost btn-sm" href={`/tests/${id}/${pos + 1}`}>Next</a>}
           {!test.finished_at && (
             <form method="post" action={`/tests/${id}/finish`}>
-              <button class="btn btn-outline" type="submit">End test</button>
+              <button class="btn btn-outline btn-sm" type="submit">End test</button>
             </form>
           )}
-          {test.finished_at && <a class="btn btn-outline" href={`/tests/${id}/results`}>Results</a>}
+          {test.finished_at && <a class="btn btn-outline btn-sm" href={`/tests/${id}/results`}>Results</a>}
         </div>
       </section>
       {reveal && (
-        <section class="card">
+        <section class={'card explain ' + (item.chosen_index == null ? '' : item.is_correct ? 'ok' : 'bad')}>
           <h2>{item.chosen_index == null ? 'Not answered' : item.is_correct ? 'Correct' : 'Incorrect'} · the answer is {LETTERS[q.correct_index]}</h2>
-          <p class="explain">{q.explanation}</p>
+          <p>{q.explanation}</p>
           {Object.entries(wrongEx).map(([k, v]) => (
-            <p class="explain"><strong>Choice {LETTERS[Number(k)]}:</strong> {v}</p>
+            <p><strong>Choice {LETTERS[Number(k)]}:</strong> {v}</p>
           ))}
-          {q.bottom_line && <p class="explain"><strong>Bottom line:</strong> {q.bottom_line}</p>}
+          {q.bottom_line && <p class="bl"><strong>Bottom line:</strong> {q.bottom_line}</p>}
         </section>
       )}
       {deadline && (
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){var el=document.getElementById('timer');if(!el)return;var d=+el.dataset.deadline;function tick(){var s=Math.max(0,Math.round((d-Date.now())/1000));el.textContent='Time left '+Math.floor(s/60)+':'+String(s%60).padStart(2,'0');if(s<=0){var f=document.createElement('form');f.method='post';f.action=el.dataset.finish;document.body.appendChild(f);f.submit();return;}setTimeout(tick,1000);}tick();})();`,
+            __html: `(function(){var el=document.getElementById('timer');if(!el)return;var d=+el.dataset.deadline;function tick(){var s=Math.max(0,Math.round((d-Date.now())/1000));el.textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0');el.classList.toggle('low',s<60);if(s<=0){var f=document.createElement('form');f.method='post';f.action=el.dataset.finish;document.body.appendChild(f);f.submit();return;}setTimeout(tick,1000);}tick();})();`,
           }}
         />
       )}
@@ -683,19 +961,30 @@ portal.get('/tests/:id/results', async (c) => {
   const id = Number(c.req.param('id'));
   const loaded = await loadTest(c, id);
   if (!loaded) return c.notFound();
-  const { items } = loaded;
+  const { test, items } = loaded;
   const correct = items.filter((i) => i.is_correct === 1).length;
   const answered = items.filter((i) => i.chosen_index != null).length;
+  const pct = items.length ? Math.round((correct / items.length) * 100) : 0;
   return c.html(
-    <PortalLayout title="Test results" active="create" user={user}>
-      <Eyebrow>Results</Eyebrow>
-      <h1>{items.length ? Math.round((correct / items.length) * 100) : 0}% correct</h1>
-      <p class="muted">{correct} correct · {answered - correct} incorrect · {items.length - answered} omitted</p>
-      <nav class="qnav" aria-label="Review questions">
-        {items.map((i) => (
-          <a href={`/tests/${id}/${i.position}`} class={i.is_correct ? 'ans' : ''}>{i.position}{i.is_correct === 1 ? '✓' : i.chosen_index == null ? '–' : '✗'}</a>
-        ))}
-      </nav>
+    <PortalLayout shell={c.get('shell')} title="Test results" active="results" user={user}>
+      <PageHead eyebrow="Results" title={`${pct}% correct`} sub={`${modeName(test.mode)} test · ${items.length} question${items.length === 1 ? '' : 's'}`} />
+      <section class="card" style="flex-direction:row;align-items:center;gap:18px">
+        <Ring pct={pct} color={pct < 60 ? '#c9a14a' : undefined} label={`${pct}% correct`} />
+        <div class="stack" style="gap:4px">
+          <span><strong>{correct}</strong> correct</span>
+          <span><strong>{answered - correct}</strong> incorrect</span>
+          <span><strong>{items.length - answered}</strong> omitted</span>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Review your answers</h2>
+        <p class="muted small">Open any question to see the explanation.</p>
+        <nav class="qnav" aria-label="Review questions">
+          {items.map((i) => (
+            <a href={`/tests/${id}/${i.position}`} class={i.is_correct ? 'ans' : i.chosen_index != null ? 'wrong' : ''}>{i.position}{i.is_correct === 1 ? '✓' : i.chosen_index == null ? '–' : '✗'}</a>
+          ))}
+        </nav>
+      </section>
       <div class="row">
         <a class="btn btn-primary" href="/create-test">New test</a>
         <a class="btn btn-ghost" href="/performance">Performance</a>
@@ -706,40 +995,133 @@ portal.get('/tests/:id/results', async (c) => {
 
 // ---------- Performance ----------
 
+const RANGES: { key: string; label: string; days: number | null }[] = [
+  { key: '7', label: '7 days', days: 7 },
+  { key: '30', label: '30 days', days: 30 },
+  { key: '90', label: '90 days', days: 90 },
+  { key: 'all', label: 'All time', days: null },
+];
+
 portal.get('/performance', async (c) => {
   const user = c.get('user')!;
-  const [bySystem, byDiscipline] = await Promise.all([scoresBy(c.env.DB, user.id, 'perf_system'), scoresBy(c.env.DB, user.id, 'discipline')]);
+  const range = RANGES.find((r) => r.key === c.req.query('range')) ?? RANGES[3];
+  const since = range.days ? new Date(Date.now() - range.days * 86400_000).toISOString().slice(0, 19).replace('T', ' ') : undefined;
+  const [bySystem, byDiscipline, tests, omitted] = await Promise.all([
+    scoresBy(c.env.DB, user.id, 'perf_system', since),
+    scoresBy(c.env.DB, user.id, 'discipline', since),
+    c.env.DB.prepare('SELECT COUNT(*) AS n FROM tests WHERE user_id = ? AND finished_at IS NOT NULL AND (? IS NULL OR finished_at >= ?)').bind(user.id, since ?? null, since ?? null).first<{ n: number }>(),
+    c.env.DB.prepare('SELECT COUNT(*) AS n FROM test_items ti JOIN tests t ON t.id = ti.test_id WHERE t.user_id = ? AND t.finished_at IS NOT NULL AND ti.chosen_index IS NULL AND (? IS NULL OR t.finished_at >= ?)').bind(user.id, since ?? null, since ?? null).first<{ n: number }>(),
+  ]);
   const total = bySystem.reduce((a, s) => a + s.answered, 0);
   const right = bySystem.reduce((a, s) => a + s.correct, 0);
-  const tests = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM tests WHERE user_id = ? AND finished_at IS NOT NULL').bind(user.id).first<{ n: number }>();
-  const Bars = (p: { title: string; rows: typeof bySystem }) => (
-    <section class="card" style="gap:4px">
-      <h2 style="margin-bottom:8px">{p.title}</h2>
-      {p.rows.map((r) => {
-        const pct = r.answered ? Math.round((r.correct / r.answered) * 100) : null;
-        return (
-          <div class="bar-row">
-            <div class="bar-head"><span>{r.name}</span><span>{pct == null ? '—' : `${pct}%`}<span class="muted small"> · {r.answered}</span></span></div>
-            <div class="bar"><i class={pct != null && pct < 60 ? 'low' : ''} style={`width:${pct ?? 0}%`}></i></div>
-          </div>
-        );
-      })}
+  const List = (p: { title: string; rows: typeof bySystem }) => (
+    <section class="stack" style="gap:10px">
+      <h2 class="section-title">{p.title}</h2>
+      <div class="perf-list">
+        {p.rows.map((r, i) => {
+          const pct = r.answered ? Math.round((r.correct / r.answered) * 100) : null;
+          return (
+            <div class="perf-row">
+              <div class="pr"><span><em>{i + 1}.</em>{r.name}</span><b class={pct == null ? 'none' : ''}>{pct == null ? '—' : `${pct}%`}</b></div>
+              <div class={'bar' + (pct != null && pct < 60 ? ' bar-amber' : '')}><i style={`width:${pct ?? 0}%`}></i></div>
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
   return c.html(
-    <PortalLayout title="Performance" active="performance" user={user}>
-      <Eyebrow>Progress</Eyebrow>
-      <h1>Performance</h1>
-      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
-        <div class="card"><span class="muted small">Correct overall</span><strong style="font-size:28px">{total ? Math.round((right / total) * 100) : 0}%</strong></div>
-        <div class="card"><span class="muted small">Questions answered</span><strong style="font-size:28px">{total}</strong></div>
-        <div class="card"><span class="muted small">Tests completed</span><strong style="font-size:28px">{tests?.n ?? 0}</strong></div>
+    <PortalLayout shell={c.get('shell')} title="Performance" active="performance" user={user} wide>
+      <PageHead eyebrow="Progress" title="Performance" sub="Your actual completed question performance mapped by System and Discipline." />
+      <nav class="pills" aria-label="Time range">
+        {RANGES.map((r) => (
+          <a href={`/performance?range=${r.key}`} class={r === range ? 'on' : ''} aria-current={r === range ? 'page' : undefined}>{r.label}</a>
+        ))}
+      </nav>
+      <div class="stat-tiles">
+        <div class="stat s1"><b>{total ? Math.round((right / total) * 100) : 0}%</b><span>correct</span></div>
+        <div class="stat s2"><b>{total}</b><span>answered</span></div>
+        <div class="stat s3"><b>{tests?.n ?? 0}</b><span>tests</span></div>
+        <div class="stat s4"><b>{omitted?.n ?? 0}</b><span>omitted</span></div>
       </div>
-      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(360px,1fr));align-items:start">
-        <Bars title="Performance by system" rows={bySystem} />
-        <Bars title="Performance by discipline" rows={byDiscipline} />
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-items:start;gap:20px">
+        <List title={`Performance by System (${bySystem.length})`} rows={bySystem} />
+        <List title={`Performance by Discipline (${byDiscipline.length})`} rows={byDiscipline} />
       </div>
-      <p class="muted small">Scores under 60% show in amber. Numbers after each score are questions answered.</p>
+      <p class="muted small">Scores under 60% show in amber.</p>
+    </PortalLayout>,
+  );
+});
+
+// ---------- Review & daily catch-up ----------
+
+portal.get('/review', async (c) => {
+  const user = c.get('user')!;
+  const cohort = await currentCohort(c.env.DB, c.get('enrollment')?.cohort_id);
+  const lectures = cohort ? await lecturesFor(c.env.DB, cohort.id, user.id) : [];
+  const today = cohort ? cohortDay(cohort) : 0;
+  const todays = lectures.find((l) => l.day_number === today);
+  const missed = lectures.filter((l) => l.day_number < today && l.status === 'live' && !l.completed_at);
+  const rows = await questionStatuses(c.env.DB, user.id);
+  const wrong = rows.filter((r) => r.status === 'incorrect').length;
+  const flagged = rows.filter((r) => r.flagged).length;
+  const RetryForm = (p: { pool: string; n: number; label: string }) => (
+    <form method="post" action="/create-test">
+      <input type="hidden" name="mode" value="tutor" />
+      <input type="hidden" name="pool" value={p.pool} />
+      <input type="hidden" name="count" value={String(Math.min(40, p.n))} />
+      <button class="btn btn-primary btn-sm" type="submit">{p.label}</button>
+    </form>
+  );
+  return c.html(
+    <PortalLayout shell={c.get('shell')} title="Review" active="review" user={user}>
+      <PageHead title="Review & Daily Catch-Up" sub="Keep your study run solid by reviewing missed lectures and questions." />
+      <section class="card catch">
+        <div class="catch-head"><Icon name="play_circle" size={20} />Lectures &amp; daily classes</div>
+        {todays && todays.status === 'live' && !todays.completed_at ? (
+          <div class="catch-item alert">
+            <span class="txt"><strong>Today’s lecture is waiting</strong><span>{todays.title}</span></span>
+            <a class="btn btn-primary btn-sm" href={`/lectures/${todays.id}`}>Watch today</a>
+          </div>
+        ) : (
+          <div class="catch-item">
+            <span class="txt"><strong>{todays?.completed_at ? 'Today’s lecture is done' : 'Nothing due today'}</strong><span>{todays?.completed_at ? 'Nice work.' : 'New recordings appear after each class.'}</span></span>
+            <span class="okic"><Icon name="check_circle" /></span>
+          </div>
+        )}
+        {missed.length ? (
+          missed.slice(0, 8).map((l) => (
+            <div class="catch-item alert">
+              <span class="txt"><strong>Day {l.day_number} · {l.title}</strong><span>Missed {fmtDate(dayDate(cohort!, l.day_number), { weekday: 'short', month: 'short', day: 'numeric' })}</span></span>
+              <a class="btn btn-outline btn-sm" href={`/lectures/${l.id}`}>Watch</a>
+            </div>
+          ))
+        ) : (
+          <div class="catch-item"><span class="txt"><strong>No missed lectures</strong><span>You are up to date.</span></span><span class="okic"><Icon name="check_circle" /></span></div>
+        )}
+        {missed.length > 8 && <a class="small" href="/lectures">See all {missed.length} missed lectures</a>}
+      </section>
+      <section class="card catch">
+        <div class="catch-head"><Icon name="quiz" size={20} />Missed practice questions</div>
+        {wrong ? (
+          <div class="catch-item alert">
+            <span class="txt"><strong>{wrong} question{wrong === 1 ? '' : 's'} to retry</strong><span>Answered incorrectly last time.</span></span>
+            <RetryForm pool="incorrect" n={wrong} label="Retry" />
+          </div>
+        ) : (
+          <div class="catch-item"><span class="txt"><strong>Zero unresolved questions</strong><span>All attempted questions are currently answered correctly.</span></span><span class="okic"><Icon name="check_circle" /></span></div>
+        )}
+        {flagged > 0 && (
+          <div class="catch-item">
+            <span class="txt"><strong>{flagged} flagged question{flagged === 1 ? '' : 's'}</strong><span>You marked these for later.</span></span>
+            <RetryForm pool="custom" n={flagged} label="Practice" />
+          </div>
+        )}
+      </section>
+      <div class="row between">
+        <a class="link-btn" href="/dashboard">Back to Dashboard</a>
+        <a class="btn btn-primary" href="/lectures">Browse all lectures</a>
+      </div>
     </PortalLayout>,
   );
 });
@@ -766,43 +1148,42 @@ portal.get('/exam-window', async (c) => {
   const windowStart = cohort ? fmtDate(dayDate(cohort, cohort.lecture_days + 1), { month: 'long', day: 'numeric' }) : '';
   const windowEnd = cohort ? fmtDate(dayDate(cohort, cohort.total_days), { month: 'long', day: 'numeric' }) : '';
   return c.html(
-    <PortalLayout title="Exam window" active="exam" user={user}>
-      <Eyebrow>Days 91 to 100</Eyebrow>
-      <h1>Your exam window</h1>
-      {cohort && <p class="muted">{windowStart} to {windowEnd}. Test centers fill up, so book your date first.</p>}
-      <div class="grid" style="align-items:start">
-        <section class="card">
-          <h2>Your exam checklist</h2>
+    <PortalLayout shell={c.get('shell')} title="Exam window" active="exam" user={user}>
+      <PageHead eyebrow={`Days ${cohort ? cohort.lecture_days + 1 : 91} to ${cohort?.total_days ?? 100}`} title="Your exam window" sub={cohort ? `${windowStart} to ${windowEnd}. Test centers fill up, so book your date first.` : undefined} />
+      <section class="card card-cream">
+        <Eyebrow>Group practice test</Eyebrow>
+        <h2>Full practice exam with your class</h2>
+        {settings.practice_test_when ? <p><strong>{settings.practice_test_when}</strong></p> : <p>Your instructor will post the date and Zoom link here.</p>}
+        {isHttpUrl(settings.practice_test_link) && (
+          <a class="btn btn-primary" href={settings.practice_test_link} rel="noopener" style="align-self:flex-start"><Icon name="videocam" size={18} />Join on Zoom</a>
+        )}
+      </section>
+      <section class="card">
+        <h2>Your exam checklist</h2>
+        <div class="opt-list">
           {steps.map(([t, s], i) => (
-            <label class="check" style="align-items:flex-start;padding:8px 0;border-top:1px solid var(--line-soft)">
+            <label class="opt">
               <input type="checkbox" data-step={String(i)} />
-              <span><strong>{t}</strong><br /><span class="muted small">{s}</span></span>
+              <span class="ot"><strong>{t}</strong><span>{s}</span></span>
             </label>
           ))}
-        </section>
-        <div class="stack">
-          <section class="card card-sand">
-            <Eyebrow>Group practice test</Eyebrow>
-            <h2>Full practice exam with your class</h2>
-            {settings.practice_test_when ? <p><strong>{settings.practice_test_when}</strong></p> : <p>Your instructor will post the date and Zoom link here.</p>}
-            {isHttpUrl(settings.practice_test_link) && (
-              <a class="btn btn-primary" href={settings.practice_test_link} rel="noopener" style="align-self:flex-start">Join on Zoom</a>
-            )}
-          </section>
-          <section class="card">
-            <h2>Your last weak areas</h2>
-            {scores.length ? (
-              scores.map((s) => (
-                <a class="row between" href="/create-test" style="text-decoration:none;color:inherit;border-top:1px solid var(--line-soft);padding-top:10px">
-                  <strong>{s.name}</strong><span class="chip chip-sand">{s.pct}% · Practice</span>
-                </a>
-              ))
-            ) : (
-              <p class="muted">Answer at least 5 questions in an area to see it here.</p>
-            )}
-          </section>
         </div>
-      </div>
+      </section>
+      <section class="card">
+        <h2>Your last weak areas</h2>
+        {scores.length ? (
+          <div class="perf-list">
+            {scores.map((s) => (
+              <a class="perf-row" href="/create-test" style="text-decoration:none">
+                <div class="pr"><span>{s.name}</span><b>{s.pct}%</b></div>
+                <div class={'bar' + (s.pct < 60 ? ' bar-amber' : '')}><i style={`width:${s.pct}%`}></i></div>
+              </a>
+            ))}
+          </div>
+        ) : (
+          <p class="muted">Answer at least 5 questions in an area to see it here.</p>
+        )}
+      </section>
       <script
         dangerouslySetInnerHTML={{
           __html: `(function(){var k='u100-exam-steps';var s={};try{s=JSON.parse(localStorage.getItem(k)||'{}')}catch(e){}document.querySelectorAll('[data-step]').forEach(function(b){b.checked=!!s[b.dataset.step];b.addEventListener('change',function(){s[b.dataset.step]=b.checked;try{localStorage.setItem(k,JSON.stringify(s))}catch(e){}})})})();`,
@@ -816,12 +1197,26 @@ portal.get('/exam-window', async (c) => {
 
 portal.get('/book', async (c) => {
   const settings = await getSettings(c.env.DB);
-  if (isHttpUrl(settings.calendly_url)) return c.redirect(settings.calendly_url);
+  const enr = c.get('enrollment');
+  const booking = isHttpUrl(settings.calendly_url) ? settings.calendly_url : null;
   return c.html(
-    <PortalLayout title="1-on-1" active="book" user={c.get('user')!}>
-      <Eyebrow>Help</Eyebrow>
-      <h1>Book a one-on-one session</h1>
-      <p class="muted">Online booking opens soon. Until then, email {settings.contact_email} to book.</p>
+    <PortalLayout shell={c.get('shell')} title="1-on-1 Tutoring" active="book" user={c.get('user')!}>
+      <PageHead eyebrow="1-on-1 Tutoring" title="Schedule a 1-on-1 Session" sub="Book a 60-minute private tutoring session with Dr. Khan over Zoom to review weak areas, NBME blocks, and exam strategy." />
+      <section class="card card-sage">
+        <h2>1-on-1 Tutoring</h2>
+        <div class="stack" style="gap:8px">
+          <span class="row" style="gap:10px"><Icon name="person" size={20} class="muted" />Dr. Khan</span>
+          <span class="row" style="gap:10px"><Icon name="schedule" size={20} class="muted" />60 minutes</span>
+          <span class="row" style="gap:10px"><Icon name="videocam" size={20} class="muted" />Live over Zoom</span>
+        </div>
+        <p class="small">Bring a topic, a failed block, or a stem you cannot crack. One hour, one student, no script.</p>
+        {enr && enr.one_on_one_sessions > 0 && <p class="small"><strong>Your program includes {enr.one_on_one_sessions} sessions.</strong></p>}
+        {booking ? (
+          <a class="btn btn-primary" href={booking} rel="noopener" style="align-self:flex-start"><Icon name="calendar" size={18} />Open booking calendar</a>
+        ) : (
+          <p>Online booking opens soon. Until then, email <a href={`mailto:${settings.contact_email}?subject=${encodeURIComponent('USMLE100: 1-on-1 session')}`}>{settings.contact_email}</a> to book.</p>
+        )}
+      </section>
     </PortalLayout>,
   );
 });

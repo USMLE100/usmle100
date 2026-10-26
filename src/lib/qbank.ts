@@ -64,7 +64,8 @@ export function shuffle<T>(arr: T[]): T[] {
 export type Score = { id: number; name: string; answered: number; correct: number };
 
 /** Percent correct per reporting category, from every question the student has answered. */
-export async function scoresBy(db: D1Database, userId: number, dim: 'perf_system' | 'discipline'): Promise<Score[]> {
+/** Scores by reporting system or discipline. `sinceUtc` ("YYYY-MM-DD HH:MM:SS") limits it to recent answers. */
+export async function scoresBy(db: D1Database, userId: number, dim: 'perf_system' | 'discipline', sinceUtc?: string): Promise<Score[]> {
   const table = dim === 'perf_system' ? 'perf_systems' : 'disciplines';
   const col = dim === 'perf_system' ? 'perf_system_id' : 'discipline_id';
   const { results } = await db
@@ -76,9 +77,10 @@ export async function scoresBy(db: D1Database, userId: number, dim: 'perf_system
        LEFT JOIN questions q ON q.${col} = c.id
        LEFT JOIN test_items ti ON ti.question_id = q.id AND ti.chosen_index IS NOT NULL
          AND ti.test_id IN (SELECT id FROM tests WHERE user_id = ?)
+         AND (? IS NULL OR ti.answered_at >= ?)
        GROUP BY c.id ORDER BY c.sort`,
     )
-    .bind(userId)
+    .bind(userId, sinceUtc ?? null, sinceUtc ?? null)
     .all<Score>();
   return results;
 }

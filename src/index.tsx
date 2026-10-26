@@ -6,6 +6,7 @@ import { pruneLoginAttempts } from './lib/ratelimit';
 import { pruneResetTokens } from './lib/reset';
 import { zoom } from './routes/zoom';
 import { loadUser, sameOrigin } from './lib/auth';
+import { loadShell } from './lib/shell';
 import { ensureMigrated } from './lib/migrate';
 import { publicRoutes } from './routes/public';
 import { portal } from './routes/portal';
@@ -34,6 +35,12 @@ app.use('*', async (c, next) => {
 });
 app.use('*', loadUser);
 app.use('*', sameOrigin);
+// Top-bar and menu data (study streak, lecture progress) for signed-in page views.
+app.use('*', async (c, next) => {
+  const user = c.get('user');
+  if (user && c.req.method === 'GET') c.set('shell', await loadShell(c.env.DB, user.id, c.get('enrollment')?.cohort_id ?? null));
+  await next();
+});
 
 app.route('/', publicRoutes);
 app.route('/zoom', zoom);

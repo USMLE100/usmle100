@@ -39,9 +39,13 @@ export type Enrollment = {
   lectures_until: string | null;
 };
 
+/** Data every portal page shows in its top bar and menu. */
+export type Shell = { streak: number; lecturesDone: number; lecturesTotal: number; contact: string };
+
 export type Vars = {
   user: User | null;
   enrollment: Enrollment | null;
+  shell?: Shell;
 };
 
 export type AppEnv = { Bindings: Env; Variables: Vars };

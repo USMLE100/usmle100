@@ -50,7 +50,7 @@ admin.get('/lectures', async (c) => {
   const webhookUrl = new URL('/zoom/webhook', c.env.SITE_URL || c.req.url).toString();
   const adminUser = isAdmin(user);
   return c.html(
-    <PortalLayout title="Admin: lectures" active="admin-lectures" user={user}>
+    <PortalLayout shell={c.get('shell')} title="Admin: lectures" active="admin-lectures" user={user}>
       <Eyebrow>Admin</Eyebrow>
       <h1>Lectures</h1>
       {c.req.query('ok') && <Flash>Saved.</Flash>}
@@ -280,7 +280,7 @@ admin.get('/team', async (c) => {
   const me = c.get('user')!;
   const staff = (await c.env.DB.prepare("SELECT id, name, email, role, created_at FROM users WHERE role IN ('admin', 'faculty') ORDER BY role, name COLLATE NOCASE").all<any>()).results;
   return c.html(
-    <PortalLayout title="Admin: team" active="admin-team" user={me}>
+    <PortalLayout shell={c.get('shell')} title="Admin: team" active="admin-team" user={me}>
       <Eyebrow>Admin</Eyebrow>
       <h1>Team</h1>
       {c.req.query('ok') && <Flash>Saved.</Flash>}
@@ -353,7 +353,7 @@ admin.get('/students', async (c) => {
   const today = new Date(todayUtc()).toISOString().slice(0, 10);
   const long = (d: string) => fmtDate(new Date(d + 'T00:00:00Z'), { month: 'short', day: 'numeric', year: 'numeric' });
   return c.html(
-    <PortalLayout title="Admin: students" active="admin-students" user={c.get('user')!}>
+    <PortalLayout shell={c.get('shell')} title="Admin: students" active="admin-students" user={c.get('user')!}>
       <Eyebrow>Admin</Eyebrow>
       <h1>Students</h1>
       {c.req.query('ok') && <Flash>Saved.</Flash>}
@@ -412,7 +412,7 @@ admin.post('/reset-link', async (c) => {
   c.header('Cache-Control', 'no-store');
   if (!u) {
     return c.html(
-      <PortalLayout title="Password reset link" active="admin-students" user={me}>
+      <PortalLayout shell={c.get('shell')} title="Password reset link" active="admin-students" user={me}>
         <Eyebrow>Admin · Students</Eyebrow>
         <h1>Password reset link</h1>
         <Flash kind="error">No account uses {email}.</Flash>
@@ -424,7 +424,7 @@ admin.post('/reset-link', async (c) => {
   const token = await createResetToken(c.env.DB, u.id, me.id);
   const link = new URL('/reset-password?token=' + token, c.env.SITE_URL || c.req.url).toString();
   return c.html(
-    <PortalLayout title="Password reset link" active="admin-students" user={me}>
+    <PortalLayout shell={c.get('shell')} title="Password reset link" active="admin-students" user={me}>
       <Eyebrow>Admin · Students</Eyebrow>
       <h1>Password reset link</h1>
       <section class="card">
@@ -467,7 +467,7 @@ admin.get('/evening', async (c) => {
   const ids = (await db.prepare("SELECT value FROM settings WHERE key = 'zoom_evening_meeting_ids'").first<{ value: string }>())?.value ?? '';
   const adminUser = isAdmin(c.get('user'));
   return c.html(
-    <PortalLayout title="Admin: Evening Questions" active="admin-evening" user={c.get('user')!}>
+    <PortalLayout shell={c.get('shell')} title="Admin: Evening Questions" active="admin-evening" user={c.get('user')!}>
       <Eyebrow>Admin</Eyebrow>
       <h1>Evening Questions</h1>
       {c.req.query('ok') && <Flash>Saved.</Flash>}
@@ -638,7 +638,7 @@ admin.get('/questions', async (c) => {
     ).bind(status).all<any>()
   ).results;
   return c.html(
-    <PortalLayout title="Admin: questions" active="admin-questions" user={user}>
+    <PortalLayout shell={c.get('shell')} title="Admin: questions" active="admin-questions" user={user}>
       <Eyebrow>Admin</Eyebrow>
       <h1>Questions</h1>
       {c.req.query('ok') && <Flash>{c.req.query('ok')}</Flash>}
@@ -766,7 +766,7 @@ function readQuestionForm(f: Record<string, any>, tax: Taxonomy) {
 admin.get('/questions/new', async (c) => {
   const tax = await taxonomy(c.env.DB);
   return c.html(
-    <PortalLayout title="Write a question" active="admin-questions" user={c.get('user')!}>
+    <PortalLayout shell={c.get('shell')} title="Write a question" active="admin-questions" user={c.get('user')!}>
       <Eyebrow>Admin · Questions</Eyebrow>
       <h1>Write a question</h1>
       {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
@@ -799,7 +799,7 @@ admin.get('/questions/template.csv', (c) => {
 admin.get('/questions/import', async (c) => {
   const tax = await taxonomy(c.env.DB);
   return c.html(
-    <PortalLayout title="Import questions" active="admin-questions" user={c.get('user')!}>
+    <PortalLayout shell={c.get('shell')} title="Import questions" active="admin-questions" user={c.get('user')!}>
       <Eyebrow>Admin · Questions</Eyebrow>
       <h1>Import a spreadsheet</h1>
       {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
@@ -880,7 +880,7 @@ admin.post('/questions/import', async (c) => {
   });
   if (errors.length) {
     return c.html(
-      <PortalLayout title="Import questions" active="admin-questions" user={user}>
+      <PortalLayout shell={c.get('shell')} title="Import questions" active="admin-questions" user={user}>
         <Eyebrow>Admin · Questions</Eyebrow>
         <h1>Nothing was imported</h1>
         <Flash kind="error">Fix these {errors.length} row(s) and upload the file again. No questions were saved.</Flash>
@@ -899,7 +899,7 @@ admin.get('/questions/:id{[0-9]+}', async (c) => {
   const q = await c.env.DB.prepare('SELECT * FROM questions WHERE id = ?').bind(Number(c.req.param('id'))).first<any>();
   if (!q) return c.notFound();
   return c.html(
-    <PortalLayout title={`Question ${q.id}`} active="admin-questions" user={c.get('user')!}>
+    <PortalLayout shell={c.get('shell')} title={`Question ${q.id}`} active="admin-questions" user={c.get('user')!}>
       <Eyebrow>Admin · Question {q.id} · {q.status}</Eyebrow>
       <h1>Edit question</h1>
       {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
@@ -929,7 +929,7 @@ admin.get('/settings', async (c) => {
   const settings = await getSettings(c.env.DB);
   const pkgs = (await c.env.DB.prepare('SELECT id, name, price_cents FROM packages ORDER BY sort').all<{ id: string; name: string; price_cents: number }>()).results;
   return c.html(
-    <PortalLayout title="Site settings" active="admin-settings" user={c.get('user')!}>
+    <PortalLayout shell={c.get('shell')} title="Site settings" active="admin-settings" user={c.get('user')!}>
       <Eyebrow>Admin</Eyebrow>
       <h1>Site settings</h1>
       {c.req.query('ok') && <Flash>Saved. Changes show on the site straight away.</Flash>}
