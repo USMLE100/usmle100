@@ -160,9 +160,10 @@ portal.get('/dashboard', async (c) => {
       .all<{ id: number; name: string; lectures: number; watched: number; questions: number; answered: number }>(),
     eveningAccess(db, user),
   ]);
+  const ended = await lecturesEndedOn(c, cohort);
   const todays = lectures.find((l) => l.day_number === today);
   const done = lectures.filter((l) => l.completed_at).length;
-  const missed = lectures.filter((l) => l.day_number < today && l.status === 'live' && !l.completed_at);
+  const missed = ended ? [] : lectures.filter((l) => l.day_number < today && l.status === 'live' && !l.completed_at);
   const answeredQs = statuses.filter((s) => s.status === 'correct' || s.status === 'incorrect');
   const correctQs = statuses.filter((s) => s.status === 'correct').length;
   const wrong = statuses.filter((s) => s.status === 'incorrect').length;
@@ -170,11 +171,11 @@ portal.get('/dashboard', async (c) => {
   const lPct = cohort.lecture_days ? Math.round((done / cohort.lecture_days) * 100) : 0;
   const streak = streakFrom(byDay);
   const qToday = questionsToday(byDay);
-  const classToday = !weekend && today >= 1 && today <= cohort.lecture_days;
+  const classToday = !ended && !weekend && today >= 1 && today <= cohort.lecture_days;
   const todayLectureDone = !!todays?.completed_at;
 
   // Continue where you left off: an unfinished test first, then today's or the oldest missed lecture.
-  const nextLecture = todays && todays.status === 'live' && !todays.completed_at ? todays : missed[0];
+  const nextLecture = ended ? undefined : todays && todays.status === 'live' && !todays.completed_at ? todays : missed[0];
   const cont = openTest
     ? { href: `/tests/${openTest.id}/${openTest.next}`, icon: 'quiz' as IconName, kicker: 'Continue your test', title: `${openTest.mode === 'timed' ? 'Timed' : openTest.mode === 'untimed' ? 'Untimed' : 'Tutor'} test · question ${openTest.next} of ${openTest.n}`, sub: 'Pick up where you stopped' }
     : nextLecture
@@ -204,6 +205,7 @@ portal.get('/dashboard', async (c) => {
           <h1>Welcome back, {firstName(user)}</h1>
         </div>
         <LectureNotice n={lectureNotice(c, cohort)} />
+        {ended && <Flash>Your lecture recordings closed on {fmtDate(new Date(ended + 'T00:00:00Z'), { month: 'long', day: 'numeric', year: 'numeric' })}. The question bank and your progress stay open.</Flash>}
 
         {cont && (
           <a class="card continue" href={cont.href} style="text-decoration:none">
@@ -227,7 +229,7 @@ portal.get('/dashboard', async (c) => {
         </div>
 
         <h2 class="section-title" id="streak">Today</h2>
-        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));align-items:stretch">
+        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr));align-items:stretch">
           <section class="card">
             <h3>Today’s study goal</h3>
             {classToday ? (
@@ -297,7 +299,7 @@ portal.get('/dashboard', async (c) => {
         {subjects.length > 0 && (
           <>
             <h2 class="section-title">Subjects</h2>
-            <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
+            <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))">
               {subjects.map((s) => (
                 <section class="card subject">
                   <div class="subject-top">
@@ -1045,7 +1047,7 @@ portal.get('/performance', async (c) => {
         <div class="stat s3"><b>{tests?.n ?? 0}</b><span>tests</span></div>
         <div class="stat s4"><b>{omitted?.n ?? 0}</b><span>omitted</span></div>
       </div>
-      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-items:start;gap:20px">
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));align-items:start;gap:20px">
         <List title={`Performance by System (${bySystem.length})`} rows={bySystem} />
         <List title={`Performance by Discipline (${byDiscipline.length})`} rows={byDiscipline} />
       </div>
