@@ -75,7 +75,7 @@ export type Vars = {
   user: User | null;
   enrollment: Enrollment | null;
   shell?: Shell;
-  session?: { tokenHash: string; createdAt: number; lastSeenAt: number; reauthAt: number | null; deviceHash?: string | null; verifyPending?: boolean };
+  session?: { tokenHash: string; createdAt: number; lastSeenAt: number; reauthAt: number | null; deviceHash?: string | null; verifyPending?: boolean; verifyReason?: string | null };
   /** Set when this request found the session ended: 'idle' (30 minutes) or 'expired' (24 hours). */
   sessionEnded?: 'idle' | 'expired';
 };

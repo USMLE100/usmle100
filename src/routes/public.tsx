@@ -8,6 +8,7 @@ import { signInRisk, RISK_TEXT } from '../lib/risk';
 import { emailReady, notify, sendCode, sendEmail, smsReady, checkCode } from '../lib/messaging';
 import { accountLocked, clearFailures, rateHit, unlockAccount, emailKey, ipKey, lockedFor, recordFailure } from '../lib/ratelimit';
 import { MIN_PASSWORD, passwordProblem } from '../lib/passwords';
+import { hasPasskey } from '../lib/passkeys';
 import { EXAMS, MARKETING_TEXT, gradYears, normalizePhone, validName } from '../lib/profile';
 import { audit } from '../lib/audit';
 import { consumeResetToken, createResetToken, resetTokenUser } from '../lib/reset';
@@ -547,11 +548,14 @@ publicRoutes.post('/sign-in', async (c) => {
   // Risky sign-ins get an extra email/phone code check before protected content opens (when email is set up).
   const risk = u.role === 'student' ? await signInRisk(c.env.DB, u.id, where.country, !!dev.fresh) : null;
   const check = risk && emailReady(c.env) ? risk : null;
-  await createSession(c, u.id, dev.hash, check);
-  await audit(c.env.DB, { actorId: u.id, action: 'signin.ok', targetUserId: u.id, detail: { ...where, risk }, ip });
+  // Staff with a passkey confirm with it after the password (phishing-resistant sign-in).
+  const pk = u.role !== 'student' && (await hasPasskey(c.env.DB, u.id));
+  await createSession(c, u.id, dev.hash, pk ? 'passkey' : check);
+  await audit(c.env.DB, { actorId: u.id, action: 'signin.ok', targetUserId: u.id, detail: { ...where, risk, passkeyStep: pk }, ip });
   if (risk === 'new-device' || risk === 'new-country') {
     await notify(c.env, u.id, { kind: 'security', title: 'New sign-in to your account', body: `${RISK_TEXT[risk]} ${where.device}${where.country ? ` in ${where.country}` : ''}. If this wasn’t you, open My account, press “This wasn’t me” and change your password.` });
   }
+  if (pk) return c.redirect('/account/passkey/sign-in?next=' + encodeURIComponent(safeNext(f.next)));
   return c.redirect(check ? '/account/check-sign-in' : safeNext(f.next));
 });
 
@@ -682,7 +686,8 @@ publicRoutes.post('/reset-password', async (c) => {
   const role = (await c.env.DB.prepare('SELECT role FROM users WHERE id = ?').bind(u.id).first<{ role: string }>())?.role ?? 'student';
   const dev = await deviceGate(c, u.id, role);
   if (!dev.ok) return c.html(<AuthPage mode="in" notice={'Your new password is saved. ' + DEVICE_MSG[dev.reason]} user={null} />, 403);
-  await createSession(c, u.id, dev.hash);
+  const pk = role !== 'student' && (await hasPasskey(c.env.DB, u.id));
+  await createSession(c, u.id, dev.hash, pk ? 'passkey' : null);
   await audit(c.env.DB, { actorId: u.id, action: 'password.reset', targetUserId: u.id, ip: c.req.header('cf-connecting-ip') ?? null });
   await notify(c.env, u.id, { kind: 'security', title: 'Password changed', body: 'Your password was reset with a recovery link and other devices were signed out. If this wasn’t you, contact USMLE100 right away.', sms: true });
   return c.redirect('/dashboard');

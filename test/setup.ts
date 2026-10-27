@@ -16,3 +16,13 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   return realFetch(input as any, init);
 }) as typeof fetch;
+
+// Most tests make staff accounts directly and don't use passkeys; test/passkeys.test.ts turns the requirement back on.
+import { beforeAll } from 'vitest';
+import { env } from 'cloudflare:workers';
+import { ensureMigrated } from '../src/lib/migrate';
+beforeAll(async () => {
+  const db = (env as any).DB as D1Database;
+  await ensureMigrated(db);
+  await db.prepare("INSERT INTO settings (key, value) VALUES ('staff_passkeys', '0') ON CONFLICT (key) DO UPDATE SET value = '0'").run();
+});

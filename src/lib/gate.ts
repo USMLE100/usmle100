@@ -1,4 +1,5 @@
 import type { Context, Next } from 'hono';
+import { hasPasskey, passkeysRequired } from './passkeys';
 import type { AppEnv } from './types';
 import { isOwner, isStaff } from './types';
 
@@ -37,6 +38,16 @@ export async function accountGate(c: Context<AppEnv>, next: Next) {
   const user = c.get('user');
   const p = c.req.path.replace(/\/+$/, '') || '/';
   if (!user || isPublic(p)) return next();
+  // Staff sign-ins wait for the passkey (second step) before anything else opens.
+  const sess = c.get('session');
+  const pkPath = p.startsWith('/account/passkey') || p === '/sign-out' || isSession(p);
+  if (sess?.verifyPending && sess.verifyReason === 'passkey') {
+    return pkPath ? next() : apiOrRedirect(c, p, '/account/passkey/sign-in?next=' + encodeURIComponent(c.req.method === 'GET' ? c.req.path : '/dashboard'));
+  }
+  // Staff without a passkey must set one up before using anything else (owner, admins and faculty).
+  if (isStaff(user) && !pkPath && (await passkeysRequired(c.env.DB, user)) && !(await hasPasskey(c.env.DB, user.id))) {
+    return apiOrRedirect(c, p, '/account/passkeys');
+  }
   // A risky sign-in must pass the extra email/phone check before anything else opens (risk-based verification).
   if (c.get('session')?.verifyPending && !p.startsWith('/account/check-sign-in') && p !== '/sign-out' && !isSession(p) && p !== '/play/release') {
     return apiOrRedirect(c, p, '/account/check-sign-in');

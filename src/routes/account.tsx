@@ -289,6 +289,13 @@ account.get('/account', requireUser, async (c) => {
           <button class="btn btn-primary" type="submit" style="align-self:flex-start">Change password</button>
         </form>
       </section>
+      {isStaff(u) && (
+        <section class="card stack" id="passkeys">
+          <h2 style="margin:0">Passkeys</h2>
+          <p class="muted" style="margin:0">Staff accounts confirm each sign-in and every owner-only change with a passkey.</p>
+          <a class="btn btn-outline" href="/account/passkeys" style="align-self:flex-start">Manage passkeys and recovery codes</a>
+        </section>
+      )}
 
       {!isStaff(u) && (
         <section class="card stack" id="devices">

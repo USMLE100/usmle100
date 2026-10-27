@@ -6,6 +6,8 @@ import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { audit, verifyAuditChain } from '../lib/audit';
 import { unlockAccount } from '../lib/ratelimit';
 import { lockdownOn } from '../lib/gate';
+import { hasPasskey } from '../lib/passkeys';
+import { PASSKEY_PAGE_JS, WEBAUTHN_JS } from './passkeys';
 import { notify } from '../lib/messaging';
 import { FREE_VIEWS, PAID_VIEWS, itemLabel, parseKey, titleOf } from '../lib/viewing';
 
@@ -22,24 +24,35 @@ const safeNext = (n: unknown) => (typeof n === 'string' && n.startsWith('/admin'
 
 // ---------- Owner re-confirmation (step-up before owner-only changes) ----------
 
-const ConfirmPage = (p: { user: any; shell: any; next: string; error?: string }) => (
+const ConfirmPage = (p: { user: any; shell: any; next: string; error?: string; passkey: boolean }) => (
   <PortalLayout shell={p.shell} title="Confirm it’s you" active="admin-security" user={p.user}>
     <Eyebrow>Owner</Eyebrow>
     <h1>Confirm it’s you</h1>
-    <p class="muted">Owner-only changes need your password again. You won’t be asked again for {REAUTH_SECONDS / 60} minutes.</p>
-    {p.error && <Flash kind="error">{p.error}</Flash>}
-    <form method="post" action="/admin/confirm" class="card stack" style="gap:14px;max-width:420px">
-      <input type="hidden" name="next" value={p.next} />
-      <label class="field">Password<input type="password" name="password" required autocomplete="current-password" /></label>
-      <button class="btn btn-primary" type="submit">Confirm</button>
-    </form>
+    {p.passkey ? (
+      <>
+        <p class="muted">Owner-only changes need a fresh confirmation with your passkey. You won’t be asked again for {REAUTH_SECONDS / 60} minutes.</p>
+        <p id="pk-msg" class="flash" hidden role="status"></p>
+        <button class="btn btn-primary" type="button" data-pk="auth" data-purpose="stepup" data-next={p.next} style="align-self:flex-start">Confirm with my passkey</button>
+        <script dangerouslySetInnerHTML={{ __html: WEBAUTHN_JS + PASSKEY_PAGE_JS }} />
+      </>
+    ) : (
+      <>
+        <p class="muted">Owner-only changes need your password again. You won’t be asked again for {REAUTH_SECONDS / 60} minutes.</p>
+        {p.error && <Flash kind="error">{p.error}</Flash>}
+        <form method="post" action="/admin/confirm" class="card stack" style="gap:14px;max-width:420px">
+          <input type="hidden" name="next" value={p.next} />
+          <label class="field">Password<input type="password" name="password" required autocomplete="current-password" /></label>
+          <button class="btn btn-primary" type="submit">Confirm</button>
+        </form>
+      </>
+    )}
   </PortalLayout>
 );
 
-security.get('/confirm', (c) => {
+security.get('/confirm', async (c) => {
   const u = c.get('user')!;
   if (!isOwner(u)) return c.text('Only the owner can do this.', 403);
-  return c.html(<ConfirmPage user={u} shell={c.get('shell')} next={safeNext(c.req.query('next'))} />);
+  return c.html(<ConfirmPage user={u} shell={c.get('shell')} next={safeNext(c.req.query('next'))} passkey={await hasPasskey(c.env.DB, u.id)} />);
 });
 
 security.post('/confirm', async (c) => {
@@ -47,10 +60,12 @@ security.post('/confirm', async (c) => {
   if (!isOwner(u)) return c.text('Only the owner can do this.', 403);
   const f = await c.req.parseBody();
   const next = safeNext(f.next);
+  // With a passkey set up, a password alone is no longer enough for owner-only changes (fresh MFA, R021).
+  if (await hasPasskey(c.env.DB, u.id)) return c.redirect('/admin/confirm?next=' + encodeURIComponent(next));
   const row = await c.env.DB.prepare('SELECT password_hash, password_salt FROM users WHERE id = ?').bind(u.id).first<{ password_hash: string; password_salt: string }>();
   if (!row || !(await verifyPassword(String(f.password ?? ''), row.password_hash, row.password_salt))) {
     await audit(c.env.DB, { actorId: u.id, action: 'owner.confirm_failed', targetUserId: u.id, ip: ip(c) });
-    return c.html(<ConfirmPage user={u} shell={c.get('shell')} next={next} error="That password is not right." />, 401);
+    return c.html(<ConfirmPage user={u} shell={c.get('shell')} next={next} passkey={false} error="That password is not right." />, 401);
   }
   await c.env.DB.prepare('UPDATE sessions SET reauth_at = ? WHERE token_hash = ?').bind(Math.floor(Date.now() / 1000), c.get('session')!.tokenHash).run();
   await audit(c.env.DB, { actorId: u.id, action: 'owner.confirmed', targetUserId: u.id, ip: ip(c) });

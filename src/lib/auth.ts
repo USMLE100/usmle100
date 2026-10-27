@@ -112,11 +112,11 @@ export async function loadUser(c: Context<AppEnv>, next: Next) {
     const row = await c.env.DB.prepare(
       `SELECT u.id, u.email, u.name, u.role, u.exam_date, u.exam, u.onboarded_at, u.is_owner, u.status, u.status_reason, u.warnings, u.birth_date,
               u.first_name, u.last_name, u.phone, u.grad_year, u.marketing_opt_in, u.email_verified_at, u.phone_verified_at,
-              s.created_at AS s_created, s.last_seen_at AS s_seen, s.reauth_at AS s_reauth, s.device_id AS s_device, s.verify_pending AS s_verify
+              s.created_at AS s_created, s.last_seen_at AS s_seen, s.reauth_at AS s_reauth, s.device_id AS s_device, s.verify_pending AS s_verify, s.verify_reason AS s_vreason
        FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`,
     )
       .bind(th)
-      .first<User & { s_created: number | null; s_seen: number | null; s_reauth: number | null; s_device: string | null; s_verify: number | null }>();
+      .first<User & { s_created: number | null; s_seen: number | null; s_reauth: number | null; s_device: string | null; s_verify: number | null; s_vreason: string | null }>();
     const created = row?.s_created ?? t;
     const seen = row?.s_seen ?? t;
     if (row && (t - seen > IDLE_SECONDS || t - created > MAX_SESSION_SECONDS)) {
@@ -124,9 +124,9 @@ export async function loadUser(c: Context<AppEnv>, next: Next) {
       deleteCookie(c, COOKIE, { path: '/' });
       c.set('sessionEnded', t - created > MAX_SESSION_SECONDS ? 'expired' : 'idle');
     } else if (row) {
-      const { s_created, s_seen, s_reauth, s_device, s_verify, ...user } = row;
+      const { s_created, s_seen, s_reauth, s_device, s_verify, s_vreason, ...user } = row;
       c.set('user', user as User);
-      c.set('session', { tokenHash: th, createdAt: created, lastSeenAt: seen, reauthAt: s_reauth ?? null, deviceHash: s_device ?? null, verifyPending: !!s_verify });
+      c.set('session', { tokenHash: th, createdAt: created, lastSeenAt: seen, reauthAt: s_reauth ?? null, deviceHash: s_device ?? null, verifyPending: !!s_verify, verifyReason: s_vreason ?? null });
       // Activity extends the session (written at most once a minute). The status check does not count.
       if (c.req.path !== '/session/status' && t - seen >= 60) {
         await c.env.DB.prepare('UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?').bind(t, th).run();
