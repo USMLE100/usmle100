@@ -74,6 +74,21 @@ security.post('/confirm', async (c) => {
 
 // ---------- Security page ----------
 
+/** Turns a log entry's stored details into short readable text ("country: US · device: Chrome on Mac"). */
+export function readableDetail(raw: string) {
+  try {
+    const d = JSON.parse(raw);
+    if (!d || typeof d !== 'object') return String(raw).slice(0, 160);
+    return Object.entries(d)
+      .filter(([, v]) => v !== null && v !== undefined && v !== '' && v !== false)
+      .map(([k, v]) => `${k.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').toLowerCase()}: ${typeof v === 'object' ? JSON.stringify(v) : v === true ? 'yes' : v}`)
+      .join(' · ')
+      .slice(0, 200);
+  } catch {
+    return String(raw).slice(0, 160);
+  }
+}
+
 const ACTION_LABEL: Record<string, string> = {
   'signin.ok': 'Signed in',
   'signin.failed': 'Wrong password',
@@ -237,7 +252,7 @@ security.get('/security', async (c) => {
             {log.results.map((e: any) => (
               <tr>
                 <td class="small muted">{String(e.at).slice(0, 16).replace('T', ' ')}</td>
-                <td class="small">{ACTION_LABEL[e.action] ?? e.action}{e.detail && <><br /><span class="muted">{String(e.detail).slice(0, 160)}</span></>}</td>
+                <td class="small">{ACTION_LABEL[e.action] ?? e.action}{e.detail && <><br /><span class="muted">{readableDetail(e.detail)}</span></>}</td>
                 <td class="small">{e.actor ?? '—'}</td>
                 <td class="small">{e.target ?? ''}{e.target_email && <><br /><span class="muted">{e.target_email}</span></>}</td>
                 <td class="small muted">{e.ip ?? ''}</td>

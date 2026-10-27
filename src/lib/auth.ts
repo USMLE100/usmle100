@@ -279,3 +279,9 @@ async function logged(c: Context<AppEnv>, next: Next) {
   } catch {}
   await audit(c.env.DB, { actorId: c.get('user')!.id, action: 'admin.post', detail: { path: c.req.path, ...fields }, ip: c.req.header('cf-connecting-ip') ?? null });
 }
+
+/** Every few minutes: remove sign-ins that can no longer be used (idle 30 minutes, or older than 24 hours). */
+export async function pruneSessions(db: D1Database) {
+  const t = Math.floor(Date.now() / 1000);
+  await db.prepare('DELETE FROM sessions WHERE last_seen_at < ? OR created_at < ?').bind(t - IDLE_SECONDS, t - MAX_SESSION_SECONDS).run();
+}

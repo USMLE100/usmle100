@@ -209,10 +209,14 @@ account.get('/account', requireUser, async (c) => {
   const full = (await db.prepare('SELECT * FROM users WHERE id = ?').bind(u.id).first<any>())!;
   const me = c.get('session')!;
   const [sessions, devices, history, notices, pendingContact, privacy, signed] = await Promise.all([
-    db.prepare('SELECT rowid AS rid, token_hash, created_at, last_seen_at, ip, country, user_agent FROM sessions WHERE user_id = ? ORDER BY last_seen_at DESC').bind(u.id).all<any>(),
+    // Only sign-ins that are still valid (active in the last 30 minutes and less than 24 hours old).
+    db
+      .prepare('SELECT rowid AS rid, token_hash, created_at, last_seen_at, ip, country, user_agent FROM sessions WHERE user_id = ? AND last_seen_at > ? AND created_at > ? ORDER BY last_seen_at DESC LIMIT 20')
+      .bind(u.id, Math.floor(Date.now() / 1000) - IDLE_SECONDS, Math.floor(Date.now() / 1000) - MAX_SESSION_SECONDS)
+      .all<any>(),
     db.prepare("SELECT id, label, status, first_seen, last_seen, last_country FROM devices WHERE user_id = ? AND status IN ('active', 'pending') ORDER BY status, first_seen").bind(u.id).all<any>(),
     db
-      .prepare("SELECT at, action, detail, ip FROM audit_log WHERE target_user_id = ? AND action LIKE 'signin.%' AND at > ? ORDER BY id DESC LIMIT 60")
+      .prepare("SELECT at, action, detail, ip FROM audit_log WHERE target_user_id = ? AND action LIKE 'signin.%' AND at > ? ORDER BY id DESC LIMIT 30")
       .bind(u.id, new Date(Date.now() - 30 * 86400_000).toISOString())
       .all<any>(),
     db.prepare('SELECT id, title, body, created_at, read_at FROM notices WHERE user_id = ? ORDER BY id DESC LIMIT 20').bind(u.id).all<any>(),

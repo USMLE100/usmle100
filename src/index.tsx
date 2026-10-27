@@ -6,7 +6,7 @@ import { syncDurations } from './lib/catalog';
 import { pruneLoginAttempts } from './lib/ratelimit';
 import { pruneResetTokens } from './lib/reset';
 import { zoom } from './routes/zoom';
-import { loadUser, sameOrigin } from './lib/auth';
+import { loadUser, pruneSessions, sameOrigin } from './lib/auth';
 import { loadShell } from './lib/shell';
 import { ensureMigrated } from './lib/migrate';
 import { publicRoutes } from './routes/public';
@@ -107,7 +107,7 @@ export default {
   /** Every few minutes: link Zoom recordings that Bunny has copied and put finished ones live. */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(
-      ensureMigrated(env.DB).then(() => Promise.all([syncImports(env).then(() => syncDurations(env)), pruneLoginAttempts(env.DB), pruneResetTokens(env.DB), pruneAudit(env.DB), retryNotices(env).catch(console.error), emailStaffAlerts(env).catch(console.error), syncMarketing(env).catch(console.error), escalateCases(env.DB).catch(console.error)])),
+      ensureMigrated(env.DB).then(() => Promise.all([syncImports(env).then(() => syncDurations(env)), pruneLoginAttempts(env.DB), pruneResetTokens(env.DB), pruneAudit(env.DB), retryNotices(env).catch(console.error), emailStaffAlerts(env).catch(console.error), syncMarketing(env).catch(console.error), escalateCases(env.DB).catch(console.error), pruneSessions(env.DB).catch(console.error)])),
     );
   },
 };
