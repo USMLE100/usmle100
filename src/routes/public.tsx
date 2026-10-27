@@ -4,11 +4,13 @@ import { PublicLayout, PortalLayout, Flash, LogoMark } from '../views/layout';
 import { Icon } from '../views/icons';
 import { createSession, destroySession, hashPassword, verifyPassword, requireUser, sha256Hex } from '../lib/auth';
 import { checkDevice, deviceLabel, deviceToken, type DeviceCheck } from '../lib/devices';
+import { signInRisk, RISK_TEXT } from '../lib/risk';
+import { emailReady, notify, sendCode, sendEmail, smsReady, checkCode } from '../lib/messaging';
 import { accountLocked, clearFailures, rateHit, unlockAccount, emailKey, ipKey, lockedFor, recordFailure } from '../lib/ratelimit';
 import { MIN_PASSWORD, passwordProblem } from '../lib/passwords';
 import { EXAMS, MARKETING_TEXT, gradYears, normalizePhone, validName } from '../lib/profile';
 import { audit } from '../lib/audit';
-import { consumeResetToken, resetTokenUser } from '../lib/reset';
+import { consumeResetToken, createResetToken, resetTokenUser } from '../lib/reset';
 import { handleDispute, handleRefund, activateEnrollment, createCheckoutSession, fulfil, fulfilBookPurchase, retrieveCheckoutSession, verifyWebhook } from '../lib/stripe';
 import { BOOK_PRICE_CENTS, hasBook } from '../lib/book';
 import { currentCohort, dayDate, fmtDate, money, todayUtc, ymdToUtc } from '../lib/content';
@@ -379,10 +381,11 @@ const ENDED: Record<string, string> = {
   out: 'You have been signed out.',
   password: 'Your password was changed and you were signed out everywhere. Please sign in with your new password.',
   revoked: 'That sign-in was ended. Please sign in again.',
+  verify: 'That sign-in was blocked because the security codes weren’t confirmed. If it was you, contact USMLE100.',
 };
 
 type SignupForm = { turnstile?: string; first?: string; last?: string; phone?: string; exam?: string; grad?: string; marketing?: boolean };
-const AuthPage = (p: { mode: 'in' | 'up'; error?: string; notice?: string; email?: string; name?: string; form?: SignupForm; next?: string; user: any; contact?: string }) => (
+const AuthPage = (p: { mode: 'in' | 'up'; selfReset?: boolean; error?: string; notice?: string; email?: string; name?: string; form?: SignupForm; next?: string; user: any; contact?: string }) => (
   <PublicLayout title={p.mode === 'in' ? 'Sign in' : 'Create account'} user={p.user} plain>
     <div class="auth">
       <AuthBrand />
@@ -423,14 +426,14 @@ const AuthPage = (p: { mode: 'in' | 'up'; error?: string; notice?: string; email
           )}
           {p.mode === 'in' && (
             <div class="auth-links">
-              {p.contact && <a href={`mailto:${p.contact}?subject=${encodeURIComponent('USMLE100: password reset')}`}>Forgot your password?</a>}
+              {p.selfReset ? <a href="/forgot">Forgot your password?</a> : p.contact && <a href={`mailto:${p.contact}?subject=${encodeURIComponent('USMLE100: password reset')}`}>Forgot your password?</a>}
             </div>
           )}
           <button class="btn btn-primary btn-block" type="submit">
             {p.mode === 'in' ? 'Sign in' : 'Create account'}
           </button>
         </form>
-        {p.mode === 'in' && p.contact && (
+        {p.mode === 'in' && p.contact && !p.selfReset && (
           <p class="small muted">To reset your password, email us from the address you signed up with and we’ll send you a link.</p>
         )}
         <p class="small" style="text-align:center">
@@ -505,7 +508,7 @@ publicRoutes.post('/sign-up', async (c) => {
 const contactEmail = async (db: D1Database) => (await getSettings(db)).contact_email || undefined;
 
 publicRoutes.get('/sign-in', async (c) =>
-  c.html(<AuthPage mode="in" next={c.req.query('next')} notice={ENDED[c.req.query('ended') ?? '']} user={c.get('user')} contact={await contactEmail(c.env.DB)} />),
+  c.html(<AuthPage mode="in" next={c.req.query('next')} notice={ENDED[c.req.query('ended') ?? '']} user={c.get('user')} contact={await contactEmail(c.env.DB)} selfReset={emailReady(c.env)} />),
 );
 publicRoutes.post('/sign-in', async (c) => {
   const f = await c.req.parseBody();
@@ -541,14 +544,20 @@ publicRoutes.post('/sign-in', async (c) => {
     await audit(c.env.DB, { actorId: u.id, action: 'signin.device_blocked', targetUserId: u.id, detail: { ...where, reason: dev.reason }, ip });
     return c.html(<AuthPage mode="in" error={DEVICE_MSG[dev.reason]} email={email} user={null} contact={contact} />, 403);
   }
-  await createSession(c, u.id, dev.hash);
-  await audit(c.env.DB, { actorId: u.id, action: 'signin.ok', targetUserId: u.id, detail: where, ip });
-  return c.redirect(safeNext(f.next));
+  // Risky sign-ins get an extra email/phone code check before protected content opens (when email is set up).
+  const risk = u.role === 'student' ? await signInRisk(c.env.DB, u.id, where.country, !!dev.fresh) : null;
+  const check = risk && emailReady(c.env) ? risk : null;
+  await createSession(c, u.id, dev.hash, check);
+  await audit(c.env.DB, { actorId: u.id, action: 'signin.ok', targetUserId: u.id, detail: { ...where, risk }, ip });
+  if (risk === 'new-device' || risk === 'new-country') {
+    await notify(c.env, u.id, { kind: 'security', title: 'New sign-in to your account', body: `${RISK_TEXT[risk]} ${where.device}${where.country ? ` in ${where.country}` : ''}. If this wasn’t you, open My account, press “This wasn’t me” and change your password.` });
+  }
+  return c.redirect(check ? '/account/check-sign-in' : safeNext(f.next));
 });
 
 // ---------- Password reset (one-time links made by an admin) ----------
 
-const ResetPage = (p: { token?: string; name?: string; error?: string; invalid?: boolean }) => (
+const ResetPage = (p: { token?: string; name?: string; error?: string; invalid?: boolean; phone?: string | null }) => (
   <PublicLayout title="Reset password" user={null} plain>
     <div class="auth">
       <AuthBrand />
@@ -565,6 +574,7 @@ const ResetPage = (p: { token?: string; name?: string; error?: string; invalid?:
             {p.error && <Flash kind="error">{p.error}</Flash>}
             <form method="post" action="/reset-password" class="stack" style="gap:14px">
               <input type="hidden" name="token" value={p.token} />
+              {p.phone && <label class="field">Code we texted to {p.phone}<input type="text" name="sms_code" inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code" required /></label>}
               <PwField label="New password" name="password" autocomplete="new-password" minlength={MIN_PASSWORD} />
               <PwField label="Type it again" name="again" autocomplete="new-password" minlength={MIN_PASSWORD} />
               <span class="muted small">At least {MIN_PASSWORD} characters. A short phrase of a few words works well.</span>
@@ -584,7 +594,65 @@ publicRoutes.get('/reset-password', async (c) => {
   c.header('Cache-Control', 'no-store');
   const token = c.req.query('token') ?? '';
   const u = await resetTokenUser(c.env.DB, token);
-  return c.html(u ? <ResetPage token={token} name={u.name} /> : <ResetPage invalid />, u ? 200 : 400);
+  if (!u) return c.html(<ResetPage invalid />, 400);
+  // Recovery uses both the email (this link) and the verified phone (a texted code), when SMS is set up (R: password resets).
+  const phone = await resetPhone(c, u.id);
+  if (phone) {
+    const active = await c.env.DB.prepare("SELECT 1 FROM otp_codes WHERE user_id = ? AND purpose = 'reset' AND channel = 'sms' AND used_at IS NULL AND expires_at > ?").bind(u.id, Math.floor(Date.now() / 1000)).first();
+    if (!active) await sendCode(c.env, u.id, 'sms', 'reset', phone);
+  }
+  return c.html(<ResetPage token={token} name={u.name} phone={phone ? maskPhone(phone) : null} />);
+});
+
+async function resetPhone(c: Context<AppEnv>, userId: number) {
+  if (!smsReady(c.env)) return null;
+  const u = await c.env.DB.prepare('SELECT phone, phone_verified_at FROM users WHERE id = ?').bind(userId).first<{ phone: string | null; phone_verified_at: string | null }>();
+  return u?.phone && u.phone_verified_at ? u.phone : null;
+}
+const maskPhone = (p: string) => p.replace(/^(\+\d{1,3})\d+(\d{2})$/, '$1•••••$2');
+
+// ---------- Self-service "Forgot password" (once email sending is set up) ----------
+
+const ForgotPage = (p: { sent?: boolean; error?: string; contact?: string }) => (
+  <PublicLayout title="Forgot password" user={null} plain>
+    <div class="auth">
+      <AuthBrand />
+      <main class="auth-form">
+        <h1>Forgot your password?</h1>
+        {p.sent ? (
+          <Flash kind="ok">If an account uses that email, we’ve sent it a link to choose a new password. It works once, for 1 hour.</Flash>
+        ) : (
+          <>
+            <p class="sub">Enter the email you signed up with and we’ll send you a link.</p>
+            {p.error && <Flash kind="error">{p.error}</Flash>}
+            <form method="post" action="/forgot" class="stack" style="gap:14px">
+              <label class="field">Email<input type="email" name="email" required autocomplete="email" /></label>
+              <button class="btn btn-primary btn-block" type="submit">Send the link</button>
+            </form>
+          </>
+        )}
+        <p class="small" style="text-align:center"><a href="/sign-in">Back to sign in</a></p>
+      </main>
+    </div>
+  </PublicLayout>
+);
+
+publicRoutes.get('/forgot', async (c) => (emailReady(c.env) ? c.html(<ForgotPage />) : c.redirect('/sign-in')));
+
+publicRoutes.post('/forgot', async (c) => {
+  if (!emailReady(c.env)) return c.redirect('/sign-in');
+  const email = String((await c.req.parseBody()).email ?? '').trim().toLowerCase();
+  const ip = c.req.header('cf-connecting-ip') ?? 'none';
+  // The same answer whether or not the account exists; limited per network and per email.
+  if (!(await rateHit(c.env.DB, `forgot:ip:${ip}`, 10, 3600)) || !(await rateHit(c.env.DB, `forgot:email:${email}`, 3, 3600))) return c.html(<ForgotPage sent />);
+  const u = await c.env.DB.prepare("SELECT id, email FROM users WHERE email = ? AND email NOT LIKE '%.invalid'").bind(email).first<{ id: number; email: string }>();
+  if (u) {
+    const token = await createResetToken(c.env.DB, u.id, null);
+    const link = new URL('/reset-password?token=' + token, c.env.SITE_URL || c.req.url).toString();
+    await sendEmail(c.env, u.email, 'Reset your USMLE100 password', `Someone asked to reset the password for your USMLE100 account.\n\nChoose a new password here (works once, for 1 hour):\n${link}\n\nIf this wasn’t you, ignore this email: your password hasn’t changed.`);
+    await audit(c.env.DB, { action: 'password.reset_requested', targetUserId: u.id, ip });
+  }
+  return c.html(<ForgotPage sent />);
 });
 
 publicRoutes.post('/reset-password', async (c) => {
@@ -597,6 +665,11 @@ publicRoutes.post('/reset-password', async (c) => {
   const bad = await passwordProblem(password);
   if (bad) return c.html(<ResetPage token={token} name={u.name} error={bad} />, 400);
   if (password !== String(f.again ?? '')) return c.html(<ResetPage token={token} name={u.name} error="The two passwords don’t match." />, 400);
+  const phone = await resetPhone(c, u.id);
+  if (phone) {
+    const r = await checkCode(c.env.DB, u.id, 'sms', 'reset', String(f.sms_code ?? ''));
+    if (r !== 'ok') return c.html(<ResetPage token={token} name={u.name} phone={maskPhone(phone)} error={r === 'locked' ? 'Too many wrong codes. Ask for a new link.' : 'The texted code isn’t right.'} />, 400);
+  }
   if (!(await consumeResetToken(c.env.DB, token, u.id))) return c.html(<ResetPage invalid />, 400);
   const { hash, salt } = await hashPassword(password);
   // New password, and every existing sign-in for this account is ended.
@@ -611,6 +684,7 @@ publicRoutes.post('/reset-password', async (c) => {
   if (!dev.ok) return c.html(<AuthPage mode="in" notice={'Your new password is saved. ' + DEVICE_MSG[dev.reason]} user={null} />, 403);
   await createSession(c, u.id, dev.hash);
   await audit(c.env.DB, { actorId: u.id, action: 'password.reset', targetUserId: u.id, ip: c.req.header('cf-connecting-ip') ?? null });
+  await notify(c.env, u.id, { kind: 'security', title: 'Password changed', body: 'Your password was reset with a recovery link and other devices were signed out. If this wasn’t you, contact USMLE100 right away.', sms: true });
   return c.redirect('/dashboard');
 });
 

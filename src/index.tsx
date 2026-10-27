@@ -24,6 +24,7 @@ import { freeAdmin } from './routes/freeAdmin';
 import { studentsAdmin } from './routes/students';
 import { accountGate } from './lib/gate';
 import { pruneAudit } from './lib/audit';
+import { emailStaffAlerts, retryNotices, syncMarketing } from './lib/messaging';
 import { PublicLayout } from './views/layout';
 
 const app = new Hono<AppEnv>();
@@ -100,7 +101,7 @@ export default {
   /** Every few minutes: link Zoom recordings that Bunny has copied and put finished ones live. */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(
-      ensureMigrated(env.DB).then(() => Promise.all([syncImports(env).then(() => syncDurations(env)), pruneLoginAttempts(env.DB), pruneResetTokens(env.DB), pruneAudit(env.DB)])),
+      ensureMigrated(env.DB).then(() => Promise.all([syncImports(env).then(() => syncDurations(env)), pruneLoginAttempts(env.DB), pruneResetTokens(env.DB), pruneAudit(env.DB), retryNotices(env).catch(console.error), emailStaffAlerts(env).catch(console.error), syncMarketing(env).catch(console.error)])),
     );
   },
 };

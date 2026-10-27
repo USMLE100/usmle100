@@ -6,6 +6,7 @@ import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { audit, verifyAuditChain } from '../lib/audit';
 import { unlockAccount } from '../lib/ratelimit';
 import { lockdownOn } from '../lib/gate';
+import { notify } from '../lib/messaging';
 import { FREE_VIEWS, PAID_VIEWS, itemLabel, parseKey, titleOf } from '../lib/viewing';
 
 /**
@@ -679,8 +680,8 @@ security.post('/requests/device/:id{[0-9]+}', async (c) => {
         ]
       : []),
     db.prepare("UPDATE devices SET status = 'active', replaces_id = ?, decided_by = ?, decided_at = datetime('now') WHERE id = ?").bind(old?.id ?? null, me.id, d.id),
-    db.prepare("INSERT INTO notices (user_id, kind, title, body) VALUES (?, 'device', 'New device approved', ?)").bind(d.user_id, `Your ${d.label} is now registered${old ? ` and replaces your ${old.label}` : ''}. If you didn’t ask for this, contact USMLE100 right away.`),
   ]);
+  await notify(c.env, d.user_id, { kind: 'device', title: 'New device approved', body: `Your ${d.label} is now registered${old ? ` and replaces your ${old.label}` : ''}. If you didn’t ask for this, contact USMLE100 right away.`, sms: true });
   await audit(db, { actorId: me.id, action: 'device.approved', targetUserId: d.user_id, detail: { device: d.label, replaced: old?.label ?? null }, ip: ip(c) });
   return c.redirect('/admin/requests?ok=' + encodeURIComponent('Approved.'));
 });
@@ -705,12 +706,13 @@ security.post('/requests/contact/:id{[0-9]+}', async (c) => {
             : db.prepare('UPDATE users SET phone = ?, phone_verified_at = NULL WHERE id = ?').bind(r.new_value, r.user_id),
         ]
       : []),
-    db.prepare("INSERT INTO notices (user_id, kind, title, body) VALUES (?, 'account', ?, ?)").bind(
-      r.user_id,
-      approve ? `Your ${r.field} was changed` : `Your ${r.field} change was not approved`,
-      approve ? `Your ${r.field} is now ${r.new_value}. If you didn’t ask for this, contact USMLE100 right away.` : `Please contact USMLE100 if you still need to change your ${r.field}.`,
-    ),
   ]);
+  await notify(c.env, r.user_id, {
+    kind: 'account',
+    title: approve ? `Your ${r.field} was changed` : `Your ${r.field} change was not approved`,
+    body: approve ? `Your ${r.field} is now ${r.new_value}. If you didn’t ask for this, contact USMLE100 right away.` : `Please contact USMLE100 if you still need to change your ${r.field}.`,
+    sms: true,
+  });
   await audit(db, { actorId: me.id, action: approve ? 'contact.approved' : 'contact.declined', targetUserId: r.user_id, detail: { field: r.field }, ip: ip(c) });
   return c.redirect('/admin/requests?ok=' + encodeURIComponent(approve ? 'Changed.' : 'Declined.'));
 });

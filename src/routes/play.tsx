@@ -37,7 +37,7 @@ const where = (c: Context<AppEnv>) => ({ device: c.get('session')?.deviceHash ??
 /** The protected tab is held elsewhere. From another device on another network while playing: suspected sharing. */
 async function busy(c: Context<AppEnv>, userId: number, t: { title: string | null; sharing: boolean; item: string | null }, item: string) {
   if (t.sharing) {
-    const locked = await reportSharing(c.env.DB, userId, { item, other: t.item, ip: ip(c), country: c.req.header('cf-ipcountry') ?? null });
+    const locked = await reportSharing(c.env, userId, { item, other: t.item, ip: ip(c), country: c.req.header('cf-ipcountry') ?? null });
     return c.json({ state: 'sharing', locked });
   }
   return c.json({ state: 'busy', title: t.title });

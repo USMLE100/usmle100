@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
-import type { AppEnv } from './types';
+import type { AppEnv, Env } from './types';
+import { notify } from './messaging';
 import { sha256Hex, toB64 } from './auth';
 import { audit } from './audit';
 
@@ -29,7 +30,7 @@ export function deviceLabel(ua: string) {
   return `${br} on ${os}`;
 }
 
-export type DeviceCheck = { ok: true; hash: string } | { ok: false; reason: 'pending' | 'declined' | 'new'; hash: string };
+export type DeviceCheck = { ok: true; hash: string; fresh?: boolean } | { ok: false; reason: 'pending' | 'declined' | 'new'; hash: string };
 
 /**
  * Called after a correct password, before the sign-in is created. Registers the first two devices; a third
@@ -59,7 +60,7 @@ export async function checkDevice(c: Context<AppEnv>, userId: number): Promise<D
     .run();
   if ((r.meta.changes ?? 0) > 0) {
     await audit(db, { actorId: userId, action: 'device.registered', targetUserId: userId, detail: { device: deviceLabel(ua), country }, ip: c.req.header('cf-connecting-ip') ?? null });
-    return { ok: true, hash };
+    return { ok: true, hash, fresh: true };
   }
   // Both slots taken: ask for a replacement (R017).
   await db
@@ -93,7 +94,8 @@ export async function checkDevice(c: Context<AppEnv>, userId: number): Promise<D
  * locks the account until the owner reinstates it after speaking with the student. Same network = same person
  * switching devices, which is only told to close the other tab.
  */
-export async function reportSharing(db: D1Database, userId: number, detail: Record<string, unknown>) {
+export async function reportSharing(env: Env, userId: number, detail: Record<string, unknown>) {
+  const db = env.DB;
   const prior = await db.prepare("SELECT COUNT(*) AS n FROM security_flags WHERE user_id = ? AND kind = 'concurrent_stream' AND (outcome IS NULL OR outcome <> 'dismissed')").bind(userId).first<{ n: number }>();
   const second = (prior?.n ?? 0) >= 1;
   const reason = second
@@ -109,8 +111,8 @@ export async function reportSharing(db: D1Database, userId: number, detail: Reco
       userId,
       second ? 'Repeated suspected account sharing: account locked until the owner reinstates it.' : 'Suspected account sharing: the student was warned.',
     ),
-    db.prepare('INSERT INTO notices (user_id, kind, title, body) VALUES (?, ?, ?, ?)').bind(userId, 'security', second ? 'Account locked' : 'Warning: account sharing', reason),
   ]);
+  await notify(env, userId, { kind: 'security', title: second ? 'Account locked' : 'Warning: account sharing', body: reason, sms: true });
   await audit(db, { action: second ? 'sharing.locked' : 'sharing.warned', targetUserId: userId, detail });
   return second;
 }

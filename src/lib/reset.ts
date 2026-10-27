@@ -5,7 +5,7 @@ export const RESET_LINK_SECONDS = 60 * 60;
 const now = () => Math.floor(Date.now() / 1000);
 
 /** Make a new link for a user. Any earlier unused links for them stop working. Returns the secret for the URL. */
-export async function createResetToken(db: D1Database, userId: number, createdBy: number): Promise<string> {
+export async function createResetToken(db: D1Database, userId: number, createdBy: number | null): Promise<string> {
   const raw = toB64(crypto.getRandomValues(new Uint8Array(32))).replace(/[+/=]/g, (m) => ({ '+': '-', '/': '_', '=': '' })[m]!);
   await db.batch([
     db.prepare('UPDATE password_resets SET used_at = ? WHERE user_id = ? AND used_at IS NULL').bind(now(), userId),

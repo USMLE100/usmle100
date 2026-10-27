@@ -10,7 +10,7 @@ import { isOwner, isStaff } from './types';
  * - Students must sign the current agreement (R012) before using the portal.
  * Staff are exempt from lockdown and the agreement; the owner can never be suspended.
  */
-const PUBLIC_EXACT = new Set(['/', '/programs', '/terms', '/privacy', '/refunds', '/sign-in', '/sign-up', '/sign-out', '/reset-password', '/stripe/webhook', '/styles.css', '/favicon.ico', '/webinars']);
+const PUBLIC_EXACT = new Set(['/', '/programs', '/terms', '/privacy', '/refunds', '/sign-in', '/sign-up', '/sign-out', '/reset-password', '/stripe/webhook', '/styles.css', '/favicon.ico', '/webinars', '/forgot']);
 const isPublic = (p: string) => PUBLIC_EXACT.has(p) || /\.[a-z0-9]{2,5}$/i.test(p);
 const isCheckout = (p: string) => p === '/enroll' || p.startsWith('/enroll/') || p.startsWith('/buy/');
 const isSession = (p: string) => p.startsWith('/session/');
@@ -37,6 +37,10 @@ export async function accountGate(c: Context<AppEnv>, next: Next) {
   const user = c.get('user');
   const p = c.req.path.replace(/\/+$/, '') || '/';
   if (!user || isPublic(p)) return next();
+  // A risky sign-in must pass the extra email/phone check before anything else opens (risk-based verification).
+  if (c.get('session')?.verifyPending && !p.startsWith('/account/check-sign-in') && p !== '/sign-out' && !isSession(p) && p !== '/play/release') {
+    return apiOrRedirect(c, p, '/account/check-sign-in');
+  }
 
   if (user.status === 'suspended' && !isOwner(user)) {
     if (p === '/account/suspended') return next();
