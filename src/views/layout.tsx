@@ -146,6 +146,8 @@ const groups = (staff: boolean, admin: boolean): { label: string; items: NavItem
                   { key: 'admin-students', label: 'Students', href: '/admin/students', icon: 'person' as IconName },
                   { key: 'admin-settings', label: 'Site settings', href: '/admin/settings', icon: 'info' as IconName },
                   { key: 'admin-team', label: 'Team', href: '/admin/team', icon: 'groups' as IconName },
+                  { key: 'admin-security', label: 'Security', href: '/admin/security', icon: 'shield' as IconName },
+                  { key: 'admin-agreement', label: 'Student agreement', href: '/admin/agreement', icon: 'description' as IconName },
                 ]
               : []),
           ],
@@ -163,6 +165,9 @@ const BOTTOM: NavItem[] = [
 ];
 /** Pages that light up a bottom-nav tab other than their own key. */
 const BOTTOM_ALIAS: Record<string, string> = { create: 'qbank', test: 'qbank', results: 'qbank', warmup: 'qbank', topics: 'lectures', book: 'book-tutoring' };
+
+/** Inactivity (30 min, warning at 25) and 24-hour sign-in limit (warning 5 min before), R088–R091. */
+const SESSION_JS = "(function(){\nvar WARN_IDLE=25*60e3,IDLE=30*60e3,WARN_ABS=5*60e3,last=Date.now(),lastPing=Date.now(),absEnd=0,mode='',m=document.getElementById('sess-modal'),msg=document.getElementById('sess-msg'),btn=document.getElementById('sess-stay');\nif(!m)return;\nfunction out(why){fetch('/session/end',{method:'POST',credentials:'same-origin'}).finally(function(){location.href='/sign-in?ended='+why+'&next='+encodeURIComponent(location.pathname)})}\nfunction show(k,t){mode=k;msg.textContent=t;btn.textContent=k==='idle'?'Stay logged in':'OK';m.hidden=false;btn.focus()}\nfunction ping(){lastPing=Date.now();fetch('/session/ping',{method:'POST',credentials:'same-origin'}).then(function(r){if(r.status===401)out('idle');return r.json()}).then(function(j){if(j&&j.absoluteLeft!=null)absEnd=Date.now()+j.absoluteLeft*1e3}).catch(function(){})}\nfunction act(){if(mode==='idle')return;last=Date.now();if(Date.now()-lastPing>60e3)ping()}\n['click','keydown','scroll','touchstart','pointermove'].forEach(function(e){addEventListener(e,act,{passive:true})});\nbtn.addEventListener('click',function(){var k=mode;m.hidden=true;mode=k==='abs'?'abs-seen':'';if(k==='idle'){last=Date.now();ping()}});\nfetch('/session/status',{credentials:'same-origin'}).then(function(r){if(r.status===401){out('idle');return null}return r.json()}).then(function(j){if(j)absEnd=Date.now()+j.absoluteLeft*1e3}).catch(function(){});\nfunction mmss(ms){var s=Math.max(0,Math.ceil(ms/1e3));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}\nsetInterval(function(){var now=Date.now();\n if(document.visibilityState==='visible'&&document.querySelector('iframe[data-lecture]'))act();\n if(absEnd&&now>=absEnd)return out('expired');\n if(now-last>=IDLE)return out('idle');\n if(now-last>=WARN_IDLE){if(mode!=='idle')show('idle','');msg.textContent='You have been inactive. For your security you will be signed out in '+mmss(IDLE-(now-last))+'.';return}\n if(absEnd&&absEnd-now<=WARN_ABS&&mode===''){show('abs','For your security, sign-ins last at most 24 hours. You will be signed out in '+mmss(absEnd-now)+'. Please save your work.')}\n},1000);\ndocument.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')fetch('/session/status',{credentials:'same-origin'}).then(function(r){if(r.status===401)out('idle')}).catch(function(){})});\n})();";
 
 export function PortalLayout(props: { title: string; active: string; user: User; shell?: Shell; children: Child; wide?: boolean }) {
   const s = props.shell;
@@ -260,6 +265,15 @@ export function PortalLayout(props: { title: string; active: string; user: User;
         <div class="app-main-wrap">
           <main class={'app-main' + (props.wide ? ' wide' : '')}>{props.children}</main>
         </div>
+
+        <div id="sess-modal" class="sess-modal" role="alertdialog" aria-modal="true" aria-labelledby="sess-title" aria-describedby="sess-msg" hidden>
+          <div class="sess-box">
+            <h2 id="sess-title">Are you still there?</h2>
+            <p id="sess-msg"></p>
+            <button type="button" id="sess-stay" class="btn btn-primary btn-block">Stay logged in</button>
+          </div>
+        </div>
+        <script dangerouslySetInnerHTML={{ __html: SESSION_JS }} />
 
         <nav class="bottom-nav" aria-label="Quick navigation">
           {BOTTOM.map((i) => (

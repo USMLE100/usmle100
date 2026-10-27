@@ -3,7 +3,9 @@ import type { AppEnv } from '../lib/types';
 import { PublicLayout, PortalLayout, Flash, LogoMark } from '../views/layout';
 import { Icon } from '../views/icons';
 import { createSession, destroySession, hashPassword, verifyPassword, requireUser } from '../lib/auth';
-import { clearFailures, emailKey, ipKey, lockedFor, recordFailure } from '../lib/ratelimit';
+import { accountLocked, clearFailures, unlockAccount, emailKey, ipKey, lockedFor, recordFailure } from '../lib/ratelimit';
+import { MIN_PASSWORD, passwordProblem } from '../lib/passwords';
+import { audit } from '../lib/audit';
 import { consumeResetToken, resetTokenUser } from '../lib/reset';
 import { handleRefund, activateEnrollment, createCheckoutSession, fulfil, fulfilBookPurchase, retrieveCheckoutSession, verifyWebhook } from '../lib/stripe';
 import { BOOK_PRICE_CENTS, hasBook } from '../lib/book';
@@ -332,13 +334,20 @@ const PwField = (p: { label: string; name: string; autocomplete: string; minleng
 );
 const EYE_JS = `document.querySelectorAll('[data-eye]').forEach(function(b){b.addEventListener('click',function(){var i=b.previousElementSibling,show=i.type==='password';i.type=show?'text':'password';b.setAttribute('aria-label',show?'Hide password':'Show password');b.classList.toggle('on',show);});});`;
 
-const AuthPage = (p: { mode: 'in' | 'up'; error?: string; email?: string; name?: string; next?: string; user: any; contact?: string }) => (
+const ENDED: Record<string, string> = {
+  idle: 'You were signed out after 30 minutes without activity. Please sign in again.',
+  expired: 'For your security, sign-ins last at most 24 hours. Please sign in again.',
+  out: 'You have been signed out.',
+};
+
+const AuthPage = (p: { mode: 'in' | 'up'; error?: string; notice?: string; email?: string; name?: string; next?: string; user: any; contact?: string }) => (
   <PublicLayout title={p.mode === 'in' ? 'Sign in' : 'Create account'} user={p.user} plain>
     <div class="auth">
       <AuthBrand />
       <main class="auth-form">
         <h1>{p.mode === 'in' ? 'Welcome back' : 'Create your account'}</h1>
         <p class="sub">{p.mode === 'in' ? 'Sign in to pick up where you left off.' : 'Create an account, then choose your program to unlock the portal.'}</p>
+        {p.notice && !p.error && <Flash kind="ok">{p.notice}</Flash>}
         {p.error && <Flash kind="error">{p.error}</Flash>}
         <form method="post" class="stack" style="gap:14px">
           {p.next && <input type="hidden" name="next" value={p.next} />}
@@ -352,11 +361,10 @@ const AuthPage = (p: { mode: 'in' | 'up'; error?: string; email?: string; name?:
             Email
             <input type="email" name="email" required autocomplete="email" value={p.email ?? ''} />
           </label>
-          <PwField label="Password" name="password" autocomplete={p.mode === 'up' ? 'new-password' : 'current-password'} minlength={p.mode === 'up' ? 10 : undefined} />
-          {p.mode === 'up' && <span class="muted small">At least 10 characters.</span>}
+          <PwField label="Password" name="password" autocomplete={p.mode === 'up' ? 'new-password' : 'current-password'} minlength={p.mode === 'up' ? MIN_PASSWORD : undefined} />
+          {p.mode === 'up' && <span class="muted small">At least {MIN_PASSWORD} characters. A short phrase of a few words works well.</span>}
           {p.mode === 'in' && (
             <div class="auth-links">
-              <label class="check"><input type="checkbox" name="remember" value="1" checked /> Remember me</label>
               {p.contact && <a href={`mailto:${p.contact}?subject=${encodeURIComponent('USMLE100: password reset')}`}>Forgot your password?</a>}
             </div>
           )}
@@ -387,7 +395,8 @@ publicRoutes.post('/sign-up', async (c) => {
   const password = String(f.password ?? '');
   const again = (error: string) => c.html(<AuthPage mode="up" error={error} email={email} name={name} user={null} next={typeof f.next === 'string' ? f.next : undefined} />, 400);
   if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return again('Please enter your name and a valid email.');
-  if (password.length < 10) return again('Your password needs at least 10 characters.');
+  const bad = await passwordProblem(password);
+  if (bad) return again(bad);
   const exists = await c.env.DB.prepare('SELECT 1 FROM users WHERE email = ?').bind(email).first();
   if (exists) return again('An account with that email already exists. Try signing in.');
   // Public sign-up always creates a student. Faculty and admin roles are only given by an admin (Admin -> Team).
@@ -396,13 +405,16 @@ publicRoutes.post('/sign-up', async (c) => {
     .bind(email, name, hash, salt)
     .run();
   await createSession(c, Number(r.meta.last_row_id));
+  await audit(c.env.DB, { actorId: Number(r.meta.last_row_id), action: 'account.created', targetUserId: Number(r.meta.last_row_id), ip: c.req.header('cf-connecting-ip') ?? null });
   // Someone who signed up to buy something specific (the Course Book) goes back to it.
   return c.redirect(typeof f.next === 'string' && f.next.startsWith('/buy/') ? safeNext(f.next) : '/enroll');
 });
 
 const contactEmail = async (db: D1Database) => (await getSettings(db)).contact_email || undefined;
 
-publicRoutes.get('/sign-in', async (c) => c.html(<AuthPage mode="in" next={c.req.query('next')} user={c.get('user')} contact={await contactEmail(c.env.DB)} />));
+publicRoutes.get('/sign-in', async (c) =>
+  c.html(<AuthPage mode="in" next={c.req.query('next')} notice={ENDED[c.req.query('ended') ?? '']} user={c.get('user')} contact={await contactEmail(c.env.DB)} />),
+);
 publicRoutes.post('/sign-in', async (c) => {
   const f = await c.req.parseBody();
   const email = String(f.email ?? '').trim().toLowerCase();
@@ -410,6 +422,10 @@ publicRoutes.post('/sign-in', async (c) => {
   // Cloudflare sets CF-Connecting-IP to the visitor's address; visitors cannot override it.
   const ip = c.req.header('cf-connecting-ip') ?? null;
   const contact = await contactEmail(c.env.DB);
+  const lockedMsg = 'Too many sign-in attempts. This account is locked for your protection until USMLE100 unlocks it. Please contact us.';
+  if (await accountLocked(c.env.DB, email)) {
+    return c.html(<AuthPage mode="in" error={lockedMsg} email={email} user={null} contact={contact} />, 429);
+  }
   const wait = await lockedFor(c.env.DB, [emailKey(email), ...(ip ? [ipKey(ip)] : [])]);
   if (wait > 0) {
     // Refused before the password is checked, so guessing gains nothing while locked.
@@ -421,11 +437,14 @@ publicRoutes.post('/sign-in', async (c) => {
     .first<{ id: number; password_hash: string; password_salt: string }>();
   const ok = u ? await verifyPassword(password, u.password_hash, u.password_salt) : (await hashPassword(password), false);
   if (!u || !ok) {
-    await recordFailure(c.env.DB, email, ip);
+    const nowLocked = await recordFailure(c.env.DB, email, ip);
+    await audit(c.env.DB, { action: nowLocked ? 'signin.locked' : 'signin.failed', targetUserId: u?.id ?? null, detail: { email }, ip });
+    if (nowLocked) return c.html(<AuthPage mode="in" error={lockedMsg} email={email} user={null} contact={contact} />, 429);
     return c.html(<AuthPage mode="in" error="That email and password don’t match." email={email} user={null} contact={contact} />, 401);
   }
   await clearFailures(c.env.DB, email);
-  await createSession(c, u.id, f.remember === '1');
+  await createSession(c, u.id);
+  await audit(c.env.DB, { actorId: u.id, action: 'signin.ok', targetUserId: u.id, ip });
   return c.redirect(safeNext(f.next));
 });
 
@@ -448,9 +467,9 @@ const ResetPage = (p: { token?: string; name?: string; error?: string; invalid?:
             {p.error && <Flash kind="error">{p.error}</Flash>}
             <form method="post" action="/reset-password" class="stack" style="gap:14px">
               <input type="hidden" name="token" value={p.token} />
-              <PwField label="New password" name="password" autocomplete="new-password" minlength={10} />
-              <PwField label="Type it again" name="again" autocomplete="new-password" minlength={10} />
-              <span class="muted small">At least 10 characters.</span>
+              <PwField label="New password" name="password" autocomplete="new-password" minlength={MIN_PASSWORD} />
+              <PwField label="Type it again" name="again" autocomplete="new-password" minlength={MIN_PASSWORD} />
+              <span class="muted small">At least {MIN_PASSWORD} characters. A short phrase of a few words works well.</span>
               <button class="btn btn-primary btn-block" type="submit">Save new password</button>
             </form>
           </>
@@ -477,7 +496,8 @@ publicRoutes.post('/reset-password', async (c) => {
   const password = String(f.password ?? '');
   const u = await resetTokenUser(c.env.DB, token);
   if (!u) return c.html(<ResetPage invalid />, 400);
-  if (password.length < 10) return c.html(<ResetPage token={token} name={u.name} error="Your password needs at least 10 characters." />, 400);
+  const bad = await passwordProblem(password);
+  if (bad) return c.html(<ResetPage token={token} name={u.name} error={bad} />, 400);
   if (password !== String(f.again ?? '')) return c.html(<ResetPage token={token} name={u.name} error="The two passwords don’t match." />, 400);
   if (!(await consumeResetToken(c.env.DB, token, u.id))) return c.html(<ResetPage invalid />, 400);
   const { hash, salt } = await hashPassword(password);
@@ -486,8 +506,10 @@ publicRoutes.post('/reset-password', async (c) => {
     c.env.DB.prepare('UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?').bind(hash, salt, u.id),
     c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(u.id),
   ]);
-  await clearFailures(c.env.DB, u.email);
+  // A reset link is made by an administrator, so using it also lifts a sign-in lock (R029).
+  await unlockAccount(c.env.DB, u.email, null);
   await createSession(c, u.id);
+  await audit(c.env.DB, { actorId: u.id, action: 'password.reset', targetUserId: u.id, ip: c.req.header('cf-connecting-ip') ?? null });
   return c.redirect('/dashboard');
 });
 

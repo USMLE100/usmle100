@@ -176,11 +176,20 @@ function SectionBlock(p: { g: Group; n: number; today: number; cohort: Cohort; b
   );
 }
 
+/**
+ * A student may only open, save or complete lectures of their own cohort (staff: any).
+ */
+async function ownCohortId(c: any): Promise<number | null> {
+  const cohort = await currentCohort(c.env.DB, c.get('enrollment')?.cohort_id);
+  return cohort?.id ?? null;
+}
+const lectureAllowedSql = "SELECT 1 FROM lectures WHERE id = ? AND ((status = 'live' AND cohort_id = ?) OR ?)";
+
 learn.post('/lectures/:id{[0-9]+}/save', async (c) => {
   const user = c.get('user')!;
   const id = Number(c.req.param('id'));
   const f = await c.req.parseBody();
-  const exists = await c.env.DB.prepare("SELECT 1 FROM lectures WHERE id = ? AND (status = 'live' OR ?)").bind(id, isStaff(user) ? 1 : 0).first();
+  const exists = await c.env.DB.prepare(lectureAllowedSql).bind(id, await ownCohortId(c), isStaff(user) ? 1 : 0).first();
   if (exists) {
     const had = await c.env.DB.prepare('SELECT 1 FROM lecture_bookmarks WHERE user_id = ? AND lecture_id = ?').bind(user.id, id).first();
     await c.env.DB.prepare(had ? 'DELETE FROM lecture_bookmarks WHERE user_id = ? AND lecture_id = ?' : 'INSERT INTO lecture_bookmarks (user_id, lecture_id) VALUES (?, ?)').bind(user.id, id).run();
@@ -500,6 +509,8 @@ learn.get('/lectures/:id{[0-9]+}', async (c) => {
     .first<CatLecture & { cohort_id: number; bunny_video_id: string | null; section_title: string | null; subject_name: string | null }>();
   if (!l || (l.status !== 'live' && !isStaff(user))) return c.notFound();
   const cohort = await currentCohort(db, c.get('enrollment')?.cohort_id);
+  // Paid lectures belong to one cohort: another cohort's lecture is simply not there for this student.
+  if (!isStaff(user) && (!cohort || cohort.id !== l.cohort_id)) return c.notFound();
   const ended = await lecturesEndedOn(c, cohort);
   if (ended) return lecturesEndedPage(c, ended, (await getSettings(db)).contact_email);
   const src = l.bunny_video_id ? await bunnyEmbedUrl(c.env, l.bunny_video_id) : null;
@@ -553,7 +564,7 @@ learn.get('/lectures/:id{[0-9]+}', async (c) => {
       </div>
       {src ? (
         <div class="video-wrap">
-          <iframe src={src} title={l.title} loading="lazy" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+          <iframe src={src} title={l.title} loading="lazy" data-lecture allow="accelerometer; gyroscope; autoplay; encrypted-media" allowfullscreen></iframe>
           <span class="watermark" aria-hidden="true">{user.email}</span>
         </div>
       ) : (
@@ -609,7 +620,7 @@ learn.post('/lectures/:id{[0-9]+}/done', async (c) => {
   const user = c.get('user')!;
   const id = Number(c.req.param('id'));
   const f = await c.req.parseBody();
-  const ok = await c.env.DB.prepare("SELECT 1 FROM lectures WHERE id = ? AND (status = 'live' OR ?)").bind(id, isStaff(user) ? 1 : 0).first();
+  const ok = await c.env.DB.prepare(lectureAllowedSql).bind(id, await ownCohortId(c), isStaff(user) ? 1 : 0).first();
   if (ok) {
     await c.env.DB.prepare(
       `INSERT INTO lecture_progress (user_id, lecture_id, completed_at) VALUES (?, ?, datetime('now'))

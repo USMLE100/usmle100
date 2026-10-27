@@ -1,10 +1,10 @@
 import type { Context, Next } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { AppEnv, Enrollment, User } from './types';
-import { isAdmin, isStaff } from './types';
+import { isAdmin, isOwner, isStaff } from './types';
+import { audit } from './audit';
 
 const COOKIE = 'u100_session';
-const SESSION_DAYS = 30;
 const PBKDF2_ITERATIONS = 100_000; // Workers' maximum
 
 const enc = new TextEncoder();
@@ -51,19 +51,25 @@ export async function verifyPassword(password: string, hash: string, salt: strin
   return safeEqual(res.hash, hash);
 }
 
-/** Sign in. With "Remember me" off, the cookie ends when the browser closes and the session expires within a day. */
-export async function createSession(c: Context<AppEnv>, userId: number, remember = true) {
+/** Sessions end after 30 minutes without activity and 24 hours after sign-in (R088, R089, R090). */
+export const IDLE_SECONDS = 30 * 60;
+export const MAX_SESSION_SECONDS = 24 * 3600;
+/** Owner-only actions need the password re-entered within this many seconds (until passkeys exist). */
+export const REAUTH_SECONDS = 15 * 60;
+const epoch = () => Math.floor(Date.now() / 1000);
+
+/** Sign in. The cookie lasts only for the browser session; the server ends the session on inactivity or after 24 hours. */
+export async function createSession(c: Context<AppEnv>, userId: number) {
   const raw = toB64(crypto.getRandomValues(new Uint8Array(32))).replace(/[+/=]/g, (m) => ({ '+': '-', '/': '_', '=': '' })[m]!);
-  const expires = new Date(Date.now() + (remember ? SESSION_DAYS * 86400_000 : 86400_000));
-  await c.env.DB.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
-    .bind(await sha256Hex(raw), userId, expires.toISOString())
+  const t = epoch();
+  await c.env.DB.prepare('INSERT INTO sessions (token_hash, user_id, expires_at, created_at, last_seen_at, reauth_at, ip) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .bind(await sha256Hex(raw), userId, new Date((t + MAX_SESSION_SECONDS) * 1000).toISOString(), t, t, t, c.req.header('cf-connecting-ip') ?? null)
     .run();
   setCookie(c, COOKIE, raw, {
     httpOnly: true,
     secure: new URL(c.req.url).protocol === 'https:',
     sameSite: 'Lax',
     path: '/',
-    ...(remember ? { expires } : {}),
   });
 }
 
@@ -73,20 +79,42 @@ export async function destroySession(c: Context<AppEnv>) {
   deleteCookie(c, COOKIE, { path: '/' });
 }
 
-/** Loads the signed-in user (if any) and their active enrollment onto the context. */
+/** The current session's timing, for the inactivity warning and owner re-authentication. */
+export type SessionInfo = { tokenHash: string; createdAt: number; lastSeenAt: number; reauthAt: number | null };
+
+/**
+ * Loads the signed-in user (if any) and their active enrollment onto the context.
+ * A session idle for 30 minutes, or older than 24 hours, is ended here. Requests that are not activity
+ * (the inactivity check itself) do not extend it.
+ */
 export async function loadUser(c: Context<AppEnv>, next: Next) {
   c.set('user', null);
   c.set('enrollment', null);
   const raw = getCookie(c, COOKIE);
   if (raw) {
-    const user = await c.env.DB.prepare(
-      `SELECT u.id, u.email, u.name, u.role, u.exam_date, u.exam, u.onboarded_at FROM sessions s JOIN users u ON u.id = s.user_id
-       WHERE s.token_hash = ? AND s.expires_at > ?`,
+    const th = await sha256Hex(raw);
+    const t = epoch();
+    const row = await c.env.DB.prepare(
+      `SELECT u.id, u.email, u.name, u.role, u.exam_date, u.exam, u.onboarded_at, u.is_owner, u.status, u.status_reason, u.warnings, u.birth_date,
+              s.created_at AS s_created, s.last_seen_at AS s_seen, s.reauth_at AS s_reauth
+       FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`,
     )
-      .bind(await sha256Hex(raw), new Date().toISOString())
-      .first<User>();
-    if (user) {
-      c.set('user', user);
+      .bind(th)
+      .first<User & { s_created: number | null; s_seen: number | null; s_reauth: number | null }>();
+    const created = row?.s_created ?? t;
+    const seen = row?.s_seen ?? t;
+    if (row && (t - seen > IDLE_SECONDS || t - created > MAX_SESSION_SECONDS)) {
+      await c.env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(th).run();
+      deleteCookie(c, COOKIE, { path: '/' });
+      c.set('sessionEnded', t - created > MAX_SESSION_SECONDS ? 'expired' : 'idle');
+    } else if (row) {
+      const { s_created, s_seen, s_reauth, ...user } = row;
+      c.set('user', user as User);
+      c.set('session', { tokenHash: th, createdAt: created, lastSeenAt: seen, reauthAt: s_reauth ?? null });
+      // Activity extends the session (written at most once a minute). The status check does not count.
+      if (c.req.path !== '/session/status' && t - seen >= 60) {
+        await c.env.DB.prepare('UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?').bind(t, th).run();
+      }
       const enr = await c.env.DB.prepare(
         `SELECT e.id, e.package_id, e.cohort_id, e.status, p.name AS package_name, p.one_on_one_sessions, p.evening_q_months, e.lectures_until
          FROM enrollments e JOIN packages p ON p.id = e.package_id
@@ -119,16 +147,19 @@ export async function sameOrigin(c: Context<AppEnv>, next: Next) {
   await next();
 }
 
+const signInUrl = (c: Context<AppEnv>) =>
+  '/sign-in?next=' + encodeURIComponent(c.req.path + new URL(c.req.url).search) + (c.get('sessionEnded') ? `&ended=${c.get('sessionEnded')}` : '');
+
 export async function requireUser(c: Context<AppEnv>, next: Next) {
   // Keep the query string, so a payment's return link (…?session_id=) still works after signing in.
-  if (!c.get('user')) return c.redirect('/sign-in?next=' + encodeURIComponent(c.req.path + new URL(c.req.url).search));
+  if (!c.get('user')) return c.redirect(signInUrl(c));
   await next();
 }
 
 /** Students must have paid. Faculty and admins always get in. */
 export async function requireEnrolled(c: Context<AppEnv>, next: Next) {
   const user = c.get('user');
-  if (!user) return c.redirect('/sign-in?next=' + encodeURIComponent(c.req.path));
+  if (!user) return c.redirect(signInUrl(c));
   if (!isStaff(user) && !c.get('enrollment')) return c.redirect('/enroll');
   await next();
 }
@@ -168,11 +199,59 @@ const FACULTY_ALLOWED: [method: string, path: RegExp][] = [
 export const facultyMay = (method: string, path: string) =>
   FACULTY_ALLOWED.some(([m, re]) => m === method && re.test(path.replace(/\/+$/, '')));
 
-/** Admins may use the whole admin area; faculty only the parts listed above. */
+/**
+ * Changes only the owner may make (R021, R164, R004, R023): admins and roles, prices and site settings,
+ * enrollment and access adjustments, reinstating suspended accounts, the emergency lockdown and the agreement.
+ * Admins can still open these pages to see them.
+ */
+const OWNER_ONLY: RegExp[] = [
+  /^\/admin\/team$/,
+  /^\/admin\/settings$/,
+  /^\/admin\/students\/\d+\/(lectures|restore)$/,
+  /^\/admin\/book-access(\/remove)?$/,
+  /^\/admin\/evening\/access(\/extend|\/remove)?$/,
+  /^\/admin\/security\/(reinstate|lockdown)$/,
+  /^\/admin\/agreement$/,
+];
+export const ownerOnly = (method: string, path: string) => method === 'POST' && OWNER_ONLY.some((re) => re.test(path.replace(/\/+$/, '')));
+
+/** True when the owner re-entered their password recently enough for an owner-only change. */
+export const freshlyConfirmed = (c: Context<AppEnv>) => {
+  const s = c.get('session');
+  return !!s?.reauthAt && Math.floor(Date.now() / 1000) - s.reauthAt <= REAUTH_SECONDS;
+};
+
+/** Admins may use the admin area (owner-only changes need the owner, freshly confirmed); faculty only the parts listed above. */
 export async function requireAdminOrFacultyAllowed(c: Context<AppEnv>, next: Next) {
   const user = c.get('user');
-  if (!user) return c.redirect('/sign-in?next=' + encodeURIComponent(c.req.path));
-  if (isAdmin(user)) return next();
-  if (user.role === 'faculty' && facultyMay(c.req.method, c.req.path)) return next();
+  if (!user) return c.redirect(signInUrl(c));
+  if (ownerOnly(c.req.method, c.req.path)) {
+    if (!isAdmin(user)) return c.text('Not found', 404);
+    if (!isOwner(user)) {
+      await audit(c.env.DB, { actorId: user.id, action: 'owner.denied', detail: { path: c.req.path }, ip: c.req.header('cf-connecting-ip') ?? null });
+      return c.text('Only the owner can make this change.', 403);
+    }
+    if (!freshlyConfirmed(c)) {
+      const back = (c.req.header('referer') ?? '').replace(/^https?:\/\/[^/]+/, '') || '/admin/security';
+      return c.redirect('/admin/confirm?next=' + encodeURIComponent(back.startsWith('/') && !back.startsWith('//') ? back : '/admin/security'));
+    }
+    return logged(c, next);
+  }
+  if (isAdmin(user)) return logged(c, next);
+  if (user.role === 'faculty' && facultyMay(c.req.method, c.req.path)) return logged(c, next);
   return c.text('Not found', 404);
+}
+
+/** Small, non-secret form fields worth recording with an admin change. */
+const LOGGED_FIELDS = ['email', 'user_id', 'role', 'on', 'status', 'months', 'start', 'until', 'reset', 'enrollment_id'];
+/** Records every staff change in the security log (R010). The security pages log their own, more detailed entries. */
+async function logged(c: Context<AppEnv>, next: Next) {
+  await next();
+  if (c.req.method !== 'POST' || /^\/admin\/(security|confirm|agreement)(\/|$)/.test(c.req.path) || c.res.status >= 400) return;
+  let fields: Record<string, unknown> = {};
+  try {
+    const f = await c.req.parseBody();
+    fields = Object.fromEntries(LOGGED_FIELDS.filter((k) => typeof f[k] === 'string' && f[k] !== '').map((k) => [k, String(f[k]).slice(0, 120)]));
+  } catch {}
+  await audit(c.env.DB, { actorId: c.get('user')!.id, action: 'admin.post', detail: { path: c.req.path, ...fields }, ip: c.req.header('cf-connecting-ip') ?? null });
 }

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../lib/types';
-import { isAdmin } from '../lib/types';
+import { isAdmin, isOwner } from '../lib/types';
 import { requireAdminOrFacultyAllowed } from '../lib/auth';
 import { createResetToken, RESET_LINK_SECONDS } from '../lib/reset';
 import { PortalLayout, Eyebrow, Flash } from '../views/layout';
@@ -279,7 +279,7 @@ admin.post('/zoom-imports/:id/assign-evening', async (c) => {
 
 admin.get('/team', async (c) => {
   const me = c.get('user')!;
-  const staff = (await c.env.DB.prepare("SELECT id, name, email, role, created_at FROM users WHERE role IN ('admin', 'faculty') ORDER BY role, name COLLATE NOCASE").all<any>()).results;
+  const staff = (await c.env.DB.prepare("SELECT id, name, email, role, is_owner, created_at FROM users WHERE role IN ('admin', 'faculty') ORDER BY role, name COLLATE NOCASE").all<any>()).results;
   return c.html(
     <PortalLayout shell={c.get('shell')} title="Admin: team" active="admin-team" user={me}>
       <Eyebrow>Admin</Eyebrow>
@@ -287,17 +287,17 @@ admin.get('/team', async (c) => {
       {c.req.query('ok') && <Flash>Saved.</Flash>}
       {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
       <p class="muted">
-        New accounts are always students. Only an admin can make someone faculty or admin here.{' '}
+        New accounts are always students. Only the <strong>owner</strong> can make someone faculty or admin here.{' '}
         <strong>Faculty</strong> can write and approve questions and manage lecture and Evening Questions recordings.{' '}
-        <strong>Admins</strong> can also change prices, settings, the schedule, student access and this team.
+        <strong>Admins</strong> can also manage the schedule, content and students. Prices, settings, access grants, the agreement, reinstatements, lockdown and this team are owner-only.
       </p>
-      <form method="post" action="/admin/team" class="card row" style="align-items:flex-end">
+      {isOwner(me) && <form method="post" action="/admin/team" class="card row" style="align-items:flex-end">
         <label class="field" style="flex:2 1 240px">Email of an existing account<input type="email" name="email" required /></label>
         <label class="field" style="flex:1 1 160px">Role
           <select name="role"><option value="faculty">Faculty</option><option value="admin">Admin</option><option value="student">Student (remove access)</option></select>
         </label>
         <button class="btn btn-primary" type="submit">Save</button>
-      </form>
+      </form>}
       <div class="table-box">
         <table class="t">
           <thead><tr><th scope="col">Name</th><th scope="col">Role</th><th scope="col">Since</th></tr></thead>
@@ -305,7 +305,7 @@ admin.get('/team', async (c) => {
             {staff.map((u: any) => (
               <tr>
                 <td>{u.name}{u.id === me.id && ' (you)'}<br /><span class="muted small">{u.email}</span></td>
-                <td>{u.role === 'admin' ? <span class="chip">Admin</span> : <span class="chip chip-sand">Faculty</span>}</td>
+                <td>{u.is_owner ? <span class="chip">Owner</span> : u.role === 'admin' ? <span class="chip">Admin</span> : <span class="chip chip-sand">Faculty</span>}</td>
                 <td class="muted small">{String(u.created_at).slice(0, 10)}</td>
               </tr>
             ))}
@@ -322,8 +322,10 @@ admin.post('/team', async (c) => {
   const role = String(f.role ?? '');
   const bad = (m: string) => c.redirect('/admin/team?error=' + encodeURIComponent(m));
   if (!['student', 'faculty', 'admin'].includes(role)) return bad('Pick a role.');
-  const u = await c.env.DB.prepare('SELECT id, role FROM users WHERE email = ?').bind(email).first<{ id: number; role: string }>();
+  const u = await c.env.DB.prepare('SELECT id, role, is_owner, status FROM users WHERE email = ?').bind(email).first<{ id: number; role: string; is_owner: number; status: string }>();
   if (!u) return bad(`No account uses ${email}. They need to create one first.`);
+  if (u.is_owner === 1) return bad('The owner’s role cannot be changed.');
+  if (u.status === 'suspended' && role !== 'student') return bad('That account is suspended. Reinstate it first.');
   if (u.role === 'admin' && role !== 'admin') {
     const admins = (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'").first<{ n: number }>())?.n ?? 0;
     if (admins <= 1) return bad('There must always be at least one admin. Make someone else an admin first.');
@@ -331,6 +333,7 @@ admin.post('/team', async (c) => {
   // Only change the role if it is still what we read, so two admins acting at once cannot remove the last admin.
   await c.env.DB.prepare("UPDATE users SET role = ? WHERE id = ? AND role = ? AND (? = 'admin' OR role <> 'admin' OR (SELECT COUNT(*) FROM users WHERE role = 'admin') > 1)")
     .bind(role, u.id, u.role, role).run();
+  if (role !== u.role) await c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(u.id).run(); // new permissions take effect at next sign-in
   return c.redirect('/admin/team?ok=1');
 });
 

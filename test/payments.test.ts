@@ -202,8 +202,9 @@ describe('Course Book PDF storage', () => {
     const ch = (await db.prepare("SELECT id, file_id FROM book_chapters WHERE title = 'Big chapter'").first<{ id: number; file_id: number }>())!;
     expect((await db.prepare('SELECT COUNT(*) AS n FROM file_chunks WHERE file_id = ?').bind(ch.file_id).first<{ n: number }>())!.n).toBe(3);
     const max = await student('max');
+    // View-only (R005): asking for a download still gets the in-browser view.
     const res = await req(`/course-book/${ch.id}/pdf?download=1`, { cookie: max.cookie });
-    expect(res.headers.get('content-disposition')).toContain('attachment');
+    expect(res.headers.get('content-disposition')).toMatch(/^inline/);
     const got = new Uint8Array(await res.arrayBuffer());
     expect(got.length).toBe(big.length);
     expect(got.every((b, i) => b === big[i])).toBe(true);

@@ -31,7 +31,7 @@ async function bookLocked(c: Context<AppEnv>) {
       <section class="card card-sage">
         <Icon name="menu_book" size={36} class="gic" />
         <h1 style="font-size:26px">USMLE100 Book</h1>
-        <p>Written syllabus chapters and downloadable PDF handouts. The Course Book is included with <strong>Companion</strong>, <strong>Complete</strong> and <strong>MAX</strong>, or <strong>$199</strong> on its own.</p>
+        <p>Written syllabus chapters to read online. The Course Book is included with <strong>Companion</strong>, <strong>Complete</strong> and <strong>MAX</strong>, or <strong>$199</strong> on its own.</p>
         <a class="btn btn-primary btn-block" href="/buy/course-book">Buy the Course Book</a>
         <a class="btn btn-outline btn-block" href="/plans">See plans</a>
         {settings.contact_email && <a class="btn btn-outline btn-block" href={`mailto:${settings.contact_email}?subject=${encodeURIComponent('USMLE100: Course Book')}`}>Ask about the Course Book</a>}
@@ -53,7 +53,7 @@ library.get('/course-book', async (c) => {
     <PortalLayout shell={c.get('shell')} title="USMLE100 Book" active="book-library" user={user} wide>
       <section class="card card-sage book-head">
         <h1>USMLE100 Book</h1>
-        <p>Written syllabus chapters and downloadable PDF handouts · {all.length} chapter{all.length === 1 ? '' : 's'}{pages ? ` · ${pages} pages` : ''} · {read}/{all.length} read</p>
+        <p>Written syllabus chapters to read online · {all.length} chapter{all.length === 1 ? '' : 's'}{pages ? ` · ${pages} pages` : ''} · {read}/{all.length} read</p>
         {isAdmin(user) && <a class="btn btn-primary" href="/admin/book/new" style="align-self:flex-start"><Icon name="upload" size={20} />Upload PDF</a>}
       </section>
       <nav class="pill-chips" aria-label="Subjects">
@@ -76,7 +76,6 @@ library.get('/course-book', async (c) => {
             {topicList(ch.topics).length > 0 && <div class="tags">{topicList(ch.topics).map((t) => <span class="tag-soft">{t}</span>)}</div>}
             <div class="row" style="padding-top:12px;border-top:1px solid var(--line)">
               {ch.file_id && <a class="btn btn-soft btn-sm" href={`/course-book/${ch.id}/pdf`}><Icon name="visibility" size={18} />Read Chapter</a>}
-              {ch.file_id && <a class="btn btn-outline btn-sm" href={`/course-book/${ch.id}/pdf?download=1`}><Icon name="download" size={18} />PDF</a>}
               <form method="post" action={`/course-book/${ch.id}/read`}>
                 <input type="hidden" name="back" value={c.req.url.replace(/^https?:\/\/[^/]+/, '')} />
                 <button class="btn btn-outline btn-sm" type="submit" aria-pressed={ch.read_at ? 'true' : 'false'}><Icon name={ch.read_at ? 'check_circle' : 'circle'} size={18} />{ch.read_at ? 'Read' : 'Mark Read'}</button>
@@ -103,8 +102,7 @@ library.get('/course-book/:id{[0-9]+}', async (c) => {
         <h1 style="font-size:28px">{ch.title}</h1>
         <p class="muted">{[ch.author, ch.pages ? `${ch.pages} pages` : '', ch.file_name].filter(Boolean).join(' · ')}</p>
         <div class="row">
-          {ch.file_id && <a class="btn btn-primary" href={`/course-book/${ch.id}/pdf?download=1`}><Icon name="download" size={20} />Download PDF</a>}
-          {ch.file_id && <a class="btn btn-outline" href={`/course-book/${ch.id}/pdf`}><Icon name="visibility" size={20} />Read Chapter</a>}
+          {ch.file_id && <a class="btn btn-primary" href={`/course-book/${ch.id}/pdf`}><Icon name="visibility" size={20} />Read Chapter</a>}
           <form method="post" action={`/course-book/${ch.id}/read`}>
             <input type="hidden" name="back" value={`/course-book/${ch.id}`} />
             <button class="btn btn-ghost" type="submit" aria-pressed={ch.read_at ? 'true' : 'false'}><Icon name={ch.read_at ? 'check_circle' : 'circle'} size={20} />{ch.read_at ? 'Read' : 'Mark Read'}</button>
@@ -143,7 +141,11 @@ library.get('/course-book/:id{[0-9]+}/pdf', async (c) => {
   if (!ch?.file_id || (ch.status !== 'live' && !isStaff(user))) return c.notFound();
   const f = await fileMeta(c.env.DB, ch.file_id);
   if (!f) return c.notFound();
-  return fileResponse(c.env.DB, f, c.req.query('download') ? 'download' : 'view');
+  // The Course Book is view-only (R005): never offered as a download, and only formats a browser can show.
+  if (f.type !== 'application/pdf') return c.notFound();
+  const res = fileResponse(c.env.DB, f, 'view');
+  res.headers.set('X-Robots-Tag', 'noindex, noarchive');
+  return res;
 });
 
 library.post('/course-book/:id{[0-9]+}/read', async (c) => {

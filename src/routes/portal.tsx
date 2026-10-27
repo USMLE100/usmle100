@@ -491,7 +491,7 @@ portal.get('/evening/:id', async (c) => {
       </div>
       {src ? (
         <div class="video-wrap">
-          <iframe src={src} title={e.title} loading="lazy" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+          <iframe src={src} title={e.title} loading="lazy" data-lecture allow="accelerometer; gyroscope; autoplay; encrypted-media" allowfullscreen></iframe>
           <span class="watermark" aria-hidden="true">{user.email}</span>
         </div>
       ) : (

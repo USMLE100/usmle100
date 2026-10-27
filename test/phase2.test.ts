@@ -1,5 +1,6 @@
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { makeOwner } from './owner';
 
 // Phase 2 access rules: who may see books, notes, feedback, cards and the new admin pages.
 const BASE = 'https://usmle100.test';
@@ -23,12 +24,13 @@ async function req(path: string, opts: { cookie?: string; form?: Record<string, 
 }
 
 let n = 0;
-async function account(role: 'student' | 'faculty' | 'admin', pkg: string | null = 'max') {
+async function account(role: 'student' | 'faculty' | 'admin' | 'owner', pkg: string | null = 'max') {
   const email = `p2user${++n}@example.com`;
   const res = await req('/sign-up', { form: { name: 'Phase Two', email, password: 'correct-horse-battery' } });
   const cookie = (res.headers.get('set-cookie') ?? '').split(';')[0];
   const u = await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: number }>();
-  if (role !== 'student') await db.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, u!.id).run();
+  if (role === 'owner') await makeOwner(db, email);
+  else if (role !== 'student') await db.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, u!.id).run();
   if (role === 'student' && pkg) {
     await db.prepare("INSERT INTO enrollments (user_id, package_id, status, paid_at) VALUES (?, ?, 'active', datetime('now'))").bind(u!.id, pkg).run();
   }
@@ -41,7 +43,7 @@ let admin: Awaited<ReturnType<typeof account>>;
 let chapterId = 0;
 
 beforeAll(async () => {
-  admin = await account('admin');
+  admin = await account('owner');
   const fd = new FormData();
   fd.set('number', '1');
   fd.set('title', 'Test chapter');
@@ -194,12 +196,11 @@ describe('progress can only come from real activity', () => {
   });
 });
 
-describe('remember me', () => {
-  it('without it, the sign-in cookie lasts only for the browser session', async () => {
+describe('no remember me (R088-R091)', () => {
+  it('the sign-in cookie lasts only for the browser session, even if asked to remember', async () => {
     const s = await account('student');
-    const off = await req('/sign-in', { form: { email: s.email, password: 'correct-horse-battery' } });
-    expect(off.headers.get('set-cookie')).not.toMatch(/expires=/i);
     const on = await req('/sign-in', { form: { email: s.email, password: 'correct-horse-battery', remember: '1' } });
-    expect(on.headers.get('set-cookie')).toMatch(/expires=/i);
+    expect(on.headers.get('set-cookie')).not.toMatch(/expires=|max-age=/i);
+    expect(await (await req('/sign-in')).text()).not.toContain('Remember me');
   });
 });

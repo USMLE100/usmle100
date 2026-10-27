@@ -1,6 +1,6 @@
 /**
  * Sign-in protection against password guessing, kept in D1 (no extra service).
- * - Per email: 5 wrong passwords within 15 minutes locks that email for 15 minutes.
+ * - Per email: 5 wrong passwords within 15 minutes locks that account until an administrator unlocks it (R029).
  * - Per network address: 20 wrong passwords within 15 minutes (any emails) locks that address for 15 minutes.
  * Unknown emails are counted the same way, so the response never reveals whether an account exists.
  */
@@ -39,8 +39,31 @@ function failure(db: D1Database, key: string, max: number) {
     .bind(key, t, cutoff, max, LOCK_SECONDS);
 }
 
+/** Count a failed sign-in. Returns true when this failure locked the account. */
 export async function recordFailure(db: D1Database, email: string, ip: string | null) {
   await db.batch([failure(db, emailKey(email), EMAIL_MAX_FAILURES), ...(ip ? [failure(db, ipKey(ip), IP_MAX_FAILURES)] : [])]);
+  const row = await db.prepare('SELECT failures, locked_until FROM login_attempts WHERE key = ?').bind(emailKey(email)).first<{ failures: number; locked_until: number | null }>();
+  if (row && row.failures >= EMAIL_MAX_FAILURES) {
+    const r = await db
+      .prepare('INSERT INTO account_locks (email) VALUES (?) ON CONFLICT (email) DO UPDATE SET locked_at = datetime(\'now\'), unlocked_at = NULL, unlocked_by = NULL WHERE unlocked_at IS NOT NULL')
+      .bind(email)
+      .run();
+    return (r.meta.changes ?? 0) > 0;
+  }
+  return false;
+}
+
+/** True while an account is locked awaiting an administrator. */
+export async function accountLocked(db: D1Database, email: string) {
+  return !!(await db.prepare('SELECT 1 FROM account_locks WHERE email = ? AND unlocked_at IS NULL').bind(email).first());
+}
+
+/** An administrator unlocks an account (also clears its failure counter). */
+export async function unlockAccount(db: D1Database, email: string, by: number | null) {
+  await db.batch([
+    db.prepare("UPDATE account_locks SET unlocked_at = datetime('now'), unlocked_by = ? WHERE email = ? AND unlocked_at IS NULL").bind(by, email),
+    db.prepare('DELETE FROM login_attempts WHERE key = ?').bind(emailKey(email)),
+  ]);
 }
 
 /** A correct password (or a password reset) clears that email's counter. */

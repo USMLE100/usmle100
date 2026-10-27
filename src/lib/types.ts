@@ -27,6 +27,13 @@ export type User = {
   exam_date: string | null;
   exam?: string | null;
   onboarded_at?: string | null;
+  /** The owner: final authority over admins, money, access changes and reinstatement. */
+  is_owner?: number;
+  /** active | warned | suspended */
+  status?: string;
+  status_reason?: string | null;
+  warnings?: number;
+  birth_date?: string | null;
 };
 
 export type Enrollment = {
@@ -48,6 +55,9 @@ export type Vars = {
   user: User | null;
   enrollment: Enrollment | null;
   shell?: Shell;
+  session?: { tokenHash: string; createdAt: number; lastSeenAt: number; reauthAt: number | null };
+  /** Set when this request found the session ended: 'idle' (30 minutes) or 'expired' (24 hours). */
+  sessionEnded?: 'idle' | 'expired';
 };
 
 export type AppEnv = { Bindings: Env; Variables: Vars };
@@ -56,3 +66,5 @@ export type AppEnv = { Bindings: Env; Variables: Vars };
 export const isStaff = (u: User | null) => !!u && (u.role === 'admin' || u.role === 'faculty');
 /** Admin only: prices, settings, schedule, student access and the team. */
 export const isAdmin = (u: User | null) => !!u && u.role === 'admin';
+/** The owner (an admin with final authority). */
+export const isOwner = (u: User | null) => !!u && u.role === 'admin' && u.is_owner === 1;

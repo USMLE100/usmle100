@@ -11,6 +11,7 @@ import m0010 from '../../migrations/0010_login_limits_and_resets.sql';
 import m0011 from '../../migrations/0011_phase2.sql';
 import m0012 from '../../migrations/0012_book_purchases.sql';
 import m0013 from '../../migrations/0013_refunds.sql';
+import m0014 from '../../migrations/0014_owner_security.sql';
 
 /**
  * Database migrations run by the Worker itself on first request, so deploys
@@ -30,6 +31,7 @@ const MIGRATIONS: [string, string][] = [
   ['0011_phase2', m0011],
   ['0012_book_purchases', m0012],
   ['0013_refunds', m0013],
+  ['0014_owner_security', m0014],
 ];
 
 function statements(sql: string): string[] {

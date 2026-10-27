@@ -1,5 +1,6 @@
 import { env, exports } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeOwner } from './owner';
 
 // Refunds are issued by the owner in the Stripe Dashboard. The site only reacts to Stripe's charge.refunded event.
 // Stripe's API is mocked; nothing reaches Stripe.
@@ -26,7 +27,8 @@ async function account(pkg: string | null = null, role = 'student') {
   const res = await req('/sign-up', { form: { name: 'Refund Test', email, password: 'correct-horse-battery' } });
   const cookie = (res.headers.get('set-cookie') ?? '').split(';')[0];
   const u = (await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: number }>())!;
-  if (role !== 'student') await db.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, u.id).run();
+  if (role === 'owner') await makeOwner(db, email);
+  else if (role !== 'student') await db.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, u.id).run();
   if (pkg) await db.prepare("INSERT INTO enrollments (user_id, package_id, status, paid_at) VALUES (?, ?, 'active', datetime('now'))").bind(u.id, pkg).run();
   return { cookie, id: u.id, email };
 }
@@ -118,7 +120,7 @@ describe('a full refund issued in Stripe removes only that purchase’s access',
     expect(await (await req('/course-book', { cookie: s.cookie })).text()).toContain('$199');
 
     // The owner decides to give it back; a duplicate refund notification and a replayed payment change nothing.
-    const admin = await account(null, 'admin');
+    const admin = await account(null, 'owner');
     await req('/admin/book-access', { cookie: admin.cookie, form: { email: s.email, note: 'Restored by owner' } });
     expect(await hasBookAccess(s.id)).toBe(true);
     await webhook(charge('pi_book1', 19900, 19900), 'charge.refunded');
@@ -168,7 +170,7 @@ describe('a full refund issued in Stripe removes only that purchase’s access',
     expect((await req(`/admin/students/${enrollmentId}/restore`, { cookie: fac.cookie, form: {} })).status).toBe(404);
     expect((await req(`/admin/students/${enrollmentId}/restore`, { cookie: s.cookie, form: {} })).status).toBe(404);
     expect(await status()).toBe('refunded');
-    const admin = await account(null, 'admin');
+    const admin = await account(null, 'owner');
     expect(await (await req('/admin/students', { cookie: admin.cookie })).text()).toContain('Refunded programs');
     await req(`/admin/students/${enrollmentId}/restore`, { cookie: admin.cookie, form: {} });
     expect(await status()).toBe('active');

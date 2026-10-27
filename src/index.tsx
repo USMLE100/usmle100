@@ -16,6 +16,10 @@ import { learn } from './routes/learn';
 import { content } from './routes/content';
 import { library } from './routes/library';
 import { community } from './routes/community';
+import { account } from './routes/account';
+import { security } from './routes/security';
+import { accountGate } from './lib/gate';
+import { pruneAudit } from './lib/audit';
 import { PublicLayout } from './views/layout';
 
 const app = new Hono<AppEnv>();
@@ -48,8 +52,13 @@ app.use('*', async (c, next) => {
   await next();
 });
 
+// Suspension, emergency lockdown, warnings and the student agreement (lib/gate).
+app.use('*', accountGate);
+
 app.route('/', publicRoutes);
+app.route('/', account);
 app.route('/zoom', zoom);
+app.route('/admin', security);
 app.route('/admin', admin);
 app.route('/admin', content);
 app.route('/', portal);
@@ -80,7 +89,7 @@ export default {
   /** Every few minutes: link Zoom recordings that Bunny has copied and put finished ones live. */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(
-      ensureMigrated(env.DB).then(() => Promise.all([syncImports(env).then(() => syncDurations(env)), pruneLoginAttempts(env.DB), pruneResetTokens(env.DB)])),
+      ensureMigrated(env.DB).then(() => Promise.all([syncImports(env).then(() => syncDurations(env)), pruneLoginAttempts(env.DB), pruneResetTokens(env.DB), pruneAudit(env.DB)])),
     );
   },
 };

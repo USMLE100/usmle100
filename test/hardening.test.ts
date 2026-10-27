@@ -30,9 +30,12 @@ async function account(role: 'student' | 'faculty' | 'admin' = 'student') {
 const signIn = (email: string, password: string, ip = '203.0.113.1') => req('/sign-in', { form: { email, password }, ip });
 
 describe('sign-in lockout', () => {
-  it('locks an email for 15 minutes after 5 wrong passwords, even for the right password', async () => {
+  it('locks an account after 5 wrong passwords until an admin unlocks it, even for the right password (R029)', async () => {
     const { email } = await account();
-    for (let i = 0; i < 5; i++) expect((await signIn(email, 'wrong-password-' + i, `192.0.2.${i}`)).status).toBe(401);
+    for (let i = 0; i < 4; i++) expect((await signIn(email, 'wrong-password-' + i, `192.0.2.${i}`)).status).toBe(401);
+    const fifth = await signIn(email, 'wrong-password-4', '192.0.2.4');
+    expect(fifth.status).toBe(429);
+    expect(await fifth.text()).toContain('until USMLE100 unlocks it');
     const blocked = await signIn(email, PASSWORD, '192.0.2.99');
     expect(blocked.status).toBe(429);
     expect(cookieOf(blocked)).not.toMatch(/u100_session=./);
@@ -48,12 +51,20 @@ describe('sign-in lockout', () => {
     expect(cookieOf(res)).toMatch(/^u100_session=./);
   });
 
-  it('works again once the lock has passed', async () => {
+  it('stays locked after 15 minutes; works again once an admin unlocks it', async () => {
     const { email } = await account();
     for (let i = 0; i < 5; i++) await signIn(email, 'nope-nope-nope', `192.0.2.${20 + i}`);
-    // Pretend the 15 minutes are over.
+    // Even when the timed limit has passed, the account lock remains.
     await db.prepare("UPDATE login_attempts SET locked_until = 1, window_start = 1 WHERE key = 'email:' || ?").bind(email).run();
-    expect((await signIn(email, PASSWORD, '192.0.2.60')).status).toBe(302);
+    expect((await signIn(email, PASSWORD, '192.0.2.60')).status).toBe(429);
+    // A student cannot unlock; an admin can.
+    const student = await account();
+    expect((await req('/admin/security/unlock', { cookie: student.cookie, form: { email } })).status).toBe(404);
+    const admin = await account('admin');
+    expect((await req('/admin/security/unlock', { cookie: admin.cookie, form: { email } })).status).toBe(302);
+    expect((await signIn(email, PASSWORD, '192.0.2.61')).status).toBe(302);
+    const log = await db.prepare("SELECT action FROM audit_log WHERE detail LIKE ? ORDER BY id").bind(`%${email}%`).all<{ action: string }>();
+    expect(log.results.map((x) => x.action)).toEqual(expect.arrayContaining(['signin.failed', 'signin.locked', 'account.unlocked']));
   });
 
   it('a correct password clears earlier mistakes', async () => {
@@ -66,7 +77,8 @@ describe('sign-in lockout', () => {
 
   it('treats unknown emails the same, so it does not reveal which accounts exist', async () => {
     const ghost = 'nobody-here@example.com';
-    for (let i = 0; i < 5; i++) expect((await signIn(ghost, 'nope-nope-nope', `192.0.2.${80 + i}`)).status).toBe(401);
+    for (let i = 0; i < 4; i++) expect((await signIn(ghost, 'nope-nope-nope', `192.0.2.${80 + i}`)).status).toBe(401);
+    expect((await signIn(ghost, 'nope-nope-nope', '192.0.2.84')).status).toBe(429);
     expect((await signIn(ghost, 'nope-nope-nope', '192.0.2.90')).status).toBe(429);
   });
 
@@ -91,7 +103,7 @@ describe('video links are always signed', () => {
     expect(url.searchParams.get('token')).toMatch(/^[0-9a-f]{64}$/);
     const expires = Number(url.searchParams.get('expires'));
     expect(expires).toBeGreaterThan(Date.now() / 1000);
-    expect(expires).toBeLessThanOrEqual(Date.now() / 1000 + 4 * 3600 + 5);
+    expect(expires).toBeLessThanOrEqual(Date.now() / 1000 + 3600 + 5);
   });
 });
 

@@ -1,5 +1,6 @@
 import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
+import { makeOwner } from './owner';
 
 const BASE = 'https://usmle100.test';
 const worker = (exports as any).default as { fetch: (r: Request) => Promise<Response> };
@@ -30,9 +31,10 @@ async function signUp(email = `user${++n}@example.com`) {
 const roleOf = async (email: string) => (await db.prepare('SELECT role FROM users WHERE email = ?').bind(email).first<{ role: string }>())?.role;
 const setRole = (email: string, role: string) => db.prepare('UPDATE users SET role = ? WHERE email = ?').bind(role, email).run();
 
-async function as(role: 'student' | 'faculty' | 'admin') {
+async function as(role: 'student' | 'faculty' | 'admin' | 'owner') {
   const u = await signUp();
-  if (role !== 'student') await setRole(u.email, role);
+  if (role === 'owner') await makeOwner(db, u.email);
+  else if (role !== 'student') await setRole(u.email, role);
   return u;
 }
 
@@ -126,8 +128,8 @@ describe('admins keep full access', () => {
     for (const path of [...ADMIN_ONLY_GET, ...TEACHING_GET]) expect((await req(path, { cookie })).status, path).toBe(200);
   });
 
-  it('can make someone faculty and remove it again', async () => {
-    const { cookie } = await as('admin');
+  it('the owner can make someone faculty and remove it again', async () => {
+    const { cookie } = await as('owner');
     const other = await as('student');
     await req('/admin/team', { cookie, form: { email: other.email, role: 'faculty' } });
     expect(await roleOf(other.email)).toBe('faculty');
@@ -135,12 +137,18 @@ describe('admins keep full access', () => {
     expect(await roleOf(other.email)).toBe('student');
   });
 
-  it('cannot remove the last admin', async () => {
-    await db.prepare("UPDATE users SET role = 'student' WHERE role = 'admin'").run();
-    const { cookie, email } = await as('admin');
+  it('the owner cannot be demoted, not even by themselves', async () => {
+    const { cookie, email } = await as('owner');
     const res = await req('/admin/team', { cookie, form: { email, role: 'student' } });
     expect(res.headers.get('location')).toContain('error=');
     expect(await roleOf(email)).toBe('admin');
+  });
+
+  it('an admin who is not the owner cannot change the team', async () => {
+    const { cookie } = await as('admin');
+    const other = await as('student');
+    expect((await req('/admin/team', { cookie, form: { email: other.email, role: 'admin' } })).status).toBe(403);
+    expect(await roleOf(other.email)).toBe('student');
   });
 });
 

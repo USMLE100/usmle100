@@ -1,3 +1,4 @@
+import { audit } from './audit';
 import type { Env } from './types';
 
 const API = 'https://api.stripe.com/v1';
@@ -75,7 +76,7 @@ export async function verifyWebhook(payload: string, header: string | undefined,
  */
 export async function activateEnrollment(db: D1Database, sessionId: string, enrollmentId: number, amountCents: number) {
   const cohort = await db.prepare('SELECT id FROM cohorts ORDER BY start_date DESC LIMIT 1').first<{ id: number }>();
-  await db
+  const r = await db
     .prepare(
       `UPDATE enrollments SET status = 'active', paid_at = COALESCE(paid_at, datetime('now')), amount_cents = ?1,
          cohort_id = COALESCE(cohort_id, ?2)
@@ -83,6 +84,7 @@ export async function activateEnrollment(db: D1Database, sessionId: string, enro
     )
     .bind(amountCents, cohort?.id ?? null, enrollmentId, sessionId)
     .run();
+  return (r.meta.changes ?? 0) > 0;
 }
 
 /**
@@ -108,8 +110,17 @@ export async function fulfil(db: D1Database, s: PaidSession) {
   if (s.payment_status !== 'paid' || (s.currency ?? 'usd').toLowerCase() !== 'usd' || !s.client_reference_id) return;
   const ref = s.client_reference_id;
   const book = /^book-(\d+)$/.exec(ref);
-  if (book) await fulfilBookPurchase(db, s.id, Number(book[1]), s.amount_total);
-  else if (/^\d+$/.test(ref)) await activateEnrollment(db, s.id, Number(ref), s.amount_total);
+  if (book) {
+    if (await fulfilBookPurchase(db, s.id, Number(book[1]), s.amount_total)) {
+      const p = await db.prepare('SELECT user_id FROM book_purchases WHERE id = ?').bind(Number(book[1])).first<{ user_id: number }>();
+      await audit(db, { action: 'payment.book', targetUserId: p?.user_id ?? null, detail: { purchase: Number(book[1]), cents: s.amount_total, session: s.id } });
+    }
+  } else if (/^\d+$/.test(ref)) {
+    if (await activateEnrollment(db, s.id, Number(ref), s.amount_total)) {
+      const e = await db.prepare('SELECT user_id, package_id FROM enrollments WHERE id = ?').bind(Number(ref)).first<{ user_id: number; package_id: string }>();
+      await audit(db, { action: 'payment.enrollment', targetUserId: e?.user_id ?? null, detail: { enrollment: Number(ref), pkg: e?.package_id, cents: s.amount_total, session: s.id } });
+    }
+  }
   // Remember the payment, so a refund issued later in Stripe can be matched to this purchase.
   if (s.payment_intent) {
     await db.batch([
@@ -181,5 +192,6 @@ export async function handleRefund(env: Env, ch: RefundedCharge): Promise<string
   // Recorded in the same transaction, so a retry after a failure is handled, and a second notification is not.
   steps.push(db.prepare('INSERT OR IGNORE INTO stripe_refunds (charge_id, payment_intent, result) VALUES (?, ?, ?)').bind(ch.id, ch.payment_intent, result));
   await db.batch(steps);
+  await audit(db, { action: 'refund.revoked', targetUserId: book?.user_id ?? null, detail: { result, charge: ch.id, cents: ch.amount_refunded } });
   return result;
 }

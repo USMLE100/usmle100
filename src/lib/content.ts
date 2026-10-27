@@ -82,9 +82,9 @@ export async function currentCohort(db: D1Database, cohortId?: number | null): P
 /**
  * Bunny Stream embed URL with token authentication:
  * token = SHA256_HEX(token_security_key + video_id + expiration).
- * Links expire, so a copied URL stops working.
+ * Links expire after 1 hour, so a copied URL soon stops working.
  */
-export async function bunnyEmbedUrl(env: Env, videoId: string, ttlSeconds = 4 * 3600) {
+export async function bunnyEmbedUrl(env: Env, videoId: string, ttlSeconds = 3600) {
   // Fail closed: never hand out an unsigned player link. Without the key the video simply does not play.
   if (!env.BUNNY_LIBRARY_ID || !env.BUNNY_TOKEN_KEY) {
     console.error('Bunny video not shown: BUNNY_LIBRARY_ID or BUNNY_TOKEN_KEY is missing');

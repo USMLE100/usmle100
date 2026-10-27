@@ -16,4 +16,5 @@ export default defineConfig({
       miniflare: { bindings: { ZOOM_WEBHOOK_SECRET: 'test-secret', STRIPE_SECRET_KEY: 'sk_test_not_real', STRIPE_WEBHOOK_SECRET: 'whsec_test_not_real', BUNNY_API_KEY: 'bunny_test_not_real' } },
     }),
   ],
+  test: { setupFiles: ['./test/setup.ts'] },
 });
