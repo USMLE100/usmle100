@@ -9,7 +9,7 @@ Never paste keys into chat, email or GitHub. In Cloudflare, always add keys as t
 2. Add it in Cloudflare → Workers & Pages → usmle100 → Settings → Variables and Secrets, type Secret, named `STRIPE_SECRET_KEY`.
 3. In Stripe → Developers → Webhooks → Add endpoint:
    - **URL:** `https://<site address>/stripe/webhook`. Today that is `https://usmle100.info-usmle100.workers.dev/stripe/webhook`; it becomes `https://usmle100.com/stripe/webhook` once the domain is connected.
-   - **Events:** `checkout.session.completed`, `checkout.session.async_payment_succeeded` and `charge.refunded`.
+   - **Events:** `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `charge.refunded`, `charge.dispute.created`, `charge.dispute.closed` and `charge.dispute.funds_reinstated`.
 4. Copy that endpoint's **signing secret** (`whsec_…`) into Cloudflare as Secret `STRIPE_WEBHOOK_SECRET`.
 5. Do one test-mode purchase of a package and one of the Course Book, using Stripe's test card `4242 4242 4242 4242`. Check that:
    - the portal unlocks;

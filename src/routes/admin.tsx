@@ -445,9 +445,9 @@ admin.get('/students', async (c) => {
   }
   const refunded = (
     await db.prepare(
-      `SELECT e.id, e.refunded_at, u.name, u.email, p.name AS package_name FROM enrollments e
+      `SELECT e.id, e.refunded_at, e.suspended_at, e.suspended_reason, u.name, u.email, p.name AS package_name FROM enrollments e
        JOIN users u ON u.id = e.user_id JOIN packages p ON p.id = e.package_id
-       WHERE e.status = 'refunded' ORDER BY e.refunded_at DESC LIMIT 50`,
+       WHERE e.status = 'refunded' OR e.suspended_at IS NOT NULL ORDER BY COALESCE(e.suspended_at, e.refunded_at) DESC LIMIT 50`,
     ).all<any>()
   ).results;
   const fallback = await currentCohort(db);
@@ -457,6 +457,7 @@ admin.get('/students', async (c) => {
     <PortalLayout shell={c.get('shell')} title="Admin: students" active="admin-students" user={c.get('user')!}>
       <Eyebrow>Admin</Eyebrow>
       <h1>Students</h1>
+      <p><a class="btn btn-outline btn-sm" href="/admin/students/directory">All students: search, filters, CSV</a></p>
       {c.req.query('ok') && <Flash>Saved.</Flash>}
       <p class="muted">Lecture recordings stay open until {LECTURE_DAYS_AFTER_END} days after a cohort’s last day (Day 100). To give one student more time, change their date and tap Save.</p>
       <form method="post" action="/admin/reset-link" class="card row" style="align-items:flex-end">
@@ -502,12 +503,12 @@ admin.get('/students', async (c) => {
       )}
       {refunded.length > 0 && (
         <section class="card">
-          <h2>Refunded programs</h2>
-          <p class="muted small">A full refund issued in Stripe removes that program automatically. If you change your mind, restore it here; a repeat notification from Stripe won’t remove it again.</p>
+          <h2>Refunded or disputed programs</h2>
+          <p class="muted small">A full refund issued in Stripe removes that program automatically, and a chargeback pauses it. If you decide to give it back, restore it here (owner only); a repeat notification from Stripe won’t remove it again.</p>
           <ul class="plain-list">
             {refunded.map((r: any) => (
               <li class="row between">
-                <span><strong>{r.name}</strong> <span class="muted small">{r.email} · {r.package_name}{r.refunded_at ? ` · refunded ${long(r.refunded_at.slice(0, 10))}` : ''}</span></span>
+                <span><strong>{r.name}</strong> <span class="muted small">{r.email} · {r.package_name}{r.suspended_at ? ` · ${r.suspended_reason ?? 'suspended'} since ${long(r.suspended_at.slice(0, 10))}` : r.refunded_at ? ` · refunded ${long(r.refunded_at.slice(0, 10))}` : ''}</span></span>
                 <form method="post" action={`/admin/students/${r.id}/restore`}><button class="btn btn-ghost btn-sm" type="submit">Restore access</button></form>
               </li>
             ))}
@@ -520,7 +521,7 @@ admin.get('/students', async (c) => {
 
 /** Give a refunded program back (admin decision). Does not touch Stripe. */
 admin.post('/students/:id{[0-9]+}/restore', async (c) => {
-  await c.env.DB.prepare("UPDATE enrollments SET status = 'active' WHERE id = ? AND status = 'refunded'").bind(Number(c.req.param('id'))).run();
+  await c.env.DB.prepare("UPDATE enrollments SET status = 'active', suspended_at = NULL, suspended_reason = NULL WHERE id = ? AND (status = 'refunded' OR suspended_at IS NOT NULL)").bind(Number(c.req.param('id'))).run();
   return c.redirect('/admin/students?ok=1');
 });
 

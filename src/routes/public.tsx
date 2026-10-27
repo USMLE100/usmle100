@@ -9,7 +9,7 @@ import { MIN_PASSWORD, passwordProblem } from '../lib/passwords';
 import { EXAMS, MARKETING_TEXT, gradYears, normalizePhone, validName } from '../lib/profile';
 import { audit } from '../lib/audit';
 import { consumeResetToken, resetTokenUser } from '../lib/reset';
-import { handleRefund, activateEnrollment, createCheckoutSession, fulfil, fulfilBookPurchase, retrieveCheckoutSession, verifyWebhook } from '../lib/stripe';
+import { handleDispute, handleRefund, activateEnrollment, createCheckoutSession, fulfil, fulfilBookPurchase, retrieveCheckoutSession, verifyWebhook } from '../lib/stripe';
 import { BOOK_PRICE_CENTS, hasBook } from '../lib/book';
 import { currentCohort, dayDate, fmtDate, money, todayUtc, ymdToUtc } from '../lib/content';
 import { getSettings } from '../lib/settings';
@@ -800,6 +800,10 @@ publicRoutes.post('/stripe/webhook', async (c) => {
   // Refunds are issued by the owner in the Stripe Dashboard only. A full refund removes that purchase's access.
   if (event.type === 'charge.refunded') {
     console.log('stripe refund', event.data.object?.id, await handleRefund(c.env, event.data.object));
+  }
+  // Chargebacks suspend the disputed purchase at once; the owner decides on restoring it.
+  if (event.type === 'charge.dispute.created' || event.type === 'charge.dispute.closed' || event.type === 'charge.dispute.funds_reinstated') {
+    console.log('stripe dispute', event.data.object?.id, await handleDispute(c.env, event.data.object, event.type));
   }
   return c.json({ received: true });
 });

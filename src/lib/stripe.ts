@@ -195,3 +195,65 @@ export async function handleRefund(env: Env, ch: RefundedCharge): Promise<string
   await audit(db, { action: 'refund.revoked', targetUserId: book?.user_id ?? null, detail: { result, charge: ch.id, cents: ch.amount_refunded } });
   return result;
 }
+
+/** The fields of a Stripe Dispute used here. */
+export type StripeDispute = { id: string; charge: string; payment_intent: string | null; amount: number; reason: string; status: string };
+
+/**
+ * A chargeback (charge.dispute.created): the disputed purchase's access is suspended at once, the evidence trail is
+ * kept, and the owner is alerted (owner decision on refunds and chargebacks). A dispute the bank marks as
+ * fraudulent also suspends the whole account until it is cleared (credible payment fraud). Each dispute is handled
+ * once. When it closes (charge.dispute.closed), the outcome is recorded and the owner decides whether to restore.
+ */
+export async function handleDispute(env: Env, d: StripeDispute, type: string): Promise<string> {
+  const db = env.DB;
+  if (!d?.id) return 'no dispute';
+  if (type === 'charge.dispute.closed' || type === 'charge.dispute.funds_reinstated') {
+    const row = await db.prepare('SELECT user_id FROM stripe_disputes WHERE id = ?').bind(d.id).first<{ user_id: number | null }>();
+    await db.batch([
+      db.prepare("UPDATE stripe_disputes SET status = ?, closed_at = datetime('now'), outcome = ? WHERE id = ?").bind(d.status, d.status, d.id),
+      db.prepare('INSERT INTO staff_alerts (level, kind, user_id, message) VALUES (?, ?, ?, ?)').bind(
+        'warning',
+        'dispute',
+        row?.user_id ?? null,
+        d.status === 'won' ? 'A chargeback was decided in your favour. Restore the student’s access if you agree (Admin → Students).' : `A chargeback closed as “${d.status}”. Access stays suspended.`,
+      ),
+    ]);
+    await audit(db, { action: 'payment.dispute_closed', targetUserId: row?.user_id ?? null, detail: { dispute: d.id, status: d.status } });
+    return `dispute ${d.status}`;
+  }
+  if (await db.prepare('SELECT 1 FROM stripe_disputes WHERE id = ?').bind(d.id).first()) return 'already handled';
+  const pi = d.payment_intent;
+  const enr = pi ? await db.prepare('SELECT id, user_id FROM enrollments WHERE payment_intent = ?').bind(pi).first<{ id: number; user_id: number }>() : null;
+  const book = pi ? await db.prepare('SELECT id, user_id FROM book_purchases WHERE payment_intent = ?').bind(pi).first<{ id: number; user_id: number }>() : null;
+  const userId = enr?.user_id ?? book?.user_id ?? null;
+  const fraud = d.reason === 'fraudulent';
+  const steps: D1PreparedStatement[] = [
+    db.prepare('INSERT OR IGNORE INTO stripe_disputes (id, charge_id, payment_intent, amount, reason, status, user_id, enrollment_id, book_purchase_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(d.id, d.charge, pi, d.amount, d.reason, d.status, userId, enr?.id ?? null, book?.id ?? null),
+  ];
+  if (enr) steps.push(db.prepare("UPDATE enrollments SET suspended_at = datetime('now'), suspended_reason = ? WHERE id = ? AND suspended_at IS NULL").bind(`Chargeback ${d.id}`, enr.id));
+  if (book) steps.push(db.prepare('DELETE FROM book_access WHERE user_id = ? AND note = ?').bind(book.user_id, 'Bought online · purchase ' + book.id));
+  if (userId) {
+    steps.push(
+      db.prepare("INSERT INTO security_flags (user_id, kind, detail) VALUES (?, 'dispute', ?)").bind(userId, JSON.stringify({ dispute: d.id, reason: d.reason, amount: d.amount })),
+      db.prepare("INSERT INTO notices (user_id, kind, title, body) VALUES (?, 'payment', 'Payment disputed', 'Your bank has disputed a payment to USMLE100, so access from that purchase is paused while it is reviewed. Please contact USMLE100.')").bind(userId),
+      db.prepare('DELETE FROM play_tabs WHERE user_id = ?').bind(userId),
+    );
+    if (fraud) {
+      steps.push(
+        db.prepare("UPDATE users SET status = 'suspended', status_reason = 'A payment was reported as fraudulent. Your account is paused until USMLE100 reviews it.', status_at = datetime('now') WHERE id = ? AND is_owner = 0 AND role = 'student'").bind(userId),
+        db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId),
+      );
+    }
+  }
+  steps.push(
+    db.prepare("INSERT INTO staff_alerts (level, kind, user_id, message) VALUES ('critical', 'dispute', ?, ?)").bind(
+      userId,
+      `Chargeback ${d.id} (${d.reason}, ${(d.amount / 100).toFixed(2)}): the purchase’s access was suspended${fraud ? ' and the account was suspended as possible fraud' : ''}. Respond in the Stripe Dashboard.`,
+    ),
+  );
+  await db.batch(steps);
+  await audit(db, { action: 'payment.disputed', targetUserId: userId, detail: { dispute: d.id, reason: d.reason, amount: d.amount, enrollment: enr?.id ?? null, book: book?.id ?? null } });
+  return userId ? 'access suspended' : 'no matching purchase';
+}

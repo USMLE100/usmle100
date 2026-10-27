@@ -70,7 +70,7 @@ async function subsFor(db: D1Database, userId: number): Promise<(Sub & { id?: nu
       .prepare(
         `SELECT substr(COALESCE(e.paid_at, e.created_at), 1, 10) AS paid, p.evening_q_months AS months, c.start_date
          FROM enrollments e JOIN packages p ON p.id = e.package_id LEFT JOIN cohorts c ON c.id = e.cohort_id
-         WHERE e.user_id = ? AND e.status = 'active' AND p.evening_q_months > 0`,
+         WHERE e.user_id = ? AND e.status = 'active' AND e.suspended_at IS NULL AND p.evening_q_months > 0`,
       )
       .bind(userId)
       .all<{ paid: string; months: number; start_date: string | null }>()

@@ -171,7 +171,7 @@ describe('a full refund issued in Stripe removes only that purchase’s access',
     expect((await req(`/admin/students/${enrollmentId}/restore`, { cookie: s.cookie, form: {} })).status).toBe(404);
     expect(await status()).toBe('refunded');
     const admin = await account(null, 'owner');
-    expect(await (await req('/admin/students', { cookie: admin.cookie })).text()).toContain('Refunded programs');
+    expect(await (await req('/admin/students', { cookie: admin.cookie })).text()).toContain('Refunded or disputed programs');
     await req(`/admin/students/${enrollmentId}/restore`, { cookie: admin.cookie, form: {} });
     expect(await status()).toBe('active');
     await webhook(charge('pi_pkg1', price, price), 'charge.refunded');
@@ -206,5 +206,48 @@ describe('a full refund issued in Stripe removes only that purchase’s access',
     expect(await hasBookAccess(s.id)).toBe(true);
     expect((await webhook(charge('pi_unknown', 5000, 5000), 'charge.refunded')).status).toBe(200);
     expect(await hasBookAccess(s.id)).toBe(true);
+  });
+});
+
+describe('chargebacks (owner: suspend the disputed purchase at once; owner decides on restoring)', () => {
+  const dispute = (id: string, pi: string, reason = 'product_not_received', status = 'needs_response') => ({ id, charge: 'ch_' + pi, payment_intent: pi, amount: 249900, reason, status });
+
+  it('a dispute pauses that program, alerts the owner, and only the owner restores it', async () => {
+    const s = await account(null);
+    const { enrollmentId } = await buyPackage(s.cookie, 'max', 'pi_disputed');
+    expect((await req('/dashboard', { cookie: s.cookie })).status).toBe(200);
+    await webhook(dispute('dp_1', 'pi_disputed'), 'charge.dispute.created');
+    await webhook(dispute('dp_1', 'pi_disputed'), 'charge.dispute.created'); // repeats are harmless
+    const e = (await db.prepare('SELECT status, suspended_at FROM enrollments WHERE id = ?').bind(enrollmentId).first<any>())!;
+    expect(e.status).toBe('active');
+    expect(e.suspended_at).not.toBeNull();
+    expect((await req('/dashboard', { cookie: s.cookie })).headers.get('location')).toBe('/enroll');
+    expect((await db.prepare("SELECT COUNT(*) AS n FROM staff_alerts WHERE kind = 'dispute' AND user_id = ?").bind(s.id).first<any>()).n).toBe(1);
+    expect(await db.prepare("SELECT 1 FROM audit_log WHERE action = 'payment.disputed' AND target_user_id = ?").bind(s.id).first()).not.toBeNull();
+    await webhook(dispute('dp_1', 'pi_disputed', 'product_not_received', 'won'), 'charge.dispute.closed');
+    expect((await db.prepare('SELECT outcome FROM stripe_disputes WHERE id = ?').bind('dp_1').first<any>()).outcome).toBe('won');
+    // Still paused until the owner restores it.
+    expect((await req('/dashboard', { cookie: s.cookie })).headers.get('location')).toBe('/enroll');
+    const admin = await account(null, 'admin');
+    expect((await req(`/admin/students/${enrollmentId}/restore`, { cookie: admin.cookie, form: {} })).status).toBe(403);
+    const owner = await account(null, 'owner');
+    await req(`/admin/students/${enrollmentId}/restore`, { cookie: owner.cookie, form: {} });
+    expect((await req('/dashboard', { cookie: s.cookie })).status).toBe(200);
+  });
+
+  it('a dispute marked fraudulent also suspends the whole account', async () => {
+    const s = await account(null);
+    await buyPackage(s.cookie, 'max', 'pi_fraud');
+    await webhook(dispute('dp_2', 'pi_fraud', 'fraudulent'), 'charge.dispute.created');
+    expect((await db.prepare('SELECT status FROM users WHERE id = ?').bind(s.id).first<any>()).status).toBe('suspended');
+    expect((await db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?').bind(s.id).first<any>()).n).toBe(0);
+  });
+
+  it('a disputed Course Book purchase loses its book access', async () => {
+    const s = await account(null);
+    await buyBook(s.cookie, 'pi_book_dispute');
+    expect(await hasBookAccess(s.id)).toBe(true);
+    await webhook(dispute('dp_3', 'pi_book_dispute'), 'charge.dispute.created');
+    expect(await hasBookAccess(s.id)).toBe(false);
   });
 });
