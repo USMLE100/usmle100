@@ -145,7 +145,7 @@ Branch `v12-frontend`. Last updated 27 Oct 2026. Nothing here is merged or deplo
 | Chargebacks pause the disputed purchase; "fraudulent" suspends; owner restores | p134, R149 | `lib/stripe` disputes | payments | Done |
 | Reconciliation of payments and enrollments (and Stripe, when the key is set) | Bus. Q3 | Admin → Payments | payments | Done |
 | Financial changes logged in a tamper-evident chain | Bus. Q3 | `audit_log` | owner-security | Done |
-| Cohort shown before payment and saved through to activation; "cohort now enrolling" and "enrollment closes after Day N" | Conv p95, p103 | `lib/enrolling` | payments | Done. **Owner**: set the values |
+| Cohort shown before payment and saved through to activation; "cohort now enrolling" and "enrollment closes after Day N" (Admin → Lectures) | Conv p95, p103 | `lib/enrolling` | payments | Done. **Owner**: set the values |
 | $199 Course Book, Evening Questions, tutoring, prices and course structure kept | Conv | unchanged | payments, phase2 | Done |
 
 ## J. Notifications

@@ -83,7 +83,7 @@ Never paste keys into chat, email or GitHub. In Cloudflare, always add keys as t
 - **Course Book:** upload chapters in Admin → Course Book (PDFs up to 40 MB each). Students read them only in the stamped, view-only reader.
 - **Teaching content:** sections, objectives and flash cards (faculty can add these), questions (Admin → Questions, or spreadsheet import).
 - **Free lectures:** Admin → Free lectures. Add a course lecture, an Evening class or an information video (by its Bunny video ID), then **Publish**. Only you can publish.
-- **Enrollment:** Admin → Site settings: set the cohort now enrolling and the "enrollment closes after Day N" day.
+- **Enrollment:** Admin → Lectures: set the cohort now enrolling and the "enrollment closes after Day N" day.
 
 ## 6. Email, SMS and marketing (optional; site works without them)
 
