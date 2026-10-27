@@ -4,7 +4,8 @@ import { isStaff } from '../lib/types';
 import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { Icon } from '../views/icons';
 import { lecturesEndedOn, lecturesEndedPage, lectureNotice, LectureNotice } from '../views/lectureAccess';
-import { bunnyEmbedUrl, cohortDay, currentCohort, dayDate, fmtDate, type Cohort } from '../lib/content';
+import { ProtectedPlayer } from '../views/player';
+import { cohortDay, currentCohort, dayDate, fmtDate, type Cohort } from '../lib/content';
 import { getSettings } from '../lib/settings';
 import { shuffle } from '../lib/qbank';
 import { catalog, clock, groupBySection, hasLength, objectiveList, runtime, runtimeLong, seconds, type CatLecture, type Group } from '../lib/catalog';
@@ -513,7 +514,6 @@ learn.get('/lectures/:id{[0-9]+}', async (c) => {
   if (!isStaff(user) && (!cohort || cohort.id !== l.cohort_id)) return c.notFound();
   const ended = await lecturesEndedOn(c, cohort);
   if (ended) return lecturesEndedPage(c, ended, (await getSettings(db)).contact_email);
-  const src = l.bunny_video_id ? await bunnyEmbedUrl(c.env, l.bunny_video_id) : null;
 
   // Previous / next: within the section or the Workbench when played from there, otherwise by day.
   const inP = c.req.query('in') ?? '';
@@ -562,14 +562,7 @@ learn.get('/lectures/:id{[0-9]+}', async (c) => {
         <h1>{l.title}</h1>
         {(l.subject_name || listName) && <p class="muted small">{[l.subject_name, listName && pos >= 0 ? `${listName} · ${pos + 1} of ${list.length}` : ''].filter(Boolean).join(' · ')}</p>}
       </div>
-      {src ? (
-        <div class="video-wrap">
-          <iframe src={src} title={l.title} loading="lazy" data-lecture allow="accelerometer; gyroscope; autoplay; encrypted-media" allowfullscreen></iframe>
-          <span class="watermark" aria-hidden="true">{user.email}</span>
-        </div>
-      ) : (
-        <Flash kind="error">{l.bunny_video_id ? 'This video can’t be played right now. Please try again later.' : 'The video for this lecture isn’t uploaded yet.'}</Flash>
-      )}
+      {l.bunny_video_id ? <ProtectedPlayer lectureId={l.id} title={l.title} /> : <Flash kind="error">The video for this lecture isn’t uploaded yet.</Flash>}
       <section class="card" style="flex-direction:row;align-items:center;flex-wrap:wrap;gap:10px">
         {l.completed_at ? (
           <span class="tag" style="font-size:13px;padding:6px 12px"><Icon name="check_circle" size={16} />&nbsp;Watched</span>

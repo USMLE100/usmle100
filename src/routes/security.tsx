@@ -86,6 +86,9 @@ const ACTION_LABEL: Record<string, string> = {
   'access.evening': 'Evening Questions access changed',
   'access.lectures': 'Lecture access date changed',
   'admin.post': 'Staff change',
+  'views.requested': 'Asked for more lecture views',
+  'views.granted': 'Extra lecture views given',
+  'views.declined': 'Request for more views declined',
   'owner.denied': 'Blocked: owner-only change attempted',
 };
 
@@ -344,4 +347,140 @@ security.post('/agreement', async (c) => {
   const r = await db.prepare('INSERT INTO agreements (title, body, body_hash, material, published_by) VALUES (?, ?, ?, ?, ?)').bind(title, body, hash, material, me.id).run();
   await audit(db, { actorId: me.id, action: 'agreement.published', detail: { version: Number(r.meta.last_row_id), material: !!material, hash }, ip: ip(c) });
   return c.redirect('/admin/agreement?ok=1');
+});
+
+// ---------- Lecture views: requests and extra views (owner grants, R044/R051) ----------
+
+security.get('/views', async (c) => {
+  const me = c.get('user')!;
+  if (me.role !== 'admin') return c.text('Not found', 404);
+  const db = c.env.DB;
+  const email = String(c.req.query('email') ?? '').trim().toLowerCase();
+  const owner = isOwner(me);
+  const requests = (
+    await db
+      .prepare(
+        `SELECT r.id, r.kind, r.created_at, r.user_id, r.lecture_id, u.name, u.email, l.title, l.day_number
+         FROM view_requests r JOIN users u ON u.id = r.user_id JOIN lectures l ON l.id = r.lecture_id
+         WHERE r.resolved_at IS NULL ORDER BY r.id`,
+      )
+      .all<any>()
+  ).results;
+  const student = email ? await db.prepare('SELECT id, name, email FROM users WHERE email = ?').bind(email).first<{ id: number; name: string; email: string }>() : null;
+  const rows = student
+    ? (
+        await db
+          .prepare(
+            `SELECT v.lecture_id, v.kind, l.title, l.day_number,
+                    SUM(v.counted) AS used, SUM(CASE WHEN v.counted = 0 AND v.started_at IS NOT NULL THEN 1 ELSE 0 END) AS open,
+                    MAX(v.started_at) AS last_started,
+                    (SELECT COALESCE(SUM(g.extra), 0) FROM view_grants g WHERE g.user_id = v.user_id AND g.lecture_id = v.lecture_id AND g.kind = v.kind) AS extra
+             FROM view_sessions v JOIN lectures l ON l.id = v.lecture_id
+             WHERE v.user_id = ? GROUP BY v.lecture_id, v.kind ORDER BY l.day_number`,
+          )
+          .bind(student.id)
+          .all<any>()
+      ).results
+    : [];
+  const GrantForm = (p: { userId: number; lectureId: number; kind: string; requestId?: number }) =>
+    owner ? (
+      <form method="post" action="/admin/views/grant" class="row" style="align-items:flex-end;gap:8px">
+        <input type="hidden" name="user_id" value={String(p.userId)} />
+        <input type="hidden" name="lecture_id" value={String(p.lectureId)} />
+        <input type="hidden" name="kind" value={p.kind} />
+        {p.requestId && <input type="hidden" name="request_id" value={String(p.requestId)} />}
+        <label class="field" style="flex:0 0 90px">Extra<select name="extra"><option>1</option><option>2</option><option>3</option><option>5</option></select></label>
+        <label class="field" style="flex:1 1 160px">Reason<input type="text" name="reason" required maxlength={200} /></label>
+        <button class="btn btn-primary btn-sm" type="submit">Give views</button>
+      </form>
+    ) : (
+      <span class="muted small">Only the owner can give extra views.</span>
+    );
+  return c.html(
+    <PortalLayout shell={c.get('shell')} title="Admin: lecture views" active="admin-views" user={me} wide>
+      <Eyebrow>Admin</Eyebrow>
+      <h1>Lecture views</h1>
+      {c.req.query('ok') && <Flash>Saved.</Flash>}
+      {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
+      <p class="muted">Paid lectures: 5 views per lecture for each enrollment. Free lectures: 2 views. A view is used at 65% watched or when a started viewing’s 24 hours end. Only the owner can give extra views; every change is logged.</p>
+      <section class="card stack">
+        <h2 style="margin:0">Requests for more views</h2>
+        {requests.length === 0 ? (
+          <p class="muted" style="margin:0">No open requests.</p>
+        ) : (
+          <div class="table-box"><table class="t">
+            <thead><tr><th scope="col">Student</th><th scope="col">Lecture</th><th scope="col">Asked</th><th scope="col">Decision</th></tr></thead>
+            <tbody>
+              {requests.map((r: any) => (
+                <tr>
+                  <td>{r.name}<br /><a class="small" href={`/admin/views?email=${encodeURIComponent(r.email)}`}>{r.email}</a></td>
+                  <td>Day {r.day_number}: {r.title}<br /><span class="muted small">{r.kind === 'free' ? 'Free lecture' : 'Paid lecture'}</span></td>
+                  <td class="small muted">{String(r.created_at).slice(0, 16)} UTC</td>
+                  <td class="stack" style="gap:6px">
+                    <GrantForm userId={r.user_id} lectureId={r.lecture_id} kind={r.kind} requestId={r.id} />
+                    {owner && <form method="post" action="/admin/views/dismiss"><input type="hidden" name="request_id" value={String(r.id)} /><button class="btn btn-ghost btn-sm" type="submit">Decline</button></form>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>
+        )}
+      </section>
+      <section class="card stack">
+        <h2 style="margin:0">A student’s views</h2>
+        <form method="get" action="/admin/views" class="row" style="align-items:flex-end">
+          <label class="field" style="flex:1 1 240px">Student email<input type="email" name="email" value={email} required /></label>
+          <button class="btn btn-outline" type="submit">Look up</button>
+        </form>
+        {email && !student && <p class="muted" style="margin:0">No account uses {email}.</p>}
+        {student && rows.length === 0 && <p class="muted" style="margin:0">{student.name} hasn’t started any lecture yet.</p>}
+        {student && rows.length > 0 && (
+          <div class="table-box"><table class="t">
+            <thead><tr><th scope="col">Lecture</th><th scope="col">Views used</th><th scope="col">Extra views</th><th scope="col"></th></tr></thead>
+            <tbody>
+              {rows.map((r: any) => (
+                <tr>
+                  <td>Day {r.day_number}: {r.title}<br /><span class="muted small">{r.kind === 'free' ? 'Free lecture' : 'Paid lecture'}{r.open ? ' · a viewing is open' : ''}</span></td>
+                  <td>{r.used} of {(r.kind === 'free' ? 2 : 5) + r.extra}</td>
+                  <td>{r.extra}</td>
+                  <td><GrantForm userId={student.id} lectureId={r.lecture_id} kind={r.kind} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>
+        )}
+      </section>
+    </PortalLayout>,
+  );
+});
+
+/** Owner only (OWNER_ONLY). Paid extra views apply to the student's current enrollment. */
+security.post('/views/grant', async (c) => {
+  const me = c.get('user')!;
+  const f = await c.req.parseBody();
+  const userId = Number(f.user_id), lectureId = Number(f.lecture_id), kind = String(f.kind);
+  const extra = Math.min(10, Math.max(1, Math.floor(Number(f.extra) || 0)));
+  const reason = String(f.reason ?? '').trim().slice(0, 200);
+  const bad = (m: string) => c.redirect('/admin/views?error=' + encodeURIComponent(m));
+  if (!['free', 'paid'].includes(kind) || !reason) return bad('Please give a reason.');
+  const db = c.env.DB;
+  const u = await db.prepare('SELECT email FROM users WHERE id = ?').bind(userId).first<{ email: string }>();
+  if (!u || !(await db.prepare('SELECT 1 FROM lectures WHERE id = ?').bind(lectureId).first())) return bad('Student or lecture not found.');
+  const enr = kind === 'paid' ? await db.prepare("SELECT id FROM enrollments WHERE user_id = ? AND status = 'active' ORDER BY paid_at DESC LIMIT 1").bind(userId).first<{ id: number }>() : null;
+  if (kind === 'paid' && !enr) return bad('That student has no active program, so paid views can’t be added.');
+  await db.batch([
+    db.prepare('INSERT INTO view_grants (user_id, lecture_id, kind, enrollment_id, extra, reason, granted_by) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(userId, lectureId, kind, enr?.id ?? null, extra, reason, me.id),
+    db.prepare("UPDATE view_requests SET resolved_at = datetime('now'), resolved_by = ?, outcome = 'granted' WHERE user_id = ? AND lecture_id = ? AND resolved_at IS NULL").bind(me.id, userId, lectureId),
+  ]);
+  await audit(db, { actorId: me.id, action: 'views.granted', targetUserId: userId, detail: { lecture: lectureId, kind, extra, reason }, ip: ip(c) });
+  return c.redirect('/admin/views?ok=1&email=' + encodeURIComponent(u.email));
+});
+
+security.post('/views/dismiss', async (c) => {
+  const me = c.get('user')!;
+  const id = Number((await c.req.parseBody()).request_id);
+  const r = await c.env.DB.prepare('SELECT user_id, lecture_id FROM view_requests WHERE id = ?').bind(id).first<{ user_id: number; lecture_id: number }>();
+  await c.env.DB.prepare("UPDATE view_requests SET resolved_at = datetime('now'), resolved_by = ?, outcome = 'declined' WHERE id = ? AND resolved_at IS NULL").bind(me.id, id).run();
+  if (r) await audit(c.env.DB, { actorId: me.id, action: 'views.declined', targetUserId: r.user_id, detail: { lecture: r.lecture_id }, ip: ip(c) });
+  return c.redirect('/admin/views?ok=1');
 });

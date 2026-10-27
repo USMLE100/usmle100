@@ -212,6 +212,7 @@ const OWNER_ONLY: RegExp[] = [
   /^\/admin\/evening\/access(\/extend|\/remove)?$/,
   /^\/admin\/security\/(reinstate|lockdown)$/,
   /^\/admin\/agreement$/,
+  /^\/admin\/views\/(grant|dismiss)$/,
 ];
 export const ownerOnly = (method: string, path: string) => method === 'POST' && OWNER_ONLY.some((re) => re.test(path.replace(/\/+$/, '')));
 
@@ -247,7 +248,7 @@ const LOGGED_FIELDS = ['email', 'user_id', 'role', 'on', 'status', 'months', 'st
 /** Records every staff change in the security log (R010). The security pages log their own, more detailed entries. */
 async function logged(c: Context<AppEnv>, next: Next) {
   await next();
-  if (c.req.method !== 'POST' || /^\/admin\/(security|confirm|agreement)(\/|$)/.test(c.req.path) || c.res.status >= 400) return;
+  if (c.req.method !== 'POST' || /^\/admin\/(security|confirm|agreement|views)(\/|$)/.test(c.req.path) || c.res.status >= 400) return;
   let fields: Record<string, unknown> = {};
   try {
     const f = await c.req.parseBody();
