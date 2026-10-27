@@ -17,6 +17,19 @@ export type Env = {
   ZOOM_CLIENT_SECRET?: string;
   /** Local development only: "1" marks enrollments paid without Stripe. Never set in production. */
   DEV_FAKE_PAYMENTS?: string;
+  /** Optional free Cloudflare Turnstile bot check on sign-up: the site key (public) and secret. */
+  TURNSTILE_SITE_KEY?: string;
+  TURNSTILE_SECRET?: string;
+  /** Optional email sending (Resend) and SMS (Twilio) for codes and alerts; nothing is sent until these are set. */
+  RESEND_API_KEY?: string;
+  EMAIL_FROM?: string;
+  TWILIO_ACCOUNT_SID?: string;
+  TWILIO_AUTH_TOKEN?: string;
+  TWILIO_FROM?: string;
+  /** Optional Sender (marketing) API key: only students who opted in are sent. */
+  SENDER_API_KEY?: string;
+  /** Where owner alerts are emailed (once email sending is set up). */
+  OWNER_ALERT_EMAIL?: string;
 };
 
 export type User = {

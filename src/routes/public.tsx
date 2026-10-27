@@ -381,7 +381,7 @@ const ENDED: Record<string, string> = {
   revoked: 'That sign-in was ended. Please sign in again.',
 };
 
-type SignupForm = { first?: string; last?: string; phone?: string; exam?: string; grad?: string; marketing?: boolean };
+type SignupForm = { turnstile?: string; first?: string; last?: string; phone?: string; exam?: string; grad?: string; marketing?: boolean };
 const AuthPage = (p: { mode: 'in' | 'up'; error?: string; notice?: string; email?: string; name?: string; form?: SignupForm; next?: string; user: any; contact?: string }) => (
   <PublicLayout title={p.mode === 'in' ? 'Sign in' : 'Create account'} user={p.user} plain>
     <div class="auth">
@@ -415,6 +415,12 @@ const AuthPage = (p: { mode: 'in' | 'up'; error?: string; notice?: string; email
           <PwField label="Password" name="password" autocomplete={p.mode === 'up' ? 'new-password' : 'current-password'} minlength={p.mode === 'up' ? MIN_PASSWORD : undefined} />
           {p.mode === 'up' && <span class="muted small">At least {MIN_PASSWORD} characters. A short phrase of a few words works well.</span>}
           {p.mode === 'up' && <label class="check"><input type="checkbox" name="marketing" value="1" checked={!!p.form?.marketing} /> {MARKETING_TEXT} (optional)</label>}
+          {p.mode === 'up' && p.form?.turnstile && (
+            <>
+              <div class="cf-turnstile" data-sitekey={p.form.turnstile}></div>
+              <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+            </>
+          )}
           {p.mode === 'in' && (
             <div class="auth-links">
               {p.contact && <a href={`mailto:${p.contact}?subject=${encodeURIComponent('USMLE100: password reset')}`}>Forgot your password?</a>}
@@ -439,7 +445,21 @@ const AuthPage = (p: { mode: 'in' | 'up'; error?: string; notice?: string; email
 
 const safeNext = (n: unknown) => (typeof n === 'string' && n.startsWith('/') && !n.startsWith('//') ? n : '/dashboard');
 
-publicRoutes.get('/sign-up', (c) => c.html(<AuthPage mode="up" user={c.get('user')} next={c.req.query('next')} />));
+publicRoutes.get('/sign-up', (c) => c.html(<AuthPage mode="up" user={c.get('user')} next={c.req.query('next')} form={{ turnstile: c.env.TURNSTILE_SITE_KEY }} />));
+
+/** Cloudflare Turnstile (free bot check), only when its keys are set. */
+async function humanCheck(c: Context<AppEnv>, token: unknown) {
+  if (!c.env.TURNSTILE_SECRET) return true;
+  try {
+    const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      body: new URLSearchParams({ secret: c.env.TURNSTILE_SECRET, response: String(token ?? ''), remoteip: c.req.header('cf-connecting-ip') ?? '' }),
+    });
+    return ((await res.json()) as { success?: boolean }).success === true;
+  } catch {
+    return false;
+  }
+}
 publicRoutes.post('/sign-up', async (c) => {
   const f = await c.req.parseBody();
   const first = String(f.first_name ?? '').trim().replace(/\s+/g, ' ');
@@ -450,11 +470,12 @@ publicRoutes.post('/sign-up', async (c) => {
   const exam = String(f.exam ?? '');
   const grad = String(f.grad_year ?? '');
   const marketing = f.marketing === '1';
-  const form: SignupForm = { first, last, phone: phoneRaw, exam, grad, marketing };
+  const form: SignupForm = { first, last, phone: phoneRaw, exam, grad, marketing, turnstile: c.env.TURNSTILE_SITE_KEY };
   const again = (error: string, status: 400 | 429 = 400) => c.html(<AuthPage mode="up" error={error} email={email} form={form} user={null} next={typeof f.next === 'string' ? f.next : undefined} />, status);
   // Generous limit per network address, so a school network still works but bots can't flood the student list.
   const ip = c.req.header('cf-connecting-ip') ?? null;
   if (ip && !(await rateHit(c.env.DB, `signup:${ip}`, 10, 3600))) return again('Too many new accounts from your network in the last hour. Please try again later.', 429);
+  if (!(await humanCheck(c, f['cf-turnstile-response']))) return again('Please complete the check that you’re not a robot.');
   if (!validName(first) || !validName(last)) return again('Please enter your first and last name.');
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 254) return again('Please enter a valid email.');
   const phone = normalizePhone(phoneRaw);

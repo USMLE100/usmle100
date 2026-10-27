@@ -8,6 +8,7 @@ import { chapters, hasBook, topicList } from '../lib/book';
 import { cardOpen, cardsIn, dueQueue, queueSummary, rate, today, type Card, type Rating } from '../lib/cards';
 import { deleteFile, fileMeta, fileResponse, fmtSize, MB, readUpload, saveFile, scrambledResponse, sniff } from '../lib/files';
 import { BookReader } from '../views/reader';
+import { RULES, throttle } from '../lib/abuse';
 import { randomId } from '../lib/viewing';
 import { questionStatuses, shuffle } from '../lib/qbank';
 import { nyDay } from '../lib/activity';
@@ -137,7 +138,7 @@ library.get('/course-book/:id{[0-9]+}', async (c) => {
 });
 
 /** Opens a reading session: a one-time key and code, printed on every page of the reader. */
-library.get('/course-book/:id{[0-9]+}/read', async (c) => {
+library.get('/course-book/:id{[0-9]+}/read', throttle(RULES.book), async (c) => {
   const user = c.get('user')!;
   if (!(await hasBook(c.env.DB, user, c.get('enrollment')))) return bookLocked(c);
   const ch = await c.env.DB.prepare('SELECT id, number, title, file_id, status FROM book_chapters WHERE id = ?').bind(Number(c.req.param('id'))).first<{ id: number; number: number; title: string; file_id: number | null; status: string }>();
@@ -205,7 +206,7 @@ library.post('/course-book/:id{[0-9]+}/read', async (c) => {
 
 // ---------- Flash Cards ----------
 
-library.get('/cards', async (c) => {
+library.get('/cards', throttle(RULES.cards), async (c) => {
   const user = c.get('user')!;
   const db = c.env.DB;
   const section = num(c.req.query('section'));

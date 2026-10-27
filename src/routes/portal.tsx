@@ -1,4 +1,5 @@
 import { ProtectedPlayer } from '../views/player';
+import { RULES, throttle } from '../lib/abuse';
 import { Hono, type Context } from 'hono';
 import type { AppEnv, User } from '../lib/types';
 import { isStaff } from '../lib/types';
@@ -678,7 +679,7 @@ const modeName = (m: string) => (m === 'timed' ? 'Timed' : m === 'untimed' ? 'Un
 /** Tutor and Daily Warmup show the answer straight after each question and lock the first answer. */
 const instant = (m: string) => m === 'tutor' || m === 'warmup';
 
-portal.get('/tests/:id/:pos{[0-9]+}', async (c) => {
+portal.get('/tests/:id/:pos{[0-9]+}', throttle(RULES.qbank), async (c) => {
   const user = c.get('user')!;
   const id = Number(c.req.param('id'));
   const pos = Number(c.req.param('pos'));

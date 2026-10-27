@@ -330,3 +330,18 @@ describe('Course Book reader (R005–R007)', () => {
     expect(await db.prepare('SELECT 1 FROM book_view_sessions WHERE id = ? AND user_id = ?').bind(r.session, s.id).first()).not.toBeNull();
   });
 });
+
+describe('anti-scraping limits', () => {
+  it('opening the Course Book far faster than reading is slowed down and flagged once', async () => {
+    const ch = (await db.prepare("SELECT id FROM book_chapters WHERE title = 'Reader chapter'").first<{ id: number }>())!;
+    const s = await account('student', 'max');
+    const statuses: number[] = [];
+    for (let i = 0; i < 8; i++) statuses.push((await req(`/course-book/${ch.id}/read`, { cookie: s.cookie })).status);
+    expect(statuses.slice(0, 6).every((x) => x === 200)).toBe(true);
+    expect(statuses.slice(6)).toEqual([429, 429]);
+    expect((await db.prepare("SELECT COUNT(*) AS n FROM security_flags WHERE user_id = ? AND kind = 'book_scraping'").bind(s.id).first<any>()).n).toBe(1);
+    // Staff aren't limited.
+    const f = await account('faculty');
+    for (let i = 0; i < 8; i++) expect((await req(`/course-book/${ch.id}/read`, { cookie: f.cookie })).status).toBe(200);
+  });
+});
