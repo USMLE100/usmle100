@@ -229,3 +229,28 @@ describe('My account', () => {
     expect(loc(await req('/account', { cookie: s.cookie }))).toContain('/sign-in');
   });
 });
+
+describe('admin students directory and payments check', () => {
+  it('admins search and export; faculty and students cannot; only the owner gives a program', async () => {
+    const s = await signUp();
+    const admin = await signUp({}, 'admin');
+    const faculty = await signUp({}, 'faculty');
+    const page = await (await req(`/admin/students/directory?q=${encodeURIComponent(s.email)}`, { cookie: admin.cookie })).text();
+    expect(page).toContain(s.email);
+    expect((await req('/admin/students/directory', { cookie: faculty.cookie })).status).toBe(404);
+    expect((await req('/admin/students/export.csv', { cookie: s.cookie })).status).toBe(404);
+    const csv = await (await req(`/admin/students/export.csv?q=${encodeURIComponent(s.email)}`, { cookie: admin.cookie })).text();
+    expect(csv.split('\n')[0]).toContain('Email');
+    expect(csv).toContain(s.email);
+    expect(await db.prepare("SELECT 1 FROM audit_log WHERE action = 'export.students' AND actor_id = ?").bind(admin.id).first()).not.toBeNull();
+    const cohort = Number((await db.prepare("INSERT INTO cohorts (name, start_date) VALUES ('Given', '2026-10-05')").run()).meta.last_row_id);
+    const give = { package: 'max', cohort: String(cohort), reason: 'Paid by bank transfer' };
+    expect((await req(`/admin/students/${s.id}/give-program`, { cookie: admin.cookie, form: give })).status).toBe(403);
+    const owner = await signUp({}, 'owner');
+    await req(`/admin/students/${s.id}/give-program`, { cookie: owner.cookie, form: give });
+    const e = await db.prepare("SELECT note, cohort_id, amount_cents FROM enrollments WHERE user_id = ? AND status = 'active'").bind(s.id).first<any>();
+    expect(e).toMatchObject({ cohort_id: cohort, amount_cents: 0, note: 'Given by the owner: Paid by bank transfer' });
+    expect((await req('/admin/payments', { cookie: admin.cookie })).status).toBe(200);
+    expect((await req('/admin/payments', { cookie: faculty.cookie })).status).toBe(404);
+  });
+});

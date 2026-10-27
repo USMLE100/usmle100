@@ -147,6 +147,7 @@ const groups = (staff: boolean, admin: boolean): { label: string; items: NavItem
                   { key: 'admin-tutoring', label: 'Tutoring sessions', href: '/admin/tutoring', icon: 'event' as IconName },
                   { key: 'admin-home', label: 'Home page content', href: '/admin/home-content', icon: 'home' as IconName },
                   { key: 'admin-students', label: 'Students', href: '/admin/students', icon: 'person' as IconName },
+                  { key: 'admin-payments', label: 'Payments check', href: '/admin/payments', icon: 'check_circle' as IconName },
                   { key: 'admin-settings', label: 'Site settings', href: '/admin/settings', icon: 'info' as IconName },
                   { key: 'admin-team', label: 'Team', href: '/admin/team', icon: 'groups' as IconName },
                   { key: 'admin-requests', label: 'Requests & alerts', href: '/admin/requests', icon: 'flag' as IconName },

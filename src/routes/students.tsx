@@ -8,6 +8,7 @@ import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { deviceLabel } from '../lib/devices';
 import { itemLabel } from '../lib/viewing';
 import { money } from '../lib/content';
+import { fulfil, retrieveCheckoutSession } from '../lib/stripe';
 
 /**
  * Admin → Students directory: every account with search and filters, a CSV export (admin only: personal data),
@@ -204,4 +205,104 @@ studentsAdmin.post('/students/:uid{[0-9]+}/give-program', async (c) => {
   await db.prepare("INSERT INTO enrollments (user_id, package_id, status, paid_at, amount_cents, cohort_id, note) VALUES (?, ?, 'active', datetime('now'), 0, ?, ?)").bind(uid, pkg.id, cohort.id, `Given by the owner: ${reason}`).run();
   await audit(db, { actorId: me.id, action: 'access.program_given', targetUserId: uid, detail: { package: pkg.id, cohort: cohort.id, reason }, ip: c.req.header('cf-connecting-ip') ?? null });
   return back('Program given.');
+});
+
+// ---------- Payments check: Stripe vs enrollments (owner decision: reconciliation, owner approves retries) ----------
+
+type Problem = { kind: string; detail: string; who?: string; session?: string };
+
+/** Local consistency checks that need no Stripe access. */
+export async function localProblems(db: D1Database): Promise<Problem[]> {
+  const out: Problem[] = [];
+  const q = (sql: string) => db.prepare(sql).all<any>().then((r) => r.results);
+  for (const r of await q(`SELECT b.id, u.email FROM book_purchases b JOIN users u ON u.id = b.user_id
+      WHERE b.status = 'paid' AND NOT EXISTS (SELECT 1 FROM book_access a WHERE a.user_id = b.user_id)
+      AND NOT EXISTS (SELECT 1 FROM stripe_disputes d WHERE d.book_purchase_id = b.id AND d.closed_at IS NULL)`))
+    out.push({ kind: 'Course Book paid, but no access', detail: `purchase ${r.id}`, who: r.email });
+  for (const r of await q(`SELECT a.user_id, a.note, u.email FROM book_access a JOIN users u ON u.id = a.user_id
+      WHERE a.note LIKE 'Bought online · purchase %' AND NOT EXISTS (SELECT 1 FROM book_purchases b WHERE b.user_id = a.user_id AND b.status = 'paid')`))
+    out.push({ kind: 'Course Book access without a paid purchase', detail: r.note, who: r.email });
+  for (const r of await q(`SELECT e.id, u.email, e.amount_cents FROM enrollments e JOIN users u ON u.id = e.user_id
+      WHERE e.status = 'active' AND (e.amount_cents IS NULL OR e.amount_cents = 0) AND COALESCE(e.note, '') = ''`))
+    out.push({ kind: 'Active program with no payment and no reason', detail: `enrollment ${r.id}`, who: r.email });
+  for (const r of await q(`SELECT e.id, u.email FROM enrollments e JOIN users u ON u.id = e.user_id
+      WHERE e.status = 'active' AND e.stripe_session_id IS NOT NULL AND e.paid_at IS NULL`))
+    out.push({ kind: 'Active program without a payment time', detail: `enrollment ${r.id}`, who: r.email });
+  for (const r of await q(`SELECT e.id, u.email FROM enrollments e JOIN users u ON u.id = e.user_id
+      WHERE e.status = 'pending' AND e.created_at < datetime('now', '-2 days') AND e.stripe_session_id IS NOT NULL`))
+    out.push({ kind: 'Checkout started but never paid (usually abandoned)', detail: `enrollment ${r.id}`, who: r.email });
+  return out;
+}
+
+studentsAdmin.get('/payments', async (c) => {
+  const me = c.get('user')!;
+  if (me.role !== 'admin') return c.text('Not found', 404);
+  const db = c.env.DB;
+  const problems = await localProblems(db);
+  // With Stripe connected: paid Checkout Sessions from the last 30 days that never activated anything.
+  const unfulfilled: Problem[] = [];
+  let stripeNote = 'Stripe isn’t connected yet, so only the site’s own records were checked.';
+  if (c.env.STRIPE_SECRET_KEY && c.req.query('stripe') === '1') {
+    const since = Math.floor(Date.now() / 1000) - 30 * 86400;
+    const res = await fetch(`https://api.stripe.com/v1/checkout/sessions?limit=100&status=complete&created[gte]=${since}`, { headers: { Authorization: `Bearer ${c.env.STRIPE_SECRET_KEY}` } });
+    if (!res.ok) stripeNote = `Stripe couldn’t be reached (error ${res.status}).`;
+    else {
+      const sessions = ((await res.json()) as { data?: any[] }).data ?? [];
+      stripeNote = `Checked ${sessions.length} paid Stripe checkouts from the last 30 days.`;
+      for (const s of sessions) {
+        if (s.payment_status !== 'paid' || !s.client_reference_id) continue;
+        const ref = String(s.client_reference_id);
+        const book = /^book-(\d+)$/.exec(ref);
+        const ok = book
+          ? await db.prepare("SELECT 1 FROM book_purchases WHERE id = ? AND status IN ('paid', 'refunded')").bind(Number(book[1])).first()
+          : await db.prepare("SELECT 1 FROM enrollments WHERE id = ? AND status IN ('active', 'refunded')").bind(Number(ref) || 0).first();
+        if (!ok) unfulfilled.push({ kind: 'Paid in Stripe, not activated here', detail: `${ref} · ${(s.amount_total / 100).toFixed(2)} ${String(s.currency).toUpperCase()}`, who: s.customer_details?.email ?? s.customer_email ?? '', session: s.id });
+      }
+    }
+  }
+  const owner = isOwner(me);
+  const Rows = (p: { list: Problem[] }) => (
+    <div class="table-box"><table class="t">
+      <thead><tr><th scope="col">What</th><th scope="col">Record</th><th scope="col">Student</th><th scope="col"></th></tr></thead>
+      <tbody>{p.list.map((x) => (
+        <tr>
+          <td class="small">{x.kind}</td><td class="small">{x.detail}</td><td class="small">{x.who}</td>
+          <td>{x.session && owner && <form method="post" action="/admin/payments/fulfil"><input type="hidden" name="session" value={x.session} /><button class="btn btn-primary btn-sm" type="submit">Activate now</button></form>}</td>
+        </tr>
+      ))}</tbody>
+    </table></div>
+  );
+  return c.html(
+    <PortalLayout shell={c.get('shell')} title="Admin: payments check" active="admin-payments" user={me} wide>
+      <Eyebrow>Admin</Eyebrow>
+      <h1>Payments check</h1>
+      {c.req.query('ok') && <Flash>{c.req.query('ok')}</Flash>}
+      {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
+      <p class="muted">Compares what was paid with what the site gave. Run it after any outage or restore from backup, and before reopening (owner decision on reconciliation).</p>
+      <section class="card stack">
+        <h2 style="margin:0">Site records</h2>
+        {problems.length === 0 ? <Flash>Everything matches.</Flash> : <Rows list={problems} />}
+      </section>
+      <section class="card stack">
+        <h2 style="margin:0">Stripe</h2>
+        <p class="small" style="margin:0">{stripeNote}</p>
+        {c.env.STRIPE_SECRET_KEY && c.req.query('stripe') !== '1' && <a class="btn btn-outline btn-sm" href="/admin/payments?stripe=1" style="align-self:flex-start">Check against Stripe</a>}
+        {unfulfilled.length > 0 && <Rows list={unfulfilled} />}
+        {c.req.query('stripe') === '1' && unfulfilled.length === 0 && c.env.STRIPE_SECRET_KEY && <Flash>Every paid checkout was activated.</Flash>}
+        <p class="muted small" style="margin:0">“Activate now” re-checks the payment with Stripe and applies it exactly as the normal payment confirmation would (owner only).</p>
+      </section>
+    </PortalLayout>,
+  );
+});
+
+/** Owner only (OWNER_ONLY): retry fulfilment of a paid session after confirming it with Stripe. */
+studentsAdmin.post('/payments/fulfil', async (c) => {
+  const me = c.get('user')!;
+  const sid = String((await c.req.parseBody()).session ?? '');
+  if (!/^cs_[A-Za-z0-9_]+$/.test(sid) || !c.env.STRIPE_SECRET_KEY) return c.redirect('/admin/payments?error=' + encodeURIComponent('Not a Stripe checkout.'));
+  const s = await retrieveCheckoutSession(c.env, sid);
+  if (!s || s.payment_status !== 'paid') return c.redirect('/admin/payments?error=' + encodeURIComponent('Stripe says that checkout is not paid.'));
+  await fulfil(c.env.DB, s);
+  await audit(c.env.DB, { actorId: me.id, action: 'payment.manual_fulfil', detail: { session: sid, ref: s.client_reference_id }, ip: c.req.header('cf-connecting-ip') ?? null });
+  return c.redirect('/admin/payments?stripe=1&ok=' + encodeURIComponent('Applied.'));
 });
