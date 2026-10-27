@@ -161,6 +161,7 @@ security.get('/security', async (c) => {
         {owner ? (
           <form method="post" action="/admin/security/lockdown" class="row">
             <input type="hidden" name="on" value={lockdown ? '0' : '1'} />
+            <input type="text" name="reason" maxlength={300} placeholder={lockdown ? 'Note (optional)' : 'Reason, for the incident record'} aria-label="Reason" style="flex:1 1 220px" />
             <button class={'btn ' + (lockdown ? 'btn-primary' : 'btn-outline')} type="submit">{lockdown ? 'Turn lockdown off' : 'Turn lockdown on'}</button>
           </form>
         ) : (
@@ -297,13 +298,18 @@ security.post('/security/reinstate', async (c) => {
 /** Owner only (OWNER_ONLY): emergency lockdown. Turning it on signs every student out at once. */
 security.post('/security/lockdown', async (c) => {
   const me = c.get('user')!;
-  const on = (await c.req.parseBody()).on === '1';
+  const f = await c.req.parseBody();
+  const on = f.on === '1';
+  const reason = String(f.reason ?? '').trim().slice(0, 300);
   const db = c.env.DB;
   await db.batch([
     db.prepare("INSERT INTO settings (key, value) VALUES ('lockdown', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(on ? '1' : '0'),
-    ...(on ? [db.prepare("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE role NOT IN ('admin', 'faculty'))")] : []),
+    // Signs students out and ends their playback slots, so running videos stop at the next progress check.
+    ...(on ? [db.prepare("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE role NOT IN ('admin', 'faculty'))"), db.prepare("DELETE FROM play_tabs WHERE user_id IN (SELECT id FROM users WHERE role NOT IN ('admin', 'faculty'))")] : []),
+    // The incident record: when, who and why.
+    db.prepare("INSERT INTO staff_alerts (level, kind, user_id, message) VALUES ('critical', ?, ?, ?)").bind(on ? 'lockdown-on' : 'lockdown-off', me.id, on ? `Emergency lockdown turned ON by ${me.name}.${reason ? ' Reason: ' + reason : ''}` : `Emergency lockdown turned OFF by ${me.name}.${reason ? ' Note: ' + reason : ''}`),
   ]);
-  await audit(db, { actorId: me.id, action: on ? 'lockdown.on' : 'lockdown.off', ip: ip(c) });
+  await audit(db, { actorId: me.id, action: on ? 'lockdown.on' : 'lockdown.off', detail: reason ? { reason } : null, ip: ip(c) });
   return c.redirect('/admin/security?ok=1');
 });
 

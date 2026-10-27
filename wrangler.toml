@@ -34,3 +34,7 @@ BUNNY_LIBRARY_ID = "785730"
 #   { pattern = "usmle100.com", custom_domain = true },
 #   { pattern = "www.usmle100.com", custom_domain = true },
 # ]
+
+# Error and request logs in the Cloudflare dashboard (Workers → usmle100 → Logs). Free.
+[observability]
+enabled = true
