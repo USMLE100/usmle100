@@ -109,6 +109,17 @@ const ACTION_LABEL: Record<string, string> = {
   'free.added': 'Video added to Free lectures',
   'free.published': 'Free lecture published',
   'free.unpublished': 'Free lecture unpublished',
+  'case.opened': 'Appeal or dispute sent',
+  'case.reviewed': 'Case reviewed (recommendation)',
+  'case.expedited': 'Case expedited (exam soon)',
+  'case.decided': 'Case decided by the owner',
+  'passkey.added': 'Passkey added',
+  'passkey.removed': 'Passkey removed',
+  'passkey.signin': 'Signed in with passkey',
+  'passkey.failed': 'Passkey not accepted',
+  'passkey.recovery_used': 'Signed in with a recovery code',
+  'passkey.recovery_failed': 'Wrong recovery code',
+  'passkey.codes_renewed': 'Recovery codes renewed',
   'owner.denied': 'Blocked: owner-only change attempted',
 };
 

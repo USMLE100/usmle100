@@ -19,6 +19,8 @@ import { community } from './routes/community';
 import { account } from './routes/account';
 import { play } from './routes/play';
 import { passkeyRoutes } from './routes/passkeys';
+import { casesAdmin, casesStudent } from './routes/cases';
+import { escalateCases } from './lib/cases';
 import { webinars, webinarAdmin } from './routes/webinars';
 import { security } from './routes/security';
 import { freeAdmin } from './routes/freeAdmin';
@@ -68,11 +70,13 @@ app.route('/', account);
 app.route('/zoom', zoom);
 app.route('/admin', security);
 app.route('/admin', freeAdmin);
+app.route('/admin', casesAdmin);
 app.route('/admin', studentsAdmin);
 app.route('/admin', webinarAdmin);
 app.route('/admin', admin);
 app.route('/admin', content);
 app.route('/', passkeyRoutes);
+app.route('/', casesStudent);
 app.route('/', play);
 app.route('/', webinars);
 app.route('/', portal);
@@ -103,7 +107,7 @@ export default {
   /** Every few minutes: link Zoom recordings that Bunny has copied and put finished ones live. */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(
-      ensureMigrated(env.DB).then(() => Promise.all([syncImports(env).then(() => syncDurations(env)), pruneLoginAttempts(env.DB), pruneResetTokens(env.DB), pruneAudit(env.DB), retryNotices(env).catch(console.error), emailStaffAlerts(env).catch(console.error), syncMarketing(env).catch(console.error)])),
+      ensureMigrated(env.DB).then(() => Promise.all([syncImports(env).then(() => syncDurations(env)), pruneLoginAttempts(env.DB), pruneResetTokens(env.DB), pruneAudit(env.DB), retryNotices(env).catch(console.error), emailStaffAlerts(env).catch(console.error), syncMarketing(env).catch(console.error), escalateCases(env.DB).catch(console.error)])),
     );
   },
 };

@@ -54,7 +54,7 @@ export async function accountGate(c: Context<AppEnv>, next: Next) {
   }
 
   if (user.status === 'suspended' && !isOwner(user)) {
-    if (p === '/account/suspended') return next();
+    if (p === '/account/suspended' || p === '/account/appeals') return next();
     return isSession(p) ? c.json({ ended: 'suspended' }, 403) : apiOrRedirect(c, p, '/account/suspended');
   }
   if (isStaff(user)) return next();

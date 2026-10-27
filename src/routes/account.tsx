@@ -62,6 +62,7 @@ account.get('/account/suspended', requireUser, async (c) => {
       <Flash kind="error">Access to USMLE100 has been suspended for this account while we review its activity.</Flash>
       {c.get('user')!.status_reason && <p><strong>Reason:</strong> {c.get('user')!.status_reason}</p>}
       {contactLine(contact)}
+      <p>If you think this is a mistake, you can <a href="/account/appeals">send an appeal</a>. An administrator reviews it and the owner decides.</p>
       <form method="post" action="/sign-out"><button class="btn btn-outline" type="submit">Sign out</button></form>
     </Notice>,
     403,
@@ -289,6 +290,13 @@ account.get('/account', requireUser, async (c) => {
           <button class="btn btn-primary" type="submit" style="align-self:flex-start">Change password</button>
         </form>
       </section>
+      {!isStaff(u) && (
+        <section class="card stack" id="appeals">
+          <h2 style="margin:0">Appeals and disputes</h2>
+          <p class="muted" style="margin:0">Think a restriction on your account or a used lecture view was a mistake? Tell us and we’ll review it.</p>
+          <a class="btn btn-outline" href="/account/appeals" style="align-self:flex-start">Appeals and disputes</a>
+        </section>
+      )}
       {isStaff(u) && (
         <section class="card stack" id="passkeys">
           <h2 style="margin:0">Passkeys</h2>

@@ -154,6 +154,7 @@ const groups = (staff: boolean, admin: boolean): { label: string; items: NavItem
                   { key: 'admin-security', label: 'Security', href: '/admin/security', icon: 'shield' as IconName },
                   { key: 'admin-views', label: 'Lecture views', href: '/admin/views', icon: 'play_circle' as IconName },
                   { key: 'admin-free', label: 'Free lectures', href: '/admin/free-lectures', icon: 'live' as IconName },
+                  { key: 'admin-cases', label: 'Appeals and disputes', href: '/admin/cases', icon: 'flag' as IconName },
                   { key: 'admin-webinars', label: 'Webinars', href: '/admin/webinars', icon: 'videocam' as IconName },
                   { key: 'admin-agreement', label: 'Student agreement', href: '/admin/agreement', icon: 'description' as IconName },
                 ]
