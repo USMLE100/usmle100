@@ -1,7 +1,8 @@
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../lib/types';
 import { isStaff } from '../lib/types';
-import { freshlyConfirmed, requireUser } from '../lib/auth';
+import { freshlyConfirmed, requireUser, verifyPassword } from '../lib/auth';
+import { checkCode, notify, sendCode } from '../lib/messaging';
 import { audit } from '../lib/audit';
 import { PortalLayout, PublicLayout, Eyebrow, Flash } from '../views/layout';
 import {
@@ -15,6 +16,9 @@ import {
   recoveryCodesLeft,
   registrationOptions,
   useRecoveryCode,
+  grantTicket,
+  hasTicket,
+  STUDENT_PASSKEY_MAX,
 } from '../lib/passkeys';
 
 /**
@@ -65,9 +69,108 @@ var go=document.querySelector('[data-pk="auth"]');if(go)go.onclick=function(){go
 
 // ---------- Manage (and the mandatory first setup for staff) ----------
 
+/** Students may add up to 2 passkeys, from an approved device, after their password and email and phone codes. */
+async function studentPasskeysPage(c: Context<AppEnv>) {
+  const user = c.get('user')!;
+  const db = c.env.DB;
+  const s = c.get('session')!;
+  const verified = !!(user.email_verified_at && user.phone_verified_at);
+  const [keys, ticket, device] = await Promise.all([passkeysOf(db, user.id), hasTicket(db, s.tokenHash), activeDevice(db, user.id, s.deviceHash ?? null)]);
+  return c.html(
+    <PortalLayout shell={c.get('shell')} title="Passkeys" active="account" user={user}>
+      <Eyebrow>My account</Eyebrow>
+      <h1>Passkeys (optional)</h1>
+      {c.req.query('ok') && <Flash>Saved.</Flash>}
+      {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
+      <p class="muted">A passkey lets you sign in with Face ID, Touch ID or your device’s screen lock instead of typing your password. Your password keeps working too. You can have up to {STUDENT_PASSKEY_MAX}, on your registered devices only.</p>
+      <p id="pk-msg" class="flash" hidden role="status"></p>
+      {!verified ? (
+        <section class="card"><p style="margin:0">To add a passkey, first verify your email and phone number in <a href="/account">My account</a>.</p></section>
+      ) : (
+        <>
+          <section class="card stack">
+            <h2 style="margin:0">Your passkeys</h2>
+            {keys.length === 0 ? <p class="muted" style="margin:0">None yet.</p> : keys.map((k) => (
+              <div class="row" style="justify-content:space-between;align-items:center">
+                <span>{k.name} <span class="muted small">· added {k.created_at.slice(0, 10)}</span></span>
+                {ticket && <form method="post" action={`/account/passkeys/${k.id}/remove`}><button class="btn btn-ghost btn-sm" type="submit">Remove</button></form>}
+              </div>
+            ))}
+          </section>
+          {!ticket ? (
+            <section class="card stack">
+              <h2 style="margin:0">Confirm it’s you</h2>
+              <p class="muted small" style="margin:0">Adding or removing a passkey needs your password and a code sent to your email and another to your phone.</p>
+              <form method="post" action="/account/passkeys/send-codes"><button class="btn btn-outline btn-sm" type="submit">Send my codes</button></form>
+              <form method="post" action="/account/passkeys/check" class="stack" style="gap:10px">
+                <label class="field">Current password<input type="password" name="password" required autocomplete="current-password" /></label>
+                <div class="grid">
+                  <label class="field">Email code<input type="text" name="email_code" required inputmode="numeric" autocomplete="one-time-code" maxlength={6} /></label>
+                  <label class="field">Phone code<input type="text" name="sms_code" required inputmode="numeric" autocomplete="one-time-code" maxlength={6} /></label>
+                </div>
+                <button class="btn btn-primary" type="submit" style="align-self:flex-start">Confirm</button>
+              </form>
+            </section>
+          ) : keys.length >= STUDENT_PASSKEY_MAX ? (
+            <p class="muted">You have the maximum of {STUDENT_PASSKEY_MAX} passkeys. Remove one to add another.</p>
+          ) : !device ? (
+            <p class="muted">Passkeys can only be added on one of your registered devices.</p>
+          ) : (
+            <section class="card stack">
+              <div class="row" style="align-items:flex-end">
+                <label class="field" style="flex:1 1 200px">Name for this device<input type="text" id="pk-name" maxlength={60} placeholder="e.g. My iPhone" /></label>
+                <button class="btn btn-primary" type="button" data-pk="add">Add a passkey</button>
+              </div>
+            </section>
+          )}
+        </>
+      )}
+      <script dangerouslySetInnerHTML={{ __html: WEBAUTHN_JS + PASSKEY_PAGE_JS }} />
+    </PortalLayout>,
+  );
+}
+
+const activeDevice = async (db: D1Database, userId: number, hash: string | null) =>
+  !!hash && !!(await db.prepare("SELECT 1 FROM devices WHERE user_id = ? AND device_hash = ? AND status = 'active'").bind(userId, hash).first());
+
+/** May this student change passkeys now? (verified email and phone, recent password + codes, approved device) */
+async function studentMayChange(c: Context<AppEnv>) {
+  const user = c.get('user')!;
+  const s = c.get('session')!;
+  if (!user.email_verified_at || !user.phone_verified_at) return 'Verify your email and phone first.';
+  if (!(await hasTicket(c.env.DB, s.tokenHash))) return 'Please confirm it’s you first (password and codes).';
+  if (!(await activeDevice(c.env.DB, user.id, s.deviceHash ?? null))) return 'Passkeys can only be changed on a registered device.';
+  return null;
+}
+
+passkeyRoutes.post('/account/passkeys/send-codes', requireUser, async (c) => {
+  const user = c.get('user')!;
+  if (isStaff(user) || !user.email_verified_at || !user.phone_verified_at || !user.phone) return c.redirect('/account/passkeys');
+  const a = await sendCode(c.env, user.id, 'email', 'passkey', user.email);
+  const b = await sendCode(c.env, user.id, 'sms', 'passkey', user.phone);
+  return c.redirect('/account/passkeys?' + (a.ok && b.ok ? 'ok=1' : 'error=' + encodeURIComponent(a.error || b.error || 'We couldn’t send the codes.')));
+});
+
+passkeyRoutes.post('/account/passkeys/check', requireUser, async (c) => {
+  const user = c.get('user')!;
+  if (isStaff(user)) return c.redirect('/account/passkeys');
+  const db = c.env.DB;
+  const f = await c.req.parseBody();
+  const row = await db.prepare('SELECT password_hash, password_salt FROM users WHERE id = ?').bind(user.id).first<{ password_hash: string; password_salt: string }>();
+  const pwOk = !!row && (await verifyPassword(String(f.password ?? ''), row.password_hash, row.password_salt));
+  const e = await checkCode(db, user.id, 'email', 'passkey', String(f.email_code ?? ''));
+  const m = await checkCode(db, user.id, 'sms', 'passkey', String(f.sms_code ?? ''));
+  if (!pwOk || e !== 'ok' || m !== 'ok') {
+    await audit(db, { actorId: user.id, action: 'passkey.check_failed', targetUserId: user.id, ip: ip(c) });
+    return c.redirect('/account/passkeys?error=' + encodeURIComponent(e === 'locked' || m === 'locked' ? 'Too many wrong codes. Send new codes and try again.' : 'The password or a code isn’t right.'));
+  }
+  await grantTicket(db, c.get('session')!.tokenHash);
+  return c.redirect('/account/passkeys?ok=1');
+});
+
 passkeyRoutes.get('/account/passkeys', requireUser, async (c) => {
   const user = c.get('user')!;
-  if (!isStaff(user)) return c.redirect('/account');
+  if (!isStaff(user)) return studentPasskeysPage(c);
   const db = c.env.DB;
   const [keys, left, required] = await Promise.all([passkeysOf(db, user.id), recoveryCodesLeft(db, user.id), passkeysRequired(db, user)]);
   const fresh = freshlyConfirmed(c);
@@ -131,7 +234,12 @@ passkeyRoutes.get('/account/passkeys', requireUser, async (c) => {
 
 passkeyRoutes.post('/account/passkeys/options', requireUser, async (c) => {
   const user = c.get('user')!;
-  if (!isStaff(user)) return c.json({ error: 'Passkeys are for staff accounts for now.' }, 403);
+  if (!isStaff(user)) {
+    const why = await studentMayChange(c);
+    if (why) return c.json({ error: why }, 403);
+    if ((await passkeysOf(c.env.DB, user.id)).length >= STUDENT_PASSKEY_MAX) return c.json({ error: `You can have at most ${STUDENT_PASSKEY_MAX} passkeys.` }, 403);
+    return c.json(await registrationOptions(c, user, c.get('session')!.tokenHash));
+  }
   // Adding a further passkey is a sensitive change: the session must have been confirmed recently.
   if ((await hasPasskey(c.env.DB, user.id)) && !freshlyConfirmed(c)) return c.json({ error: 'Please confirm it’s you first (Admin → confirm), then add the passkey.' }, 403);
   return c.json(await registrationOptions(c, user, c.get('session')!.tokenHash));
@@ -139,8 +247,18 @@ passkeyRoutes.post('/account/passkeys/options', requireUser, async (c) => {
 
 passkeyRoutes.post('/account/passkeys/verify', requireUser, async (c) => {
   const user = c.get('user')!;
-  if (!isStaff(user)) return c.json({ ok: false }, 403);
   const db = c.env.DB;
+  if (!isStaff(user)) {
+    const why = await studentMayChange(c);
+    if (why) return c.json({ ok: false, error: why }, 403);
+    if ((await passkeysOf(db, user.id)).length >= STUDENT_PASSKEY_MAX) return c.json({ ok: false, error: `You can have at most ${STUDENT_PASSKEY_MAX} passkeys.` }, 403);
+    const b = await json(c);
+    const r = await finishRegistration(c, user, c.get('session')!.tokenHash, b.response, String(b.name ?? ''));
+    if (!r.ok) return c.json(r, 400);
+    await audit(db, { actorId: user.id, action: 'passkey.added', targetUserId: user.id, ip: ip(c) });
+    await notify(c.env, user.id, { kind: 'security', title: 'A passkey was added to your account', body: 'If this wasn’t you, sign in with your password, remove it in My account → Passkeys, change your password and contact USMLE100.', sms: true });
+    return c.json({ ok: true });
+  }
   const first = !(await hasPasskey(db, user.id));
   if (!first && !freshlyConfirmed(c)) return c.json({ ok: false, error: 'Please confirm it’s you first.' }, 403);
   const b = await json(c);
@@ -155,6 +273,19 @@ passkeyRoutes.post('/account/passkeys/verify', requireUser, async (c) => {
 
 passkeyRoutes.post('/account/passkeys/:id{[0-9]+}/remove', requireUser, async (c) => {
   const user = c.get('user')!;
+  if (!isStaff(user)) {
+    const why = await studentMayChange(c);
+    if (why) return c.redirect('/account/passkeys?error=' + encodeURIComponent(why));
+    const db = c.env.DB;
+    const id = Number(c.req.param('id'));
+    await db.batch([
+      db.prepare('DELETE FROM passkeys WHERE id = ? AND user_id = ?').bind(id, user.id),
+      db.prepare('DELETE FROM sessions WHERE user_id = ? AND passkey_id = ? AND token_hash <> ?').bind(user.id, id, c.get('session')!.tokenHash),
+    ]);
+    await audit(db, { actorId: user.id, action: 'passkey.removed', targetUserId: user.id, detail: { id }, ip: ip(c) });
+    await notify(c.env, user.id, { kind: 'security', title: 'A passkey was removed from your account', body: 'If this wasn’t you, change your password and contact USMLE100.', sms: true });
+    return c.redirect('/account/passkeys?ok=1');
+  }
   if (!freshlyConfirmed(c)) return c.redirect('/account/passkeys?error=' + encodeURIComponent('Confirm with a passkey first.'));
   const db = c.env.DB;
   const count = (await passkeysOf(db, user.id)).length;

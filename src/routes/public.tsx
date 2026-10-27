@@ -2,13 +2,14 @@ import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../lib/types';
 import { PublicLayout, PortalLayout, Flash, LogoMark } from '../views/layout';
 import { Icon } from '../views/icons';
-import { createSession, destroySession, hashPassword, verifyPassword, requireUser, sha256Hex } from '../lib/auth';
+import { createSession, destroySession, hashPassword, verifyPassword, requireUser, sha256Hex, toB64 } from '../lib/auth';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { checkDevice, deviceLabel, deviceToken, type DeviceCheck } from '../lib/devices';
 import { signInRisk, RISK_TEXT } from '../lib/risk';
 import { emailReady, notify, sendCode, sendEmail, smsReady, checkCode } from '../lib/messaging';
 import { accountLocked, clearFailures, rateHit, unlockAccount, emailKey, ipKey, lockedFor, recordFailure } from '../lib/ratelimit';
 import { MIN_PASSWORD, passwordProblem } from '../lib/passwords';
-import { hasPasskey } from '../lib/passkeys';
+import { discoverableOptions, finishDiscoverable, hasPasskey } from '../lib/passkeys';
 import { EXAMS, MARKETING_TEXT, gradYears, normalizePhone, validName } from '../lib/profile';
 import { audit } from '../lib/audit';
 import { consumeResetToken, createResetToken, resetTokenUser } from '../lib/reset';
@@ -376,6 +377,16 @@ const DEVICE_MSG: Record<'new' | 'pending' | 'declined', string> = {
   declined: 'This device wasn’t approved for your account. Please sign in on one of your registered devices, or contact USMLE100.',
 };
 
+/** Passwordless sign-in for students who added a passkey (shown only when the browser supports passkeys). */
+const SIGNIN_PASSKEY_JS = `(function(){var b=document.getElementById('pk-signin'),m=document.getElementById('pk-msg');if(!b||!window.PublicKeyCredential)return;b.hidden=false;
+function b2u(x){var s='',a=new Uint8Array(x);for(var i=0;i<a.length;i++)s+=String.fromCharCode(a[i]);return btoa(s).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')}
+function u2b(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';var r=atob(s),a=new Uint8Array(r.length);for(var i=0;i<r.length;i++)a[i]=r.charCodeAt(i);return a.buffer}
+function post(u,o){return fetch(u,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(o||{})}).then(function(r){return r.json()})}
+function err(t){m.textContent=t;m.hidden=false;b.disabled=false}
+b.onclick=function(){b.disabled=true;m.hidden=true;post('/sign-in/passkey/options').then(function(o){o.challenge=u2b(o.challenge);return navigator.credentials.get({publicKey:o})}).then(function(cr){var r=cr.response;
+ return post('/sign-in/passkey/verify',{next:b.dataset.next,response:{id:cr.id,rawId:b2u(cr.rawId),type:cr.type,clientExtensionResults:{},response:{clientDataJSON:b2u(r.clientDataJSON),authenticatorData:b2u(r.authenticatorData),signature:b2u(r.signature),userHandle:r.userHandle?b2u(r.userHandle):undefined}}})})
+ .then(function(j){if(j.ok)location.href=j.next;else err(j.error||'That passkey wasn’t accepted.')}).catch(function(e){err(e&&e.name==='NotAllowedError'?'The request was cancelled or timed out.':'That didn’t work. Please sign in with your password.')})}})();`;
+
 const ENDED: Record<string, string> = {
   idle: 'You were signed out after 30 minutes without activity. Please sign in again.',
   expired: 'For your security, sign-ins last at most 24 hours. Please sign in again.',
@@ -434,6 +445,13 @@ const AuthPage = (p: { mode: 'in' | 'up'; selfReset?: boolean; error?: string; n
             {p.mode === 'in' ? 'Sign in' : 'Create account'}
           </button>
         </form>
+        {p.mode === 'in' && (
+          <>
+            <button type="button" class="btn btn-outline btn-block" id="pk-signin" data-next={p.next ?? ''} hidden>Sign in with a passkey</button>
+            <p id="pk-msg" class="flash flash-error" hidden role="alert"></p>
+            <script dangerouslySetInnerHTML={{ __html: SIGNIN_PASSKEY_JS }} />
+          </>
+        )}
         {p.mode === 'in' && p.contact && !p.selfReset && (
           <p class="small muted">To reset your password, email us from the address you signed up with and we’ll send you a link.</p>
         )}
@@ -557,6 +575,44 @@ publicRoutes.post('/sign-in', async (c) => {
   }
   if (pk) return c.redirect('/account/passkey/sign-in?next=' + encodeURIComponent(safeNext(f.next)));
   return c.redirect(check ? '/account/check-sign-in' : safeNext(f.next));
+});
+
+// ---------- Passkey sign-in (students who added one; staff use password + passkey) ----------
+
+publicRoutes.post('/sign-in/passkey/options', async (c) => {
+  const raw = toB64(crypto.getRandomValues(new Uint8Array(24)));
+  setCookie(c, 'u100_pk', raw, { httpOnly: true, secure: new URL(c.req.url).protocol === 'https:', sameSite: 'Strict', path: '/sign-in/passkey', maxAge: 300 });
+  return c.json(await discoverableOptions(c, 'pre:' + (await sha256Hex(raw))));
+});
+
+publicRoutes.post('/sign-in/passkey/verify', async (c) => {
+  const raw = getCookie(c, 'u100_pk');
+  deleteCookie(c, 'u100_pk', { path: '/sign-in/passkey' });
+  let b: any = {};
+  try {
+    b = await c.req.json();
+  } catch {}
+  const ip = c.req.header('cf-connecting-ip') ?? null;
+  const fail = (error: string, status = 401) => c.json({ ok: false, error }, status as 401);
+  if (!raw) return fail('The request expired. Please try again.');
+  const who = await finishDiscoverable(c, 'pre:' + (await sha256Hex(raw)), b.response);
+  if (!who) {
+    await audit(c.env.DB, { action: 'signin.passkey_failed', ip });
+    return fail('That passkey wasn’t accepted.');
+  }
+  const u = await c.env.DB.prepare('SELECT id, email, role FROM users WHERE id = ?').bind(who.userId).first<{ id: number; email: string; role: string }>();
+  // Staff sign in with their password, then the passkey (two steps).
+  if (!u || u.role !== 'student') return fail('Staff accounts sign in with their password, then the passkey.', 403);
+  if (await accountLocked(c.env.DB, u.email)) return fail('This account is locked for your protection until USMLE100 unlocks it. Please contact us.', 429);
+  const dev = await deviceGate(c, u.id, u.role);
+  if (!dev.ok) return fail(DEVICE_MSG[dev.reason], 403);
+  const country = c.req.header('cf-ipcountry') ?? null;
+  const risk = await signInRisk(c.env.DB, u.id, country, !!dev.fresh);
+  const check = risk && emailReady(c.env) ? risk : null;
+  await createSession(c, u.id, dev.hash, check);
+  await c.env.DB.prepare('UPDATE sessions SET passkey_id = ? WHERE rowid = (SELECT rowid FROM sessions WHERE user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1)').bind(who.keyId, u.id).run();
+  await audit(c.env.DB, { actorId: u.id, action: 'signin.passkey', targetUserId: u.id, detail: { country, risk }, ip });
+  return c.json({ ok: true, next: check ? '/account/check-sign-in' : safeNext(b.next || undefined) });
 });
 
 // ---------- Password reset (one-time links made by an admin) ----------

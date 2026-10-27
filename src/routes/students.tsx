@@ -1,3 +1,4 @@
+import { notify } from '../lib/messaging';
 import { Hono } from 'hono';
 import type { AppEnv } from '../lib/types';
 import { isOwner } from '../lib/types';
@@ -101,6 +102,7 @@ studentsAdmin.get('/students/view', async (c) => {
   const email = String(c.req.query('email') ?? '').trim().toLowerCase();
   const u = await db.prepare('SELECT * FROM users WHERE email = ?').bind(email).first<any>();
   if (!u) return c.html(<PortalLayout shell={c.get('shell')} title="Student" active="admin-students" user={me}><Flash kind="error">No account uses {email}.</Flash><a href="/admin/students/directory">Back</a></PortalLayout>, 404);
+  const passkeyCount = (await db.prepare('SELECT COUNT(*) AS n FROM passkeys WHERE user_id = ?').bind(u.id).first<{ n: number }>())?.n ?? 0;
   const [enr, book, evening, devices, sessions, views, signed, packages, cohorts, log] = await Promise.all([
     db.prepare('SELECT e.*, p.name AS package_name, c.name AS cohort FROM enrollments e JOIN packages p ON p.id = e.package_id LEFT JOIN cohorts c ON c.id = e.cohort_id WHERE e.user_id = ? ORDER BY e.id DESC').bind(u.id).all<any>(),
     db.prepare('SELECT note, created_at FROM book_access WHERE user_id = ?').bind(u.id).first<any>().catch(() => null),
@@ -162,6 +164,12 @@ studentsAdmin.get('/students/view', async (c) => {
           {devices.results.map((d: any) => <li class="small">{d.label} · {d.status} · first {String(d.first_seen).slice(0, 10)} · last {String(d.last_seen).slice(0, 10)}{d.last_country ? ` · ${d.last_country}` : ''}</li>)}
           {sessions.results.map((s: any) => <li class="small muted">Signed in: {deviceLabel(s.user_agent ?? '')} · {[s.country, s.ip].filter(Boolean).join(' · ')}</li>)}
         </ul>
+        {u.role === 'student' && passkeyCount > 0 && (
+          <form method="post" action={`/admin/students/${u.id}/passkeys/clear`} class="row" style="align-items:center;gap:8px">
+            <span class="small">{passkeyCount} passkey{passkeyCount === 1 ? '' : 's'}. If the student lost the device(s) and you’ve checked it’s really them, remove them; their password still works.</span>
+            <button class="btn btn-ghost btn-sm" type="submit">Remove passkeys</button>
+          </form>
+        )}
       </section>
 
       <section class="card stack">
@@ -305,4 +313,21 @@ studentsAdmin.post('/payments/fulfil', async (c) => {
   await fulfil(c.env.DB, s);
   await audit(c.env.DB, { actorId: me.id, action: 'payment.manual_fulfil', detail: { session: sid, ref: s.client_reference_id }, ip: c.req.header('cf-connecting-ip') ?? null });
   return c.redirect('/admin/payments?stripe=1&ok=' + encodeURIComponent('Applied.'));
+});
+
+/** Lost-passkey recovery (p155): an admin removes a student's passkeys after checking who they are. Logged; the student is told. */
+studentsAdmin.post('/students/:id{[0-9]+}/passkeys/clear', async (c) => {
+  const me = c.get('user')!;
+  if (me.role !== 'admin') return c.text('Not found', 404);
+  const db = c.env.DB;
+  const id = Number(c.req.param('id'));
+  const u = await db.prepare("SELECT email FROM users WHERE id = ? AND role = 'student'").bind(id).first<{ email: string }>();
+  if (!u) return c.notFound();
+  await db.batch([
+    db.prepare('DELETE FROM sessions WHERE user_id = ? AND passkey_id IS NOT NULL').bind(id),
+    db.prepare('DELETE FROM passkeys WHERE user_id = ?').bind(id),
+  ]);
+  await audit(db, { actorId: me.id, action: 'passkey.cleared_by_admin', targetUserId: id, ip: c.req.header('cf-connecting-ip') ?? null });
+  await notify(c.env, id, { kind: 'security', title: 'Your passkeys were removed', body: 'USMLE100 removed the passkeys on your account at your request. Sign in with your password. If you didn’t ask for this, contact USMLE100 right away.', sms: true });
+  return c.redirect('/admin/students/view?email=' + encodeURIComponent(u.email));
 });

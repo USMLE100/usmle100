@@ -155,3 +155,52 @@ export async function useRecoveryCode(db: D1Database, userId: number, code: stri
 
 export const recoveryCodesLeft = async (db: D1Database, userId: number) =>
   (await db.prepare('SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ? AND used_at IS NULL').bind(userId).first<{ n: number }>())?.n ?? 0;
+
+// ---------- Students (optional passkeys, p154–p155) ----------
+
+export const STUDENT_PASSKEY_MAX = 2;
+const TICKET_SECONDS = 900;
+
+/**
+ * After the current password plus email and phone codes, the sign-in may add or remove a passkey for 15 minutes.
+ * Stored as a challenge row for this session.
+ */
+export async function grantTicket(db: D1Database, sessionHash: string) {
+  await saveChallenge(db, sessionHash, 'student-ok', 'ok');
+}
+export async function hasTicket(db: D1Database, sessionHash: string) {
+  const row = await db.prepare("SELECT created_at FROM webauthn_challenges WHERE session_hash = ? AND purpose = 'student-ok'").bind(sessionHash).first<{ created_at: number }>();
+  return !!row && epoch() - row.created_at <= TICKET_SECONDS;
+}
+
+/** Passwordless sign-in: the browser offers any passkey it holds for this site. */
+export async function discoverableOptions(c: Context<AppEnv>, preKey: string) {
+  const { rpID } = relyingParty(c);
+  const options = await generateAuthenticationOptions({ rpID, userVerification: 'required' });
+  await saveChallenge(c.env.DB, preKey, 'signin-pre', options.challenge);
+  return options;
+}
+
+/** Checks a passwordless answer and returns whose passkey it was. */
+export async function finishDiscoverable(c: Context<AppEnv>, preKey: string, response: AuthenticationResponseJSON) {
+  const challenge = await takeChallenge(c.env.DB, preKey, 'signin-pre');
+  if (!challenge || typeof response?.id !== 'string') return null;
+  const key = await c.env.DB.prepare('SELECT * FROM passkeys WHERE credential_id = ?').bind(response.id).first<PasskeyRow>();
+  if (!key) return null;
+  const { rpID, origin } = relyingParty(c);
+  try {
+    const v = await verifyAuthenticationResponse({
+      response,
+      expectedChallenge: challenge,
+      expectedOrigin: origin,
+      expectedRPID: rpID,
+      requireUserVerification: true,
+      credential: { id: key.credential_id, publicKey: unb64u(key.public_key), counter: key.counter, transports: key.transports ? JSON.parse(key.transports) : undefined },
+    });
+    if (!v.verified) return null;
+    await c.env.DB.prepare("UPDATE passkeys SET counter = ?, last_used_at = datetime('now') WHERE id = ?").bind(v.authenticationInfo.newCounter, key.id).run();
+    return { userId: key.user_id, keyId: key.id };
+  } catch {
+    return null;
+  }
+}

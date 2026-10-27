@@ -193,3 +193,68 @@ describe('staff passkeys (R021, phishing-resistant privileged sign-in)', () => {
     expect(loc(await req(`/account/passkeys/${ids[0].id}/remove`, { cookie: owner.cookie, form: {} }))).toContain('error=');
   });
 });
+
+// ---------- Students: optional passkeys (p154–p155) ----------
+
+async function giveCodes(userId: number, email: string) {
+  const t = Math.floor(Date.now() / 1000);
+  const hash = async (code: string) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${userId}:passkey:${code}`)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  await db.batch([
+    db.prepare("INSERT INTO otp_codes (user_id, channel, purpose, target, code_hash, expires_at, created_at) VALUES (?, 'email', 'passkey', ?, ?, ?, ?)").bind(userId, email, await hash('111111'), t + 600, t),
+    db.prepare("INSERT INTO otp_codes (user_id, channel, purpose, target, code_hash, expires_at, created_at) VALUES (?, 'sms', 'passkey', '+15555550100', ?, ?, ?)").bind(userId, await hash('222222'), t + 600, t),
+  ]);
+}
+const verifyContacts = (id: number) => db.prepare("UPDATE users SET email_verified_at = datetime('now'), phone_verified_at = datetime('now') WHERE id = ?").bind(id).run();
+
+describe('student passkeys (optional)', () => {
+  it('need verified email and phone, the password plus both codes, a registered device; at most 2', async () => {
+    const s = await account('student');
+    expect(await (await req('/account/passkeys', { cookie: s.cookie })).text()).toContain('first verify your email and phone');
+    expect((await req('/account/passkeys/options', { cookie: s.cookie, json: {} })).status).toBe(403);
+    await verifyContacts(s.id);
+    // Without the password and codes: refused.
+    expect((await req('/account/passkeys/options', { cookie: s.cookie, json: {} })).status).toBe(403);
+    await giveCodes(s.id, s.email);
+    expect(loc(await req('/account/passkeys/check', { cookie: s.cookie, form: { password: 'wrong-password-123', email_code: '111111', sms_code: '222222' } }))).toContain('error=');
+    await giveCodes(s.id, s.email);
+    expect(loc(await req('/account/passkeys/check', { cookie: s.cookie, form: { password: PASSWORD, email_code: '111111', sms_code: '222222' } }))).toBe('/account/passkeys?ok=1');
+    expect((await addPasskey(s.cookie, await new Authenticator().init())).ok).toBe(true);
+    expect((await addPasskey(s.cookie, await new Authenticator().init())).ok).toBe(true);
+    expect((await req('/account/passkeys/options', { cookie: s.cookie, json: {} })).status).toBe(403);
+    expect(await db.prepare("SELECT 1 FROM notices WHERE user_id = ? AND title LIKE 'A passkey was added%'").bind(s.id).first()).not.toBeNull();
+  });
+
+  it('a student can sign in with a passkey on a registered device; staff can’t skip their password', async () => {
+    const s = await account('student');
+    await verifyContacts(s.id);
+    await giveCodes(s.id, s.email);
+    await req('/account/passkeys/check', { cookie: s.cookie, form: { password: PASSWORD, email_code: '111111', sms_code: '222222' } });
+    const key = await new Authenticator().init();
+    await addPasskey(s.cookie, key);
+    const device = s.cookie.split('; ').filter((x) => x.startsWith('u100_device=')).join('; ');
+    const o = await req('/sign-in/passkey/options', { cookie: device, json: {} });
+    const pk = cookieOf(o);
+    const opts = (await o.json()) as any;
+    expect(opts.allowCredentials ?? []).toEqual([]);
+    const r = await req('/sign-in/passkey/verify', { cookie: [device, pk].join('; '), json: { next: '/account', response: await key.assert(opts.challenge) } });
+    const j = (await r.json()) as any;
+    expect(j).toEqual({ ok: true, next: '/account' });
+    const cookie = [cookieOf(r), device].filter(Boolean).join('; ');
+    expect((await req('/account', { cookie })).status).toBe(200);
+    // A replayed answer fails (single-use challenge cookie).
+    expect((await req('/sign-in/passkey/verify', { cookie: [device, pk].join('; '), json: { response: await key.assert(opts.challenge) } })).status).toBe(401);
+
+    const owner = await account('owner');
+    const ok2 = await new Authenticator().init();
+    await addPasskey(owner.cookie, ok2);
+    const o2 = await req('/sign-in/passkey/options', { json: {} });
+    const opts2 = (await o2.json()) as any;
+    expect((await req('/sign-in/passkey/verify', { cookie: cookieOf(o2), json: { response: await ok2.assert(opts2.challenge) } })).status).toBe(403);
+
+    // Lost device: an admin removes the student's passkeys; the password still works.
+    const admin = await account('owner');
+    await addPasskey(admin.cookie, await new Authenticator().init());
+    expect(loc(await req(`/admin/students/${s.id}/passkeys/clear`, { cookie: admin.cookie, form: {} }))).toContain('/admin/students/view');
+    expect((await db.prepare('SELECT COUNT(*) AS n FROM passkeys WHERE user_id = ?').bind(s.id).first<any>()).n).toBe(0);
+  });
+});

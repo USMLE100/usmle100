@@ -301,13 +301,11 @@ account.get('/account', requireUser, async (c) => {
           <a class="btn btn-outline" href="/account/appeals" style="align-self:flex-start">Appeals and disputes</a>
         </section>
       )}
-      {isStaff(u) && (
-        <section class="card stack" id="passkeys">
-          <h2 style="margin:0">Passkeys</h2>
-          <p class="muted" style="margin:0">Staff accounts confirm each sign-in and every owner-only change with a passkey.</p>
-          <a class="btn btn-outline" href="/account/passkeys" style="align-self:flex-start">Manage passkeys and recovery codes</a>
-        </section>
-      )}
+      <section class="card stack" id="passkeys">
+        <h2 style="margin:0">Passkeys{isStaff(u) ? '' : ' (optional)'}</h2>
+        <p class="muted" style="margin:0">{isStaff(u) ? 'Staff accounts confirm each sign-in and every owner-only change with a passkey.' : 'Sign in with Face ID, Touch ID or your screen lock instead of your password, on your registered devices.'}</p>
+        <a class="btn btn-outline" href="/account/passkeys" style="align-self:flex-start">{isStaff(u) ? 'Manage passkeys and recovery codes' : 'Passkeys'}</a>
+      </section>
 
       {!isStaff(u) && (
         <section class="card stack" id="devices">

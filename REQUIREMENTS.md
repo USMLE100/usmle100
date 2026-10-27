@@ -67,7 +67,7 @@ Branch `v12-frontend`. Last updated 27 Oct 2026. Nothing here is merged or deplo
 | Risk-based extra checks (new device, new country, 30 days inactive); 5 failures end the sign-in and need admin review | p149–p150 | `lib/risk`, `/account/check-sign-in` | messaging | Done (off until email is configured) |
 | Login history (30 days), "This wasn't me", alerts for new devices and countries | p150–p151 | My account, `notices` | accounts | Done |
 | Sign out one session or all | p151 | My account | accounts | Done. The extra verification applies once messaging is on |
-| Optional student passkeys (2 devices) | p154–p155 | — | — | Not built: depends on email/phone codes (R015) being live. Staff passkeys can be reused |
+| Optional student passkeys: at most 2, registered devices only, password + email and phone codes to add or remove, passwordless sign-in through the device and risk checks, admin removal for a lost device | p154–p155 | `routes/passkeys` (students), `/sign-in/passkey/*`, Admin → Students | passkeys | Done (off until email/SMS are configured, because it needs verified contacts) |
 
 ## D. Devices and account sharing
 
