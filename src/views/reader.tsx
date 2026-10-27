@@ -18,8 +18,8 @@ export const BookReader = (p: { chapterId: number; session: string; secret: stri
 );
 
 const READER_JS = `
-import * as pdfjs from '/vendor/pdfjs-5.7.284/pdf.min.mjs';
-pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs-5.7.284/pdf.worker.min.mjs';
+import * as pdfjs from '/vendor/pdfjs-5.7.284-legacy/pdf.min.mjs';
+pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs-5.7.284-legacy/pdf.worker.min.mjs';
 const root = document.getElementById('reader');
 const { chapter, session, key, name, account } = root.dataset;
 const status = root.querySelector('.br-status'), pagesEl = root.querySelector('.br-pages'), zoomEl = root.querySelector('.br-zoom');
