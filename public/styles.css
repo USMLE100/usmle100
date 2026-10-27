@@ -804,3 +804,12 @@ fieldset.bare legend { padding: 0; margin-bottom: 12px; }
 .pp-bar { display: flex; gap: 8px; flex-wrap: wrap; }
 @media (max-width: 520px) { .pp-msg { font-size: 13px; } .pp-wm { font-size: 11px; } .pp-wm-code { font-size: 9px; } }
 @media print { .pp, .book-reader { display: none !important; } }
+
+/* Course Book reader */
+.book-reader { display: flex; flex-direction: column; gap: 10px; }
+.br-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; position: sticky; top: 0; z-index: 2; background: var(--bg, #f8f7f4); padding: 6px 0; }
+.br-status { font-size: 14px; color: var(--body); }
+.br-zoom { min-width: 48px; text-align: center; font-weight: 600; }
+.br-pages { display: flex; flex-direction: column; align-items: safe center; gap: 14px; overflow-x: auto; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.br-page { background: #fff; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12); flex: none; max-width: none; }
+.br-page canvas { display: block; pointer-events: none; }

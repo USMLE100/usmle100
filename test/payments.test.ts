@@ -1,5 +1,6 @@
 import { env, exports } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readChapter } from './reader';
 
 // Payments: Course Book checkout and package enrollment. Stripe's API is mocked; nothing reaches Stripe.
 const BASE = 'https://usmle100.test';
@@ -202,10 +203,9 @@ describe('Course Book PDF storage', () => {
     const ch = (await db.prepare("SELECT id, file_id FROM book_chapters WHERE title = 'Big chapter'").first<{ id: number; file_id: number }>())!;
     expect((await db.prepare('SELECT COUNT(*) AS n FROM file_chunks WHERE file_id = ?').bind(ch.file_id).first<{ n: number }>())!.n).toBe(3);
     const max = await student('max');
-    // View-only (R005): asking for a download still gets the in-browser view.
-    const res = await req(`/course-book/${ch.id}/pdf?download=1`, { cookie: max.cookie });
-    expect(res.headers.get('content-disposition')).toMatch(/^inline/);
-    const got = new Uint8Array(await res.arrayBuffer());
+    // Students read through the reader (R005): the original PDF is staff-only.
+    expect((await req(`/course-book/${ch.id}/pdf?download=1`, { cookie: max.cookie })).headers.get('location')).toBe(`/course-book/${ch.id}/read`);
+    const got = (await readChapter(req, max.cookie, ch.id)).bytes!;
     expect(got.length).toBe(big.length);
     expect(got.every((b, i) => b === big[i])).toBe(true);
   });

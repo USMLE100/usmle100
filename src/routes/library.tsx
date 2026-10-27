@@ -6,7 +6,9 @@ import { Icon } from '../views/icons';
 import { getSettings } from '../lib/settings';
 import { chapters, hasBook, topicList } from '../lib/book';
 import { cardOpen, cardsIn, dueQueue, queueSummary, rate, today, type Card, type Rating } from '../lib/cards';
-import { deleteFile, fileMeta, fileResponse, fmtSize, MB, readUpload, saveFile, sniff } from '../lib/files';
+import { deleteFile, fileMeta, fileResponse, fmtSize, MB, readUpload, saveFile, scrambledResponse, sniff } from '../lib/files';
+import { BookReader } from '../views/reader';
+import { randomId } from '../lib/viewing';
 import { questionStatuses, shuffle } from '../lib/qbank';
 import { nyDay } from '../lib/activity';
 import { fmtDate, todayUtc } from '../lib/content';
@@ -75,7 +77,7 @@ library.get('/course-book', async (c) => {
             {ch.description && <p class="muted">{ch.description}</p>}
             {topicList(ch.topics).length > 0 && <div class="tags">{topicList(ch.topics).map((t) => <span class="tag-soft">{t}</span>)}</div>}
             <div class="row" style="padding-top:12px;border-top:1px solid var(--line)">
-              {ch.file_id && <a class="btn btn-soft btn-sm" href={`/course-book/${ch.id}/pdf`}><Icon name="visibility" size={18} />Read Chapter</a>}
+              {ch.file_id && <a class="btn btn-soft btn-sm" href={`/course-book/${ch.id}/read`}><Icon name="visibility" size={18} />Read Chapter</a>}
               <form method="post" action={`/course-book/${ch.id}/read`}>
                 <input type="hidden" name="back" value={c.req.url.replace(/^https?:\/\/[^/]+/, '')} />
                 <button class="btn btn-outline btn-sm" type="submit" aria-pressed={ch.read_at ? 'true' : 'false'}><Icon name={ch.read_at ? 'check_circle' : 'circle'} size={18} />{ch.read_at ? 'Read' : 'Mark Read'}</button>
@@ -102,7 +104,7 @@ library.get('/course-book/:id{[0-9]+}', async (c) => {
         <h1 style="font-size:28px">{ch.title}</h1>
         <p class="muted">{[ch.author, ch.pages ? `${ch.pages} pages` : '', ch.file_name].filter(Boolean).join(' · ')}</p>
         <div class="row">
-          {ch.file_id && <a class="btn btn-primary" href={`/course-book/${ch.id}/pdf`}><Icon name="visibility" size={20} />Read Chapter</a>}
+          {ch.file_id && <a class="btn btn-primary" href={`/course-book/${ch.id}/read`}><Icon name="visibility" size={20} />Read Chapter</a>}
           <form method="post" action={`/course-book/${ch.id}/read`}>
             <input type="hidden" name="back" value={`/course-book/${ch.id}`} />
             <button class="btn btn-ghost" type="submit" aria-pressed={ch.read_at ? 'true' : 'false'}><Icon name={ch.read_at ? 'check_circle' : 'circle'} size={20} />{ch.read_at ? 'Read' : 'Mark Read'}</button>
@@ -134,9 +136,49 @@ library.get('/course-book/:id{[0-9]+}', async (c) => {
   );
 });
 
+/** Opens a reading session: a one-time key and code, printed on every page of the reader. */
+library.get('/course-book/:id{[0-9]+}/read', async (c) => {
+  const user = c.get('user')!;
+  if (!(await hasBook(c.env.DB, user, c.get('enrollment')))) return bookLocked(c);
+  const ch = await c.env.DB.prepare('SELECT id, number, title, file_id, status FROM book_chapters WHERE id = ?').bind(Number(c.req.param('id'))).first<{ id: number; number: number; title: string; file_id: number | null; status: string }>();
+  if (!ch?.file_id || (ch.status !== 'live' && !isStaff(user))) return c.notFound();
+  const session = randomId(9);
+  const key = [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  await c.env.DB.prepare('INSERT INTO book_view_sessions (id, user_id, chapter_id, key, created_at, ip) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(session, user.id, ch.id, key, Math.floor(Date.now() / 1000), c.req.header('cf-connecting-ip') ?? null)
+    .run();
+  c.header('Cache-Control', 'no-store');
+  return c.html(
+    <PortalLayout shell={c.get('shell')} title={ch.title} active="book-library" user={user} wide>
+      <nav class="crumbs" aria-label="Breadcrumb"><a href="/course-book">USMLE100 Book</a><Icon name="chevron_right" size={16} /><a href={`/course-book/${ch.id}`}>Chapter {ch.number}</a><Icon name="chevron_right" size={16} />Read</nav>
+      <h1 style="font-size:24px">{ch.title}</h1>
+      <BookReader chapterId={ch.id} session={session} secret={key} name={user.name} account={user.id} title={ch.title} />
+    </PortalLayout>,
+  );
+});
+
+/** The chapter for one reading session, once, scrambled with that session's key, within 10 minutes of opening. */
+library.get('/course-book/:id{[0-9]+}/data', async (c) => {
+  const user = c.get('user')!;
+  c.header('Cache-Control', 'no-store');
+  if (!(await hasBook(c.env.DB, user, c.get('enrollment')))) return c.notFound();
+  const id = Number(c.req.param('id'));
+  const t = Math.floor(Date.now() / 1000);
+  const s = await c.env.DB.prepare('SELECT key FROM book_view_sessions WHERE id = ? AND user_id = ? AND chapter_id = ?').bind(String(c.req.query('s') ?? ''), user.id, id).first<{ key: string }>();
+  if (!s) return c.notFound();
+  const take = await c.env.DB.prepare('UPDATE book_view_sessions SET used_at = ? WHERE id = ? AND used_at IS NULL AND created_at > ?').bind(t, String(c.req.query('s')), t - 600).run();
+  if (!take.meta.changes) return c.text('This reading session has ended.', 410);
+  const ch = await c.env.DB.prepare('SELECT file_id, status FROM book_chapters WHERE id = ?').bind(id).first<{ file_id: number | null; status: string }>();
+  if (!ch?.file_id || (ch.status !== 'live' && !isStaff(user))) return c.notFound();
+  const f = await fileMeta(c.env.DB, ch.file_id);
+  if (!f || f.type !== 'application/pdf') return c.notFound();
+  return scrambledResponse(c.env.DB, f, new Uint8Array(s.key.match(/../g)!.map((h) => parseInt(h, 16))));
+});
+
+/** The original PDF: staff only, to check an upload. Students read through the reader. */
 library.get('/course-book/:id{[0-9]+}/pdf', async (c) => {
   const user = c.get('user')!;
-  if (!(await hasBook(c.env.DB, user, c.get('enrollment')))) return c.notFound();
+  if (!isStaff(user)) return c.redirect(`/course-book/${c.req.param('id')}/read`);
   const ch = await c.env.DB.prepare('SELECT file_id, status FROM book_chapters WHERE id = ?').bind(Number(c.req.param('id'))).first<{ file_id: number | null; status: string }>();
   if (!ch?.file_id || (ch.status !== 'live' && !isStaff(user))) return c.notFound();
   const f = await fileMeta(c.env.DB, ch.file_id);

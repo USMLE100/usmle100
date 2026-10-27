@@ -97,3 +97,27 @@ export async function readUpload(v: unknown, maxBytes: number): Promise<{ name: 
 }
 
 export const fmtSize = (n: number) => (n >= MB ? `${(n / MB).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+/**
+ * The file scrambled with a one-time key, for the Course Book reader: the browser receives bytes that are not
+ * a usable PDF, and the reader unscrambles them in memory. Byte i is XORed with key[i % 32] and (7·i mod 256).
+ */
+export function scrambledResponse(db: D1Database, f: FileMeta, key: Uint8Array) {
+  const count = Math.ceil(f.size / CHUNK);
+  let i = 0;
+  let offset = 0;
+  const body = new ReadableStream<Uint8Array>({
+    async pull(ctrl) {
+      if (i >= count) return ctrl.close();
+      const row = await db.prepare('SELECT data FROM file_chunks WHERE file_id = ? AND idx = ?').bind(f.id, i++).first<{ data: unknown }>();
+      if (!row) return ctrl.error(new Error('missing file piece'));
+      const src = toBytes(row.data);
+      const out = new Uint8Array(src.length);
+      for (let j = 0; j < src.length; j++, offset++) out[j] = src[j] ^ key[offset & 31] ^ ((offset * 7) & 255);
+      ctrl.enqueue(out);
+    },
+  });
+  return new Response(body, {
+    headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(f.size), 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'X-Robots-Tag': 'noindex' },
+  });
+}

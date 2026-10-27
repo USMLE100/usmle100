@@ -1,5 +1,6 @@
 import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
+import { readChapter } from './reader';
 import { makeOwner } from './owner';
 import { verifyAuditChain } from '../src/lib/audit';
 
@@ -294,5 +295,36 @@ describe('Course Book is view-only (R005)', () => {
     const html = await (await req('/course-book', { cookie: s.cookie })).text();
     expect(html).not.toContain('download=1');
     expect(html).not.toContain('downloadable');
+  });
+});
+
+describe('Course Book reader (R005–R007)', () => {
+  it('each reading session fetches the chapter once, scrambled, and stamps the student on the page', async () => {
+    const owner = await account('owner');
+    const fd = new FormData();
+    fd.set('number', '91');
+    fd.set('title', 'Reader chapter');
+    fd.set('live', '1');
+    const pdf = new TextEncoder().encode('%PDF-1.4\n1 0 obj << >> endobj\ntrailer << >>\n%%EOF\n');
+    fd.set('pdf', new File([pdf], 'r.pdf', { type: 'application/pdf' }));
+    await worker.fetch(new Request(BASE + '/admin/book', { method: 'POST', body: fd, headers: { cookie: owner.cookie, 'sec-fetch-site': 'same-origin', origin: BASE }, redirect: 'manual' }));
+    const ch = (await db.prepare("SELECT id FROM book_chapters WHERE title = 'Reader chapter'").first<{ id: number }>())!;
+    const s = await account('student', 'max');
+    const r = await readChapter(req, s.cookie, ch.id);
+    expect(r.status).toBe(200);
+    expect(r.bytes).toEqual(pdf);
+    // What travels over the network is not a usable PDF.
+    expect(new TextDecoder().decode(r.raw!.slice(0, 4))).not.toBe('%PDF');
+    expect(r.html).toContain(`data-name="Owner Sec`);
+    expect(r.html).toContain(`data-account="${s.id}"`);
+    expect(r.html).not.toContain('download');
+    // The same session cannot fetch again, and another student cannot use it.
+    expect((await req(`/course-book/${ch.id}/data?s=${r.session}`, { cookie: s.cookie })).status).toBe(410);
+    const other = await account('student', 'max');
+    expect((await req(`/course-book/${ch.id}/data?s=${r.session}`, { cookie: other.cookie })).status).toBe(404);
+    // The original file is for staff only.
+    expect((await req(`/course-book/${ch.id}/pdf`, { cookie: s.cookie })).status).toBe(302);
+    expect((await req(`/course-book/${ch.id}/pdf`, { cookie: owner.cookie })).status).toBe(200);
+    expect(await db.prepare('SELECT 1 FROM book_view_sessions WHERE id = ? AND user_id = ?').bind(r.session, s.id).first()).not.toBeNull();
   });
 });

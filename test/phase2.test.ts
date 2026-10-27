@@ -1,5 +1,6 @@
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { readChapter } from './reader';
 import { makeOwner } from './owner';
 
 // Phase 2 access rules: who may see books, notes, feedback, cards and the new admin pages.
@@ -93,16 +94,16 @@ describe('new admin pages', () => {
 describe('Course Book access', () => {
   it('included with Companion and above; Refresher only when given it', async () => {
     const max = await account('student', 'max');
-    const pdf = await req(`/course-book/${chapterId}/pdf`, { cookie: max.cookie });
-    expect(pdf.status).toBe(200);
-    expect(pdf.headers.get('content-type')).toBe('application/pdf');
-    expect(new Uint8Array(await pdf.arrayBuffer()).slice(0, 5)).toEqual(pdfBytes.slice(0, 5));
+    const got = await readChapter(req, max.cookie, chapterId);
+    expect(got.status).toBe(200);
+    expect(got.bytes!.slice(0, 5)).toEqual(pdfBytes.slice(0, 5));
 
     const ref = await account('student', 'refresher');
-    expect((await req(`/course-book/${chapterId}/pdf`, { cookie: ref.cookie })).status).toBe(404);
+    expect((await readChapter(req, ref.cookie, chapterId)).bytes).toBeNull();
+    expect((await req(`/course-book/${chapterId}/data?s=x`, { cookie: ref.cookie })).status).toBe(404);
     expect(await (await req('/course-book', { cookie: ref.cookie })).text()).toContain('$199');
     await req('/admin/book-access', { cookie: admin.cookie, form: { email: ref.email } });
-    expect((await req(`/course-book/${chapterId}/pdf`, { cookie: ref.cookie })).status).toBe(200);
+    expect((await readChapter(req, ref.cookie, chapterId)).status).toBe(200);
   });
 
   it('unpaid accounts are sent to enroll', async () => {
