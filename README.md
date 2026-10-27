@@ -4,6 +4,8 @@ Student portal and public site for USMLE100: sign-up, one-time payments (Stripe)
 
 Runs on **Cloudflare Workers** with a **D1** database. Server-rendered with [Hono](https://hono.dev).
 
+**Start here:** [`LAUNCH.md`](LAUNCH.md) (owner setup steps), [`HANDOVER.md`](HANDOVER.md) (architecture, deploy, rollback, backups, operations) and [`REQUIREMENTS.md`](REQUIREMENTS.md) (every requirement with its status and tests). The list below is the original overview.
+
 ## What's built
 
 - **Accounts**: sign up, sign in, sign out. Passwords hashed with PBKDF2; sessions in D1.
