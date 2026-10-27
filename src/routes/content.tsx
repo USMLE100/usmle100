@@ -146,19 +146,7 @@ content.get('/lectures/:id{[0-9]+}', async (c) => {
         </label>
         <button class="btn btn-primary" type="submit" style="align-self:flex-start">Save details</button>
       </form>
-      {c.get('user')!.role === 'admin' && (
-        <form method="post" action={`/admin/lectures/${l.id}/free`} class="card stack" style="gap:10px">
-          <h2 style="margin:0;font-size:18px">Free preview</h2>
-          <p class="muted small" style="margin:0">
-            {l.is_free
-              ? 'This lecture is a free preview: any signed-in student can watch it 2 times at /free-lectures.'
-              : 'Make this lecture a free preview so any signed-in student can watch it 2 times, before enrolling.'}{' '}
-            Removing it takes free access away at once; students who have it in their program keep their paid views. View counts are kept if you add it back.
-          </p>
-          <input type="hidden" name="free" value={l.is_free ? '0' : '1'} />
-          <button class={'btn ' + (l.is_free ? 'btn-outline' : 'btn-primary')} type="submit" style="align-self:flex-start">{l.is_free ? 'Remove from free lectures' : 'Make it a free lecture'}</button>
-        </form>
-      )}
+      {c.get('user')!.role === 'admin' && <p class="small muted">To offer this lecture for free, add it in <a href="/admin/free-lectures">Free lectures</a>.</p>}
       <section class="card">
         <p class="small">{qs?.n ?? 0} approved question{qs?.n === 1 ? '' : 's'} and {cards?.n ?? 0} flash card{cards?.n === 1 ? '' : 's'} are linked to this lecture. <a href={`/admin/cards?lecture=${l.id}`}>Flash cards →</a></p>
       </section>
@@ -176,14 +164,6 @@ content.post('/lectures/:id{[0-9]+}/details', async (c) => {
     .bind(title, num(f.subject_id), num(f.section_id), str(f.objectives, 3000) || null, minutes > 0 ? Math.round(minutes * 60) : null, id)
     .run();
   return c.redirect(back(`/admin/lectures/${id}`, 'Saved.'));
-});
-
-/** Admins choose the free preview lectures (R041); removal revokes free access immediately (R042). */
-content.post('/lectures/:id{[0-9]+}/free', async (c) => {
-  const id = Number(c.req.param('id'));
-  const on = (await c.req.parseBody()).free === '1';
-  await c.env.DB.prepare('UPDATE lectures SET is_free = ? WHERE id = ?').bind(on ? 1 : 0, id).run();
-  return c.redirect(back(`/admin/lectures/${id}`, on ? 'It is now a free lecture.' : 'Removed from free lectures.'));
 });
 
 // ---------- Flash cards ----------

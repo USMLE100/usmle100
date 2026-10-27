@@ -1,6 +1,6 @@
 import { env, exports } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { makeOwner } from './owner';
+import { SIGNUP, cookies, makeOwner } from './owner';
 
 // Refunds are issued by the owner in the Stripe Dashboard. The site only reacts to Stripe's charge.refunded event.
 // Stripe's API is mocked; nothing reaches Stripe.
@@ -24,8 +24,8 @@ async function req(path: string, opts: { cookie?: string; form?: Record<string, 
 let n = 0;
 async function account(pkg: string | null = null, role = 'student') {
   const email = `refund${++n}@example.com`;
-  const res = await req('/sign-up', { form: { name: 'Refund Test', email, password: 'correct-horse-battery' } });
-  const cookie = (res.headers.get('set-cookie') ?? '').split(';')[0];
+  const res = await req('/sign-up', { form: { ...SIGNUP, email, password: 'correct-horse-battery' } });
+  const cookie = cookies(res);
   const u = (await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: number }>())!;
   if (role === 'owner') await makeOwner(db, email);
   else if (role !== 'student') await db.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, u.id).run();

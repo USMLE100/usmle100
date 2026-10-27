@@ -26,6 +26,13 @@ export type User = {
   role: 'student' | 'faculty' | 'admin';
   exam_date: string | null;
   exam?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  phone?: string | null;
+  grad_year?: number | null;
+  marketing_opt_in?: number;
+  email_verified_at?: string | null;
+  phone_verified_at?: string | null;
   onboarded_at?: string | null;
   /** The owner: final authority over admins, money, access changes and reinstatement. */
   is_owner?: number;
@@ -55,7 +62,7 @@ export type Vars = {
   user: User | null;
   enrollment: Enrollment | null;
   shell?: Shell;
-  session?: { tokenHash: string; createdAt: number; lastSeenAt: number; reauthAt: number | null };
+  session?: { tokenHash: string; createdAt: number; lastSeenAt: number; reauthAt: number | null; deviceHash?: string | null };
   /** Set when this request found the session ended: 'idle' (30 minutes) or 'expired' (24 hours). */
   sessionEnded?: 'idle' | 'expired';
 };

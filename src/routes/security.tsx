@@ -6,6 +6,7 @@ import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { audit, verifyAuditChain } from '../lib/audit';
 import { unlockAccount } from '../lib/ratelimit';
 import { lockdownOn } from '../lib/gate';
+import { FREE_VIEWS, PAID_VIEWS, itemLabel, parseKey, titleOf } from '../lib/viewing';
 
 /**
  * Admin security tools: owner re-confirmation, the security log, locked accounts, warnings,
@@ -89,6 +90,9 @@ const ACTION_LABEL: Record<string, string> = {
   'views.requested': 'Asked for more lecture views',
   'views.granted': 'Extra lecture views given',
   'views.declined': 'Request for more views declined',
+  'free.added': 'Video added to Free lectures',
+  'free.published': 'Free lecture published',
+  'free.unpublished': 'Free lecture unpublished',
   'owner.denied': 'Blocked: owner-only change attempted',
 };
 
@@ -357,36 +361,32 @@ security.get('/views', async (c) => {
   const db = c.env.DB;
   const email = String(c.req.query('email') ?? '').trim().toLowerCase();
   const owner = isOwner(me);
-  const requests = (
+  const reqRows = (
     await db
-      .prepare(
-        `SELECT r.id, r.kind, r.created_at, r.user_id, r.lecture_id, u.name, u.email, l.title, l.day_number
-         FROM view_requests r JOIN users u ON u.id = r.user_id JOIN lectures l ON l.id = r.lecture_id
-         WHERE r.resolved_at IS NULL ORDER BY r.id`,
-      )
+      .prepare(`SELECT r.id, r.kind, r.created_at, r.user_id, r.item, u.name, u.email FROM view_requests r JOIN users u ON u.id = r.user_id WHERE r.resolved_at IS NULL ORDER BY r.id`)
       .all<any>()
   ).results;
+  const requests = await Promise.all(reqRows.map(async (r: any) => ({ ...r, label: await itemLabel(db, r.item) })));
   const student = email ? await db.prepare('SELECT id, name, email FROM users WHERE email = ?').bind(email).first<{ id: number; name: string; email: string }>() : null;
   const rows = student
-    ? (
-        await db
-          .prepare(
-            `SELECT v.lecture_id, v.kind, l.title, l.day_number,
-                    SUM(v.counted) AS used, SUM(CASE WHEN v.counted = 0 AND v.started_at IS NOT NULL THEN 1 ELSE 0 END) AS open,
-                    MAX(v.started_at) AS last_started,
-                    (SELECT COALESCE(SUM(g.extra), 0) FROM view_grants g WHERE g.user_id = v.user_id AND g.lecture_id = v.lecture_id AND g.kind = v.kind) AS extra
-             FROM view_sessions v JOIN lectures l ON l.id = v.lecture_id
-             WHERE v.user_id = ? GROUP BY v.lecture_id, v.kind ORDER BY l.day_number`,
-          )
-          .bind(student.id)
-          .all<any>()
-      ).results
+    ? await Promise.all(
+        (
+          await db
+            .prepare(
+              `SELECT v.item, v.kind, SUM(v.counted) AS used, SUM(CASE WHEN v.counted = 0 AND v.started_at IS NOT NULL THEN 1 ELSE 0 END) AS open,
+                      (SELECT COALESCE(SUM(g.extra), 0) FROM view_grants g WHERE g.user_id = v.user_id AND g.item = v.item AND g.kind = v.kind) AS extra
+               FROM view_sessions v WHERE v.user_id = ? GROUP BY v.item, v.kind ORDER BY v.item`,
+            )
+            .bind(student.id)
+            .all<any>()
+        ).results.map(async (r: any) => ({ ...r, label: await itemLabel(db, r.item) })),
+      )
     : [];
-  const GrantForm = (p: { userId: number; lectureId: number; kind: string; requestId?: number }) =>
+  const GrantForm = (p: { userId: number; item: string; kind: string; requestId?: number }) =>
     owner ? (
       <form method="post" action="/admin/views/grant" class="row" style="align-items:flex-end;gap:8px">
         <input type="hidden" name="user_id" value={String(p.userId)} />
-        <input type="hidden" name="lecture_id" value={String(p.lectureId)} />
+        <input type="hidden" name="item" value={p.item} />
         <input type="hidden" name="kind" value={p.kind} />
         {p.requestId && <input type="hidden" name="request_id" value={String(p.requestId)} />}
         <label class="field" style="flex:0 0 90px">Extra<select name="extra"><option>1</option><option>2</option><option>3</option><option>5</option></select></label>
@@ -409,15 +409,15 @@ security.get('/views', async (c) => {
           <p class="muted" style="margin:0">No open requests.</p>
         ) : (
           <div class="table-box"><table class="t">
-            <thead><tr><th scope="col">Student</th><th scope="col">Lecture</th><th scope="col">Asked</th><th scope="col">Decision</th></tr></thead>
+            <thead><tr><th scope="col">Student</th><th scope="col">Video</th><th scope="col">Asked</th><th scope="col">Decision</th></tr></thead>
             <tbody>
               {requests.map((r: any) => (
                 <tr>
                   <td>{r.name}<br /><a class="small" href={`/admin/views?email=${encodeURIComponent(r.email)}`}>{r.email}</a></td>
-                  <td>Day {r.day_number}: {r.title}<br /><span class="muted small">{r.kind === 'free' ? 'Free lecture' : 'Paid lecture'}</span></td>
+                  <td>{r.label}</td>
                   <td class="small muted">{String(r.created_at).slice(0, 16)} UTC</td>
                   <td class="stack" style="gap:6px">
-                    <GrantForm userId={r.user_id} lectureId={r.lecture_id} kind={r.kind} requestId={r.id} />
+                    <GrantForm userId={r.user_id} item={r.item} kind={r.kind} requestId={r.id} />
                     {owner && <form method="post" action="/admin/views/dismiss"><input type="hidden" name="request_id" value={String(r.id)} /><button class="btn btn-ghost btn-sm" type="submit">Decline</button></form>}
                   </td>
                 </tr>
@@ -433,17 +433,17 @@ security.get('/views', async (c) => {
           <button class="btn btn-outline" type="submit">Look up</button>
         </form>
         {email && !student && <p class="muted" style="margin:0">No account uses {email}.</p>}
-        {student && rows.length === 0 && <p class="muted" style="margin:0">{student.name} hasn’t started any lecture yet.</p>}
+        {student && rows.length === 0 && <p class="muted" style="margin:0">{student.name} hasn’t started any video yet.</p>}
         {student && rows.length > 0 && (
           <div class="table-box"><table class="t">
-            <thead><tr><th scope="col">Lecture</th><th scope="col">Views used</th><th scope="col">Extra views</th><th scope="col"></th></tr></thead>
+            <thead><tr><th scope="col">Video</th><th scope="col">Views used</th><th scope="col">Extra views</th><th scope="col"></th></tr></thead>
             <tbody>
               {rows.map((r: any) => (
                 <tr>
-                  <td>Day {r.day_number}: {r.title}<br /><span class="muted small">{r.kind === 'free' ? 'Free lecture' : 'Paid lecture'}{r.open ? ' · a viewing is open' : ''}</span></td>
-                  <td>{r.used} of {(r.kind === 'free' ? 2 : 5) + r.extra}</td>
+                  <td>{r.label}<br /><span class="muted small">{r.kind === 'free' ? 'Free' : 'Paid'}{r.open ? ' · a viewing is open' : ''}</span></td>
+                  <td>{r.used} of {(r.kind === 'free' ? FREE_VIEWS : PAID_VIEWS) + r.extra}</td>
                   <td>{r.extra}</td>
-                  <td><GrantForm userId={student.id} lectureId={r.lecture_id} kind={r.kind} /></td>
+                  <td><GrantForm userId={student.id} item={r.item} kind={r.kind} /></td>
                 </tr>
               ))}
             </tbody>
@@ -458,29 +458,308 @@ security.get('/views', async (c) => {
 security.post('/views/grant', async (c) => {
   const me = c.get('user')!;
   const f = await c.req.parseBody();
-  const userId = Number(f.user_id), lectureId = Number(f.lecture_id), kind = String(f.kind);
+  const userId = Number(f.user_id), item = String(f.item ?? ''), kind = String(f.kind);
   const extra = Math.min(10, Math.max(1, Math.floor(Number(f.extra) || 0)));
   const reason = String(f.reason ?? '').trim().slice(0, 200);
   const bad = (m: string) => c.redirect('/admin/views?error=' + encodeURIComponent(m));
   if (!['free', 'paid'].includes(kind) || !reason) return bad('Please give a reason.');
+  if (!parseKey(item) || (kind === 'paid') !== item.startsWith('L:')) return bad('Video not found.');
   const db = c.env.DB;
   const u = await db.prepare('SELECT email FROM users WHERE id = ?').bind(userId).first<{ email: string }>();
-  if (!u || !(await db.prepare('SELECT 1 FROM lectures WHERE id = ?').bind(lectureId).first())) return bad('Student or lecture not found.');
+  if (!u || !(await titleOf(db, item))) return bad('Student or video not found.');
   const enr = kind === 'paid' ? await db.prepare("SELECT id FROM enrollments WHERE user_id = ? AND status = 'active' ORDER BY paid_at DESC LIMIT 1").bind(userId).first<{ id: number }>() : null;
   if (kind === 'paid' && !enr) return bad('That student has no active program, so paid views can’t be added.');
   await db.batch([
-    db.prepare('INSERT INTO view_grants (user_id, lecture_id, kind, enrollment_id, extra, reason, granted_by) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(userId, lectureId, kind, enr?.id ?? null, extra, reason, me.id),
-    db.prepare("UPDATE view_requests SET resolved_at = datetime('now'), resolved_by = ?, outcome = 'granted' WHERE user_id = ? AND lecture_id = ? AND resolved_at IS NULL").bind(me.id, userId, lectureId),
+    db.prepare('INSERT INTO view_grants (user_id, item, kind, enrollment_id, extra, reason, granted_by) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(userId, item, kind, enr?.id ?? null, extra, reason, me.id),
+    db.prepare("UPDATE view_requests SET resolved_at = datetime('now'), resolved_by = ?, outcome = 'granted' WHERE user_id = ? AND item = ? AND resolved_at IS NULL").bind(me.id, userId, item),
   ]);
-  await audit(db, { actorId: me.id, action: 'views.granted', targetUserId: userId, detail: { lecture: lectureId, kind, extra, reason }, ip: ip(c) });
+  await audit(db, { actorId: me.id, action: 'views.granted', targetUserId: userId, detail: { item, kind, extra, reason }, ip: ip(c) });
   return c.redirect('/admin/views?ok=1&email=' + encodeURIComponent(u.email));
 });
 
 security.post('/views/dismiss', async (c) => {
   const me = c.get('user')!;
   const id = Number((await c.req.parseBody()).request_id);
-  const r = await c.env.DB.prepare('SELECT user_id, lecture_id FROM view_requests WHERE id = ?').bind(id).first<{ user_id: number; lecture_id: number }>();
+  const r = await c.env.DB.prepare('SELECT user_id, item FROM view_requests WHERE id = ?').bind(id).first<{ user_id: number; item: string }>();
   await c.env.DB.prepare("UPDATE view_requests SET resolved_at = datetime('now'), resolved_by = ?, outcome = 'declined' WHERE id = ? AND resolved_at IS NULL").bind(me.id, id).run();
-  if (r) await audit(c.env.DB, { actorId: me.id, action: 'views.declined', targetUserId: r.user_id, detail: { lecture: r.lecture_id }, ip: ip(c) });
+  if (r) await audit(c.env.DB, { actorId: me.id, action: 'views.declined', targetUserId: r.user_id, detail: { item: r.item }, ip: ip(c) });
   return c.redirect('/admin/views?ok=1');
+});
+
+// ---------- Requests: devices, contact changes, privacy, alerts ----------
+
+security.get('/requests', async (c) => {
+  const me = c.get('user')!;
+  if (me.role !== 'admin') return c.text('Not found', 404);
+  const db = c.env.DB;
+  const owner = isOwner(me);
+  const [devices, contacts, privacy, alerts, flags] = await Promise.all([
+    db
+      .prepare(
+        `SELECT d.id, d.user_id, d.label, d.first_seen, d.last_country, u.name, u.email,
+                (SELECT COUNT(*) FROM devices x WHERE x.user_id = d.user_id AND x.first_seen > datetime('now', '-30 days') AND (x.status <> 'active' OR x.replaces_id IS NOT NULL)) AS recent
+         FROM devices d JOIN users u ON u.id = d.user_id WHERE d.status = 'pending' ORDER BY d.id`,
+      )
+      .all<any>(),
+    db.prepare("SELECT r.id, r.field, r.new_value, r.created_at, u.name, u.email, u.phone FROM contact_change_requests r JOIN users u ON u.id = r.user_id WHERE r.status = 'pending' ORDER BY r.id").all<any>(),
+    db.prepare("SELECT r.id, r.kind, r.created_at, u.name, u.email, u.id AS user_id FROM privacy_requests r JOIN users u ON u.id = r.user_id WHERE r.status = 'pending' ORDER BY r.id").all<any>(),
+    db.prepare('SELECT a.*, u.name, u.email FROM staff_alerts a LEFT JOIN users u ON u.id = a.user_id WHERE a.resolved_at IS NULL ORDER BY a.id DESC LIMIT 100').all<any>(),
+    db.prepare('SELECT f.*, u.name, u.email FROM security_flags f JOIN users u ON u.id = f.user_id WHERE f.reviewed_at IS NULL ORDER BY f.id DESC LIMIT 100').all<any>(),
+  ]);
+  const actives = new Map<number, any[]>();
+  for (const d of devices.results) {
+    actives.set(d.user_id, (await db.prepare("SELECT id, label, last_seen, last_country FROM devices WHERE user_id = ? AND status = 'active' ORDER BY last_seen").bind(d.user_id).all<any>()).results);
+  }
+  return c.html(
+    <PortalLayout shell={c.get('shell')} title="Admin: requests" active="admin-requests" user={me} wide>
+      <Eyebrow>Admin</Eyebrow>
+      <h1>Requests and alerts</h1>
+      {c.req.query('ok') && <Flash>{c.req.query('ok')}</Flash>}
+      {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
+
+      <section class="card stack">
+        <h2 style="margin:0">Alerts</h2>
+        {alerts.results.length === 0 ? <p class="muted" style="margin:0">No open alerts.</p> : (
+          <div class="table-box"><table class="t">
+            <thead><tr><th scope="col">When</th><th scope="col">Alert</th><th scope="col">Student</th><th scope="col"></th></tr></thead>
+            <tbody>{alerts.results.map((a: any) => (
+              <tr>
+                <td class="small muted">{String(a.created_at).slice(0, 16)} UTC</td>
+                <td class="small">{a.level === 'critical' ? <strong style="color:#8c2f20">{a.message}</strong> : a.message}</td>
+                <td class="small">{a.name ? <a href={`/admin/students/view?email=${encodeURIComponent(a.email)}`}>{a.name}</a> : '—'}</td>
+                <td><form method="post" action={`/admin/alerts/${a.id}/resolve`}><button class="btn btn-ghost btn-sm" type="submit">Done</button></form></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+        {flags.results.length > 0 && (
+          <>
+            <h3 style="margin:8px 0 0">Flags to review</h3>
+            <div class="table-box"><table class="t">
+              <thead><tr><th scope="col">When</th><th scope="col">Flag</th><th scope="col">Student</th><th scope="col"></th></tr></thead>
+              <tbody>{flags.results.map((f: any) => (
+                <tr>
+                  <td class="small muted">{String(f.created_at).slice(0, 16)} UTC</td>
+                  <td class="small">{FLAG[f.kind] ?? f.kind}<br /><span class="muted">{String(f.detail ?? '').slice(0, 160)}</span></td>
+                  <td class="small">{f.name}<br /><span class="muted">{f.email}</span></td>
+                  <td class="stack" style="gap:4px">
+                    <form method="post" action={`/admin/flags/${f.id}`}><input type="hidden" name="outcome" value="confirmed" /><button class="btn btn-ghost btn-sm" type="submit">Confirmed</button></form>
+                    <form method="post" action={`/admin/flags/${f.id}`}><input type="hidden" name="outcome" value="dismissed" /><button class="btn btn-ghost btn-sm" type="submit">False alarm</button></form>
+                  </td>
+                </tr>
+              ))}</tbody>
+            </table></div>
+            <p class="muted small" style="margin:0">“False alarm” stops a sharing flag from counting toward a lock. It doesn’t lift a lock: the owner reinstates accounts on the Security page.</p>
+          </>
+        )}
+      </section>
+
+      <section class="card stack">
+        <h2 style="margin:0">New devices waiting for approval</h2>
+        <p class="muted small" style="margin:0">Each student may use 2 devices. Approving a new one replaces (signs out and removes) the device you choose. Check the history first, especially when a request repeats within 30 days.</p>
+        {devices.results.length === 0 ? <p class="muted" style="margin:0">None.</p> : devices.results.map((d: any) => (
+          <form method="post" action={`/admin/requests/device/${d.id}`} class="card stack" style="gap:8px;box-shadow:none;border:1px solid var(--line)">
+            <div><strong>{d.name}</strong> <span class="muted small">{d.email}</span></div>
+            <div class="small">New: {d.label}{d.last_country ? ` · ${d.last_country}` : ''} · asked {String(d.first_seen).slice(0, 16)} UTC{d.recent >= 2 && <strong style="color:#8c2f20"> · repeated request within 30 days</strong>}</div>
+            <label class="field">Replace
+              <select name="replace">{(actives.get(d.user_id) ?? []).map((a: any) => <option value={String(a.id)}>{a.label} (last used {String(a.last_seen).slice(0, 10)}{a.last_country ? `, ${a.last_country}` : ''})</option>)}<option value="">Nothing (only if a slot is free)</option></select>
+            </label>
+            <div class="row">
+              <button class="btn btn-primary btn-sm" type="submit" name="decision" value="approve">Approve</button>
+              <button class="btn btn-ghost btn-sm" type="submit" name="decision" value="decline">Decline</button>
+            </div>
+          </form>
+        ))}
+      </section>
+
+      <section class="card stack">
+        <h2 style="margin:0">Email and phone changes</h2>
+        {contacts.results.length === 0 ? <p class="muted" style="margin:0">None.</p> : (
+          <div class="table-box"><table class="t">
+            <thead><tr><th scope="col">Student</th><th scope="col">Change</th><th scope="col"></th></tr></thead>
+            <tbody>{contacts.results.map((r: any) => (
+              <tr>
+                <td>{r.name}<br /><span class="muted small">{r.email} · {r.phone ?? 'no phone'}</span></td>
+                <td class="small">{r.field} → {r.new_value}<br /><span class="muted">asked {String(r.created_at).slice(0, 10)}</span></td>
+                <td class="row" style="gap:6px">
+                  <form method="post" action={`/admin/requests/contact/${r.id}`}><button class="btn btn-primary btn-sm" type="submit" name="decision" value="approve">Approve</button></form>
+                  <form method="post" action={`/admin/requests/contact/${r.id}`}><button class="btn btn-ghost btn-sm" type="submit" name="decision" value="decline">Decline</button></form>
+                </td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+        <p class="muted small" style="margin:0">Before approving, confirm it’s really the student (for example a call to the phone number on file).</p>
+      </section>
+
+      <section class="card stack">
+        <h2 style="margin:0">Data copies and account deletions</h2>
+        {privacy.results.length === 0 ? <p class="muted" style="margin:0">None.</p> : (
+          <div class="table-box"><table class="t">
+            <thead><tr><th scope="col">Student</th><th scope="col">Request</th><th scope="col"></th></tr></thead>
+            <tbody>{privacy.results.map((r: any) => (
+              <tr>
+                <td>{r.name}<br /><span class="muted small">{r.email}</span></td>
+                <td class="small">{r.kind === 'export' ? 'Copy of their data' : 'Delete their account'} · {String(r.created_at).slice(0, 10)}</td>
+                <td class="stack" style="gap:6px">
+                  {r.kind === 'export' && <a class="btn btn-outline btn-sm" href={`/admin/requests/privacy/${r.id}/export`}>Download their data (JSON)</a>}
+                  {owner ? (
+                    <form method="post" action={`/admin/requests/privacy/${r.id}`} class="row" style="gap:6px">
+                      <button class="btn btn-primary btn-sm" type="submit" name="decision" value="complete">{r.kind === 'export' ? 'Mark sent' : 'Delete account'}</button>
+                      <button class="btn btn-ghost btn-sm" type="submit" name="decision" value="decline">Decline</button>
+                    </form>
+                  ) : <span class="muted small">The owner decides.</span>}
+                </td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+        <p class="muted small" style="margin:0">Deleting removes the person’s name, email, phone, notes, sign-ins and devices. Payment, enrollment and security records are kept as the law requires, without their contact details.</p>
+      </section>
+    </PortalLayout>,
+  );
+});
+
+const FLAG: Record<string, string> = {
+  concurrent_stream: 'Lectures played on two devices in different places at once',
+  device_replacement_repeat: 'Repeated device replacement within 30 days',
+  reported_session: 'Student reported a sign-in they don’t recognise',
+  dispute: 'Card payment disputed (chargeback)',
+  qbank_scraping: 'Unusual question-bank paging',
+  book_scraping: 'Unusual Course Book opening',
+};
+
+security.post('/alerts/:id{[0-9]+}/resolve', async (c) => {
+  const me = c.get('user')!;
+  if (me.role !== 'admin') return c.text('Not found', 404);
+  await c.env.DB.prepare("UPDATE staff_alerts SET resolved_at = datetime('now'), resolved_by = ? WHERE id = ?").bind(me.id, Number(c.req.param('id'))).run();
+  return c.redirect('/admin/requests');
+});
+
+security.post('/flags/:id{[0-9]+}', async (c) => {
+  const me = c.get('user')!;
+  if (me.role !== 'admin') return c.text('Not found', 404);
+  const outcome = (await c.req.parseBody()).outcome === 'dismissed' ? 'dismissed' : 'confirmed';
+  const f = await c.env.DB.prepare('SELECT user_id, kind FROM security_flags WHERE id = ?').bind(Number(c.req.param('id'))).first<{ user_id: number; kind: string }>();
+  await c.env.DB.prepare("UPDATE security_flags SET reviewed_at = datetime('now'), reviewed_by = ?, outcome = ? WHERE id = ?").bind(me.id, outcome, Number(c.req.param('id'))).run();
+  if (f) await audit(c.env.DB, { actorId: me.id, action: 'flag.reviewed', targetUserId: f.user_id, detail: { kind: f.kind, outcome }, ip: ip(c) });
+  return c.redirect('/admin/requests?ok=' + encodeURIComponent('Saved.'));
+});
+
+/** Admin approval for every device replacement (R017). The replaced device is signed out at once. */
+security.post('/requests/device/:id{[0-9]+}', async (c) => {
+  const me = c.get('user')!;
+  if (me.role !== 'admin') return c.text('Not found', 404);
+  const db = c.env.DB;
+  const f = await c.req.parseBody();
+  const d = await db.prepare("SELECT id, user_id, label FROM devices WHERE id = ? AND status = 'pending'").bind(Number(c.req.param('id'))).first<{ id: number; user_id: number; label: string }>();
+  if (!d) return c.redirect('/admin/requests?error=' + encodeURIComponent('That request was already handled.'));
+  if (f.decision === 'decline') {
+    await db.prepare("UPDATE devices SET status = 'declined', decided_by = ?, decided_at = datetime('now') WHERE id = ?").bind(me.id, d.id).run();
+    await audit(db, { actorId: me.id, action: 'device.declined', targetUserId: d.user_id, detail: { device: d.label }, ip: ip(c) });
+    return c.redirect('/admin/requests?ok=' + encodeURIComponent('Declined.'));
+  }
+  const replace = Number(f.replace) || 0;
+  const old = replace ? await db.prepare("SELECT id, device_hash, label FROM devices WHERE id = ? AND user_id = ? AND status = 'active'").bind(replace, d.user_id).first<{ id: number; device_hash: string; label: string }>() : null;
+  const active = (await db.prepare("SELECT COUNT(*) AS n FROM devices WHERE user_id = ? AND status = 'active'").bind(d.user_id).first<{ n: number }>())!.n;
+  if (!old && active >= 2) return c.redirect('/admin/requests?error=' + encodeURIComponent('Both device slots are in use: choose which device this replaces.'));
+  await db.batch([
+    ...(old
+      ? [
+          db.prepare("UPDATE devices SET status = 'removed', decided_by = ?, decided_at = datetime('now') WHERE id = ?").bind(me.id, old.id),
+          db.prepare('DELETE FROM sessions WHERE user_id = ? AND device_id = ?').bind(d.user_id, old.device_hash),
+        ]
+      : []),
+    db.prepare("UPDATE devices SET status = 'active', replaces_id = ?, decided_by = ?, decided_at = datetime('now') WHERE id = ?").bind(old?.id ?? null, me.id, d.id),
+    db.prepare("INSERT INTO notices (user_id, kind, title, body) VALUES (?, 'device', 'New device approved', ?)").bind(d.user_id, `Your ${d.label} is now registered${old ? ` and replaces your ${old.label}` : ''}. If you didn’t ask for this, contact USMLE100 right away.`),
+  ]);
+  await audit(db, { actorId: me.id, action: 'device.approved', targetUserId: d.user_id, detail: { device: d.label, replaced: old?.label ?? null }, ip: ip(c) });
+  return c.redirect('/admin/requests?ok=' + encodeURIComponent('Approved.'));
+});
+
+/** Admin approval for changes to email or phone (R016). */
+security.post('/requests/contact/:id{[0-9]+}', async (c) => {
+  const me = c.get('user')!;
+  if (me.role !== 'admin') return c.text('Not found', 404);
+  const db = c.env.DB;
+  const r = await db.prepare("SELECT * FROM contact_change_requests WHERE id = ? AND status = 'pending'").bind(Number(c.req.param('id'))).first<any>();
+  if (!r) return c.redirect('/admin/requests?error=' + encodeURIComponent('That request was already handled.'));
+  const approve = (await c.req.parseBody()).decision === 'approve';
+  if (approve && r.field === 'email' && (await db.prepare('SELECT 1 FROM users WHERE email = ? AND id <> ?').bind(r.new_value, r.user_id).first())) {
+    return c.redirect('/admin/requests?error=' + encodeURIComponent('Another account already uses that email.'));
+  }
+  await db.batch([
+    db.prepare("UPDATE contact_change_requests SET status = ?, decided_at = datetime('now'), decided_by = ? WHERE id = ?").bind(approve ? 'approved' : 'declined', me.id, r.id),
+    ...(approve
+      ? [
+          r.field === 'email'
+            ? db.prepare('UPDATE users SET email = ?, email_verified_at = NULL WHERE id = ?').bind(r.new_value, r.user_id)
+            : db.prepare('UPDATE users SET phone = ?, phone_verified_at = NULL WHERE id = ?').bind(r.new_value, r.user_id),
+        ]
+      : []),
+    db.prepare("INSERT INTO notices (user_id, kind, title, body) VALUES (?, 'account', ?, ?)").bind(
+      r.user_id,
+      approve ? `Your ${r.field} was changed` : `Your ${r.field} change was not approved`,
+      approve ? `Your ${r.field} is now ${r.new_value}. If you didn’t ask for this, contact USMLE100 right away.` : `Please contact USMLE100 if you still need to change your ${r.field}.`,
+    ),
+  ]);
+  await audit(db, { actorId: me.id, action: approve ? 'contact.approved' : 'contact.declined', targetUserId: r.user_id, detail: { field: r.field }, ip: ip(c) });
+  return c.redirect('/admin/requests?ok=' + encodeURIComponent(approve ? 'Changed.' : 'Declined.'));
+});
+
+/** Everything stored about one person, for a data-copy request (protected course content is not included). */
+security.get('/requests/privacy/:id{[0-9]+}/export', async (c) => {
+  const me = c.get('user')!;
+  if (me.role !== 'admin') return c.text('Not found', 404);
+  const db = c.env.DB;
+  const r = await db.prepare('SELECT user_id FROM privacy_requests WHERE id = ?').bind(Number(c.req.param('id'))).first<{ user_id: number }>();
+  if (!r) return c.notFound();
+  const uid = r.user_id;
+  const q = (sql: string) => db.prepare(sql).bind(uid).all().then((x) => x.results);
+  const data = {
+    account: await db.prepare('SELECT id, email, name, first_name, last_name, phone, exam, exam_date, grad_year, created_at, marketing_opt_in, marketing_consent_at, marketing_consent_text, signup_source, birth_date FROM users WHERE id = ?').bind(uid).first(),
+    enrollments: await q('SELECT id, package_id, status, amount_cents, paid_at, cohort_id, lectures_until FROM enrollments WHERE user_id = ?'),
+    course_book_purchases: await q('SELECT id, status, amount_cents, paid_at, refunded_at FROM book_purchases WHERE user_id = ?'),
+    agreement_signatures: await q('SELECT agreement_id, legal_name, birth_date, signed_at, ip FROM agreement_signatures WHERE user_id = ?'),
+    devices: await q('SELECT label, status, first_seen, last_seen, last_country FROM devices WHERE user_id = ?'),
+    lecture_progress: await q('SELECT lecture_id, completed_at FROM lecture_progress WHERE user_id = ?'),
+    lecture_views: await q('SELECT item, kind, started_at, counted, counted_reason FROM view_sessions WHERE user_id = ?'),
+    test_answers: await q('SELECT t.id AS test, ti.question_id, ti.chosen, ti.correct FROM tests t JOIN test_items ti ON ti.test_id = t.id WHERE t.user_id = ?').catch(() => []),
+    notes: await q('SELECT id, title, created_at FROM notes WHERE user_id = ?').catch(() => []),
+    security_log: await q('SELECT at, action, ip FROM audit_log WHERE target_user_id = ? ORDER BY id'),
+  };
+  await audit(db, { actorId: me.id, action: 'privacy.exported', targetUserId: uid, ip: ip(c) });
+  c.header('Content-Disposition', `attachment; filename="usmle100-data-${uid}.json"`);
+  c.header('Cache-Control', 'no-store');
+  return c.json(data);
+});
+
+/** Owner only (OWNER_ONLY): complete or decline a privacy request. Deletion anonymises the account. */
+security.post('/requests/privacy/:id{[0-9]+}', async (c) => {
+  const me = c.get('user')!;
+  const db = c.env.DB;
+  const r = await db.prepare("SELECT * FROM privacy_requests WHERE id = ? AND status = 'pending'").bind(Number(c.req.param('id'))).first<any>();
+  if (!r) return c.redirect('/admin/requests?error=' + encodeURIComponent('That request was already handled.'));
+  const complete = (await c.req.parseBody()).decision === 'complete';
+  const target = await db.prepare('SELECT is_owner, role FROM users WHERE id = ?').bind(r.user_id).first<{ is_owner: number; role: string }>();
+  if (complete && r.kind === 'deletion' && (target?.is_owner || target?.role !== 'student')) return c.redirect('/admin/requests?error=' + encodeURIComponent('Staff accounts can’t be deleted here.'));
+  const uid = r.user_id;
+  await db.batch([
+    db.prepare("UPDATE privacy_requests SET status = ?, decided_at = datetime('now'), decided_by = ? WHERE id = ?").bind(complete ? 'completed' : 'declined', me.id, r.id),
+    ...(complete && r.kind === 'deletion'
+      ? [
+          db.prepare(
+            `UPDATE users SET email = 'deleted-' || id || '@deleted.invalid', name = 'Deleted student', first_name = NULL, last_name = NULL, phone = NULL,
+               birth_date = NULL, marketing_opt_in = 0, password_hash = 'deleted', password_salt = 'deleted', status = 'suspended', status_reason = 'Account deleted at the student’s request.' WHERE id = ?`,
+          ).bind(uid),
+          db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(uid),
+          db.prepare('DELETE FROM devices WHERE user_id = ?').bind(uid),
+          db.prepare('DELETE FROM play_tabs WHERE user_id = ?').bind(uid),
+          db.prepare('DELETE FROM notices WHERE user_id = ?').bind(uid),
+        ]
+      : []),
+  ]);
+  if (complete && r.kind === 'deletion') await db.prepare('DELETE FROM notes WHERE user_id = ?').bind(uid).run().catch(() => {});
+  await audit(db, { actorId: me.id, action: complete ? `privacy.${r.kind}_completed` : `privacy.${r.kind}_declined`, targetUserId: uid, ip: ip(c) });
+  return c.redirect('/admin/requests?ok=' + encodeURIComponent('Done.'));
 });

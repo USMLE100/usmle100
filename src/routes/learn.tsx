@@ -562,7 +562,7 @@ learn.get('/lectures/:id{[0-9]+}', async (c) => {
         <h1>{l.title}</h1>
         {(l.subject_name || listName) && <p class="muted small">{[l.subject_name, listName && pos >= 0 ? `${listName} · ${pos + 1} of ${list.length}` : ''].filter(Boolean).join(' · ')}</p>}
       </div>
-      {l.bunny_video_id ? <ProtectedPlayer lectureId={l.id} title={l.title} /> : <Flash kind="error">The video for this lecture isn’t uploaded yet.</Flash>}
+      {l.bunny_video_id ? <ProtectedPlayer item={`L:${l.id}`} title={l.title} /> : <Flash kind="error">The video for this lecture isn’t uploaded yet.</Flash>}
       <section class="card" style="flex-direction:row;align-items:center;flex-wrap:wrap;gap:10px">
         {l.completed_at ? (
           <span class="tag" style="font-size:13px;padding:6px 12px"><Icon name="check_circle" size={16} />&nbsp;Watched</span>

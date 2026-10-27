@@ -1,7 +1,7 @@
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { readChapter } from './reader';
-import { makeOwner } from './owner';
+import { SIGNUP, cookies, makeOwner } from './owner';
 
 // Phase 2 access rules: who may see books, notes, feedback, cards and the new admin pages.
 const BASE = 'https://usmle100.test';
@@ -27,8 +27,8 @@ async function req(path: string, opts: { cookie?: string; form?: Record<string, 
 let n = 0;
 async function account(role: 'student' | 'faculty' | 'admin' | 'owner', pkg: string | null = 'max') {
   const email = `p2user${++n}@example.com`;
-  const res = await req('/sign-up', { form: { name: 'Phase Two', email, password: 'correct-horse-battery' } });
-  const cookie = (res.headers.get('set-cookie') ?? '').split(';')[0];
+  const res = await req('/sign-up', { form: { ...SIGNUP, email, password: 'correct-horse-battery' } });
+  const cookie = cookies(res);
   const u = await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: number }>();
   if (role === 'owner') await makeOwner(db, email);
   else if (role !== 'student') await db.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, u!.id).run();
@@ -201,7 +201,8 @@ describe('no remember me (R088-R091)', () => {
   it('the sign-in cookie lasts only for the browser session, even if asked to remember', async () => {
     const s = await account('student');
     const on = await req('/sign-in', { form: { email: s.email, password: 'correct-horse-battery', remember: '1' } });
-    expect(on.headers.get('set-cookie')).not.toMatch(/expires=|max-age=/i);
+    const session = on.headers.getSetCookie().find((c) => c.startsWith('u100_session='))!;
+    expect(session).not.toMatch(/expires=|max-age=/i);
     expect(await (await req('/sign-in')).text()).not.toContain('Remember me');
   });
 });

@@ -1,5 +1,6 @@
 import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
+import { SIGNUP, cookies } from './owner';
 import { bunnyEmbedUrl } from '../src/lib/content';
 
 const BASE = 'https://usmle100.test';
@@ -18,16 +19,20 @@ async function req(path: string, opts: { cookie?: string; form?: Record<string, 
   }
   return worker.fetch(new Request(BASE + path, init));
 }
-const cookieOf = (res: Response) => (res.headers.get('set-cookie') ?? '').split(';')[0];
+const cookieOf = (res: Response) => cookies(res);
 
 let n = 0;
 async function account(role: 'student' | 'faculty' | 'admin' = 'student') {
   const email = `h${++n}-${Date.now()}@example.com`;
-  const res = await req('/sign-up', { form: { name: `Person ${n}`, email, password: PASSWORD }, ip: `198.51.100.${n}` });
+  const res = await req('/sign-up', { form: { ...SIGNUP, email, password: PASSWORD }, ip: `198.51.100.${n}` });
   if (role !== 'student') await db.prepare('UPDATE users SET role = ? WHERE email = ?').bind(role, email).run();
+  browser.set(email, deviceOf(cookieOf(res)));
   return { email, cookie: cookieOf(res) };
 }
-const signIn = (email: string, password: string, ip = '203.0.113.1') => req('/sign-in', { form: { email, password }, ip });
+/** Each account's own browser: its registered-device cookie is sent with later sign-ins. */
+const browser = new Map<string, string>();
+const deviceOf = (cookie: string) => cookie.split('; ').filter((c) => c.startsWith('u100_device=')).join('; ');
+const signIn = (email: string, password: string, ip = '203.0.113.1') => req('/sign-in', { form: { email, password }, ip, cookie: browser.get(email) });
 
 describe('sign-in lockout', () => {
   it('locks an account after 5 wrong passwords until an admin unlocks it, even for the right password (R029)', async () => {
@@ -48,7 +53,7 @@ describe('sign-in lockout', () => {
     for (let i = 0; i < 5; i++) await signIn(a.email, 'nope-nope-nope', `192.0.2.${10 + i}`);
     const res = await signIn(b.email, PASSWORD, '192.0.2.50');
     expect(res.status).toBe(302);
-    expect(cookieOf(res)).toMatch(/^u100_session=./);
+    expect(cookieOf(res)).toMatch(/u100_session=./);
   });
 
   it('stays locked after 15 minutes; works again once an admin unlocks it', async () => {
@@ -127,9 +132,9 @@ describe('password reset links', () => {
     expect(page.status).toBe(200);
     expect(await page.text()).toContain('Choose a new password');
 
-    const done = await req('/reset-password', { form: { token, password: 'brand-new-password-1', again: 'brand-new-password-1' } });
+    const done = await req('/reset-password', { cookie: browser.get(student.email), form: { token, password: 'brand-new-password-1', again: 'brand-new-password-1' } });
     expect(done.status).toBe(302);
-    expect(cookieOf(done)).toMatch(/^u100_session=./);
+    expect(cookieOf(done)).toMatch(/u100_session=./);
 
     // Old sign-in is gone; old password no longer works; new one does.
     expect((await req('/dashboard', { cookie: student.cookie })).headers.get('location')).toContain('/sign-in');
@@ -138,7 +143,7 @@ describe('password reset links', () => {
 
     // The link cannot be used twice.
     expect((await req(path)).status).toBe(400);
-    const again = await req('/reset-password', { form: { token, password: 'another-password-22', again: 'another-password-22' } });
+    const again = await req('/reset-password', { cookie: browser.get(student.email), form: { token, password: 'another-password-22', again: 'another-password-22' } });
     expect(again.status).toBe(400);
     expect((await signIn(student.email, 'another-password-22', '192.0.2.152')).status).toBe(401);
   });
@@ -159,10 +164,10 @@ describe('password reset links', () => {
     const admin = await account('admin');
     const student = await account();
     const { token } = await makeLink(admin.cookie, student.email);
-    expect((await req('/reset-password', { form: { token, password: 'short', again: 'short' } })).status).toBe(400);
-    expect((await req('/reset-password', { form: { token, password: 'long-enough-111', again: 'different-222' } })).status).toBe(400);
+    expect((await req('/reset-password', { cookie: browser.get(student.email), form: { token, password: 'short', again: 'short' } })).status).toBe(400);
+    expect((await req('/reset-password', { cookie: browser.get(student.email), form: { token, password: 'long-enough-111', again: 'different-222' } })).status).toBe(400);
     // Mistakes do not use up the link.
-    expect((await req('/reset-password', { form: { token, password: 'long-enough-111', again: 'long-enough-111' } })).status).toBe(302);
+    expect((await req('/reset-password', { cookie: browser.get(student.email), form: { token, password: 'long-enough-111', again: 'long-enough-111' } })).status).toBe(302);
   });
 
   it('clears a sign-in lock for that account', async () => {
@@ -170,7 +175,7 @@ describe('password reset links', () => {
     const student = await account();
     for (let i = 0; i < 5; i++) await signIn(student.email, 'nope-nope-nope', `192.0.2.${160 + i}`);
     const { token } = await makeLink(admin.cookie, student.email);
-    await req('/reset-password', { form: { token, password: 'fresh-password-333', again: 'fresh-password-333' } });
+    await req('/reset-password', { cookie: browser.get(student.email), form: { token, password: 'fresh-password-333', again: 'fresh-password-333' } });
     expect((await signIn(student.email, 'fresh-password-333', '192.0.2.170')).status).toBe(302);
   });
 

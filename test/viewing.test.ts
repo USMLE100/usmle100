@@ -1,6 +1,6 @@
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { makeOwner } from './owner';
+import { SIGNUP, cookies, makeOwner } from './owner';
 import { markSeconds } from '../src/lib/viewing';
 
 const BASE = 'https://usmle100.test';
@@ -29,8 +29,8 @@ const json = async (r: Response) => (await r.json()) as any;
 let n = 0;
 async function account(role: 'student' | 'faculty' | 'admin' | 'owner' = 'student') {
   const email = `view${++n}-${Date.now()}@example.com`;
-  const res = await req('/sign-up', { form: { name: `Viewer ${n}`, email, password: PASSWORD } });
-  const cookie = (res.headers.get('set-cookie') ?? '').split(';')[0];
+  const res = await req('/sign-up', { form: { ...SIGNUP, email, password: PASSWORD } });
+  const cookie = cookies(res);
   const id = (await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: number }>())!.id;
   if (role === 'owner') await makeOwner(db, email);
   else if (role !== 'student') await db.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, id).run();
@@ -42,10 +42,10 @@ async function enroll(userId: number, cohortId: number) {
 }
 
 let cohortA = 0, cohortB = 0, day = 0;
-async function lecture(cohort: number, opts: { free?: boolean } = {}) {
+async function lecture(cohort: number) {
   const r = await db
-    .prepare("INSERT INTO lectures (cohort_id, day_number, title, status, bunny_video_id, duration_seconds, is_free) VALUES (?, ?, ?, 'live', 'vid-abc', 100, ?)")
-    .bind(cohort, ++day, `Lecture ${day}`, opts.free ? 1 : 0)
+    .prepare("INSERT INTO lectures (cohort_id, day_number, title, status, bunny_video_id, duration_seconds) VALUES (?, ?, ?, 'live', 'vid-abc', 100)")
+    .bind(cohort, ++day, `Lecture ${day}`)
     .run();
   return Number(r.meta.last_row_id);
 }
@@ -60,13 +60,15 @@ beforeAll(async () => {
 
 let tabN = 0;
 const newTab = () => (++tabN).toString(16).padStart(12, 'a');
-const claim = (cookie: string, lectureId: number, tab: string) => req('/play/claim', { cookie, json: { lecture: lectureId, tab } }).then(json);
+/** Lecture ids are numbers ('L:' videos); free list entries and others are passed as their item key. */
+const key = (v: number | string) => (typeof v === 'number' ? `L:${v}` : v);
+const claim = (cookie: string, video: number | string, tab: string) => req('/play/claim', { cookie, json: { item: key(video), tab } }).then(json);
 const beat = (cookie: string, c: any, tab: string, body: Record<string, unknown>) => req('/play/beat', { cookie, json: { sid: c.sid, nonce: c.nonce, tab, playing: true, pos: 0, dur: 100, add: [], ...body } }).then(json);
 /** Pretend the last progress report was long ago, so the 2×-speed limit allows a big jump. */
 const rewindBeat = (sid: string) => db.prepare('UPDATE view_sessions SET last_beat_at = last_beat_at - 1000 WHERE id = ?').bind(sid).run();
 const session = (sid: string) => db.prepare('SELECT * FROM view_sessions WHERE id = ?').bind(sid).first<any>();
 /** Watch 65 of 100 seconds in one session. */
-async function watch65(cookie: string, lectureId: number, tab: string) {
+async function watch65(cookie: string, lectureId: number | string, tab: string) {
   const c = await claim(cookie, lectureId, tab);
   expect(c.state, JSON.stringify(c)).toBe('ok');
   await beat(cookie, c, tab, { add: [] });
@@ -171,11 +173,11 @@ describe('paid lectures: 5 views, 65% or 24 hours', () => {
     for (let i = 0; i < 5; i++) await watch65(s.cookie, lec, tab);
     expect((await claim(s.cookie, lec, tab)).state).toBe('locked');
     // The student asks; an admin who is not the owner cannot decide; the owner can.
-    expect(await json(await req('/play/request', { cookie: s.cookie, json: { lecture: lec } }))).toEqual({ ok: true });
+    expect(await json(await req('/play/request', { cookie: s.cookie, json: { item: key(lec) } }))).toEqual({ ok: true });
     expect((await claim(s.cookie, lec, tab)).requested).toBe(true);
     const admin = await account('admin');
     const owner = await account('owner');
-    const grant = { user_id: String(s.id), lecture_id: String(lec), kind: 'paid', extra: '1', reason: 'Internet outage' };
+    const grant = { user_id: String(s.id), item: key(lec), kind: 'paid', extra: '1', reason: 'Internet outage' };
     expect((await req('/admin/views', { cookie: admin.cookie })).status).toBe(200);
     expect((await req('/admin/views/grant', { cookie: admin.cookie, form: grant })).status).toBe(403);
     expect((await req('/admin/views/grant', { cookie: (await account('faculty')).cookie, form: grant })).status).toBe(404);
@@ -195,11 +197,11 @@ describe('paid lectures: 5 views, 65% or 24 hours', () => {
     const s = await account();
     await enroll(s.id, cohortA);
     const other = await lecture(cohortB);
-    const r = await req('/play/claim', { cookie: s.cookie, json: { lecture: other, tab: newTab() } });
+    const r = await req('/play/claim', { cookie: s.cookie, json: { item: key(other), tab: newTab() } });
     expect(r.status).toBe(403);
     const none = await account();
-    expect((await req('/play/claim', { cookie: none.cookie, json: { lecture: other, tab: newTab() } })).status).toBe(403);
-    expect((await req('/play/claim', { json: { lecture: other, tab: newTab() } })).status).toBe(401);
+    expect((await req('/play/claim', { cookie: none.cookie, json: { item: key(other), tab: newTab() } })).status).toBe(403);
+    expect((await req('/play/claim', { json: { item: key(other), tab: newTab() } })).status).toBe(401);
   });
 
   it('the lecture page carries no video link: only the claim gives one', async () => {
@@ -246,38 +248,65 @@ describe('one protected lecture tab (R060–R062)', () => {
   });
 });
 
-describe('free preview lectures (R035–R046)', () => {
-  it('admins choose them; any signed-in student gets 2 views; removal revokes at once; restore keeps counts', async () => {
+describe('Free Lectures list (R035–R046)', () => {
+  it('admins add entries, only the owner publishes; signed-in students get 2 views; unpublishing revokes; re-publishing keeps counts', async () => {
     const admin = await account('admin');
+    const owner = await account('owner');
     const faculty = await account('faculty');
     const s = await account();
     const lec = await lecture(cohortB);
     const tab = newTab();
-    expect((await req(`/play/claim`, { cookie: s.cookie, json: { lecture: lec, tab } })).status).toBe(403);
-    expect((await req(`/admin/lectures/${lec}/free`, { cookie: faculty.cookie, form: { free: '1' } })).status).toBe(404);
-    expect((await req(`/admin/lectures/${lec}/free`, { cookie: admin.cookie, form: { free: '1' } })).status).toBe(302);
-    // Listed for a student with no program, and playable.
-    expect(await (await req('/free-lectures', { cookie: s.cookie })).text()).toContain(`/free-lectures/${lec}`);
-    expect((await req(`/free-lectures/${lec}`, { cookie: s.cookie })).status).toBe(200);
-    await watch65(s.cookie, lec, tab);
-    const c = await claim(s.cookie, lec, tab);
+    expect((await req('/play/claim', { cookie: s.cookie, json: { item: key(lec), tab } })).status).toBe(403);
+    expect((await req('/admin/free-lectures', { cookie: faculty.cookie, form: { lecture: String(lec) } })).status).toBe(404);
+    expect((await req('/admin/free-lectures', { cookie: s.cookie, form: { lecture: String(lec) } })).status).toBe(404);
+    await req('/admin/free-lectures', { cookie: admin.cookie, form: { lecture: String(lec), category: 'sample' } });
+    const f = (await db.prepare('SELECT id, published FROM free_videos WHERE source = ?').bind(`L:${lec}`).first<{ id: number; published: number }>())!;
+    expect(f.published).toBe(0);
+    const item = `F:${f.id}`;
+    // Not published yet: nothing plays, and the original lecture is still paid-only.
+    expect((await req('/play/claim', { cookie: s.cookie, json: { item, tab } })).status).toBe(403);
+    expect((await req(`/admin/free-lectures/${f.id}/publish`, { cookie: admin.cookie, form: { on: '1' } })).status).toBe(403);
+    expect((await req(`/admin/free-lectures/${f.id}/publish`, { cookie: owner.cookie, form: { on: '1' } })).status).toBe(302);
+    expect(await (await req('/free-lectures', { cookie: s.cookie })).text()).toContain(`/free-lectures/${f.id}`);
+    expect((await req(`/free-lectures/${f.id}`, { cookie: s.cookie })).status).toBe(200);
+    // The free entry never opens the paid lecture itself.
+    expect((await req('/play/claim', { cookie: s.cookie, json: { item: key(lec), tab } })).status).toBe(403);
+    await watch65(s.cookie, item, tab);
+    const c = await claim(s.cookie, item, tab);
     expect(c.state).toBe('ok');
     await beat(s.cookie, c, tab, {});
-    // Removed while watching: the player is stopped and no new link is given.
-    await req(`/admin/lectures/${lec}/free`, { cookie: admin.cookie, form: { free: '0' } });
+    // Unpublished while watching: the player stops and no new link is given.
+    await req(`/admin/free-lectures/${f.id}/publish`, { cookie: owner.cookie, form: { on: '0' } });
     expect((await beat(s.cookie, c, tab, {})).state).toBe('gone');
-    expect((await req('/play/claim', { cookie: s.cookie, json: { lecture: lec, tab } })).status).toBe(403);
-    expect((await req(`/free-lectures/${lec}`, { cookie: s.cookie })).status).toBe(404);
-    // Restored: earlier views still count.
-    await req(`/admin/lectures/${lec}/free`, { cookie: admin.cookie, form: { free: '1' } });
-    const resumed = await claim(s.cookie, lec, tab);
+    expect((await req('/play/claim', { cookie: s.cookie, json: { item, tab } })).status).toBe(403);
+    expect((await req(`/free-lectures/${f.id}`, { cookie: s.cookie })).status).toBe(404);
+    // Published again: earlier views still count.
+    await req(`/admin/free-lectures/${f.id}/publish`, { cookie: owner.cookie, form: { on: '1' } });
+    const resumed = await claim(s.cookie, item, tab);
     expect(resumed.sid).toBe(c.sid);
     await rewindBeat(c.sid);
     expect((await beat(s.cookie, resumed, tab, { add: [[0, 70]] })).state).toBe('done');
-    expect(await claim(s.cookie, lec, tab)).toMatchObject({ state: 'locked', allowed: 2 });
+    expect(await claim(s.cookie, item, tab)).toMatchObject({ state: 'locked', allowed: 2 });
     // Buying the program that includes it gives the 5 paid views instead (R046).
     await enroll(s.id, cohortB);
+    expect(await claim(s.cookie, item, tab)).toMatchObject({ state: 'redirect', url: `/lectures/${lec}` });
     expect((await claim(s.cookie, lec, tab)).state).toBe('ok');
-    expect((await req(`/free-lectures/${lec}`, { cookie: s.cookie })).headers.get('location')).toBe(`/lectures/${lec}`);
+    expect((await req(`/free-lectures/${f.id}`, { cookie: s.cookie })).headers.get('location')).toBe(`/lectures/${lec}`);
+  });
+
+  it('needs the phone, exam and graduation year; signed-out visitors get nothing', async () => {
+    const owner = await account('owner');
+    const r = await req('/admin/free-lectures', { cookie: owner.cookie, form: { bunny: 'info-video-123', title: 'About USMLE100', category: 'info', minutes: '3' } });
+    expect(r.status).toBe(302);
+    const f = (await db.prepare("SELECT id FROM free_videos WHERE source = 'V:info-video-123'").first<{ id: number }>())!;
+    await req(`/admin/free-lectures/${f.id}/publish`, { cookie: owner.cookie, form: { on: '1' } });
+    const s = await account();
+    await db.prepare('UPDATE users SET phone = NULL WHERE id = ?').bind(s.id).run();
+    expect(await claim(s.cookie, `F:${f.id}`, newTab())).toEqual({ state: 'profile' });
+    expect((await req('/play/claim', { json: { item: `F:${f.id}`, tab: newTab() } })).status).toBe(401);
+    await db.prepare("UPDATE users SET phone = '+447700900123' WHERE id = ?").bind(s.id).run();
+    const ok = await claim(s.cookie, `F:${f.id}`, newTab());
+    expect(ok.state).toBe('ok');
+    expect(ok.src).toContain('/info-video-123?token=');
   });
 });

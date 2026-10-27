@@ -14,6 +14,9 @@ const PUBLIC_EXACT = new Set(['/', '/programs', '/terms', '/privacy', '/refunds'
 const isPublic = (p: string) => PUBLIC_EXACT.has(p) || /\.[a-z0-9]{2,5}$/i.test(p);
 const isCheckout = (p: string) => p === '/enroll' || p.startsWith('/enroll/') || p.startsWith('/buy/');
 const isSession = (p: string) => p.startsWith('/session/');
+/** Requests made by page scripts get a JSON answer the script understands, not a redirect to an HTML page. */
+const isApi = (p: string) => p.startsWith('/play/') || p.startsWith('/session/');
+const apiOrRedirect = (c: Context<AppEnv>, p: string, url: string, status: 403 | 503 = 403) => (isApi(p) ? c.json({ state: 'account', url }, status) : c.redirect(url));
 
 export async function lockdownOn(db: D1Database) {
   return (await db.prepare("SELECT value FROM settings WHERE key = 'lockdown'").first<{ value: string }>())?.value === '1';
@@ -37,21 +40,22 @@ export async function accountGate(c: Context<AppEnv>, next: Next) {
 
   if (user.status === 'suspended' && !isOwner(user)) {
     if (p === '/account/suspended') return next();
-    return isSession(p) ? c.json({ ended: 'suspended' }, 403) : c.redirect('/account/suspended');
+    return isSession(p) ? c.json({ ended: 'suspended' }, 403) : apiOrRedirect(c, p, '/account/suspended');
   }
   if (isStaff(user)) return next();
 
   if (await lockdownOn(c.env.DB)) {
     if (isCheckout(p) || p === '/account/unavailable') return next();
-    return isSession(p) ? c.json({ ended: 'lockdown' }, 503) : c.redirect('/account/unavailable');
+    return isSession(p) ? c.json({ ended: 'lockdown' }, 503) : apiOrRedirect(c, p, '/account/unavailable', 503);
   }
   if (isSession(p) || isCheckout(p)) return next();
 
   if (user.status === 'warned') {
-    if (p === '/account/notice') return next();
-    return c.redirect('/account/notice');
+    if (p === '/account/notice' || p === '/play/release') return next();
+    return apiOrRedirect(c, p, '/account/notice');
   }
-  if (p !== '/agreement' && (await needsAgreement(c.env.DB, user.id))) {
+  if (p !== '/agreement' && p !== '/play/release' && (await needsAgreement(c.env.DB, user.id))) {
+    if (isApi(p)) return apiOrRedirect(c, p, '/agreement');
     return c.redirect('/agreement?next=' + encodeURIComponent(c.req.method === 'GET' ? c.req.path : '/dashboard'));
   }
   return next();

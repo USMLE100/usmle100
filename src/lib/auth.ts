@@ -59,11 +59,24 @@ export const REAUTH_SECONDS = 15 * 60;
 const epoch = () => Math.floor(Date.now() / 1000);
 
 /** Sign in. The cookie lasts only for the browser session; the server ends the session on inactivity or after 24 hours. */
-export async function createSession(c: Context<AppEnv>, userId: number) {
+export async function createSession(c: Context<AppEnv>, userId: number, deviceId?: string | null) {
   const raw = toB64(crypto.getRandomValues(new Uint8Array(32))).replace(/[+/=]/g, (m) => ({ '+': '-', '/': '_', '=': '' })[m]!);
   const t = epoch();
-  await c.env.DB.prepare('INSERT INTO sessions (token_hash, user_id, expires_at, created_at, last_seen_at, reauth_at, ip) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .bind(await sha256Hex(raw), userId, new Date((t + MAX_SESSION_SECONDS) * 1000).toISOString(), t, t, t, c.req.header('cf-connecting-ip') ?? null)
+  await c.env.DB.prepare(
+    'INSERT INTO sessions (token_hash, user_id, expires_at, created_at, last_seen_at, reauth_at, ip, user_agent, country, device_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  )
+    .bind(
+      await sha256Hex(raw),
+      userId,
+      new Date((t + MAX_SESSION_SECONDS) * 1000).toISOString(),
+      t,
+      t,
+      t,
+      c.req.header('cf-connecting-ip') ?? null,
+      (c.req.header('user-agent') ?? '').slice(0, 300) || null,
+      c.req.header('cf-ipcountry') ?? null,
+      deviceId ?? null,
+    )
     .run();
   setCookie(c, COOKIE, raw, {
     httpOnly: true,
@@ -80,7 +93,7 @@ export async function destroySession(c: Context<AppEnv>) {
 }
 
 /** The current session's timing, for the inactivity warning and owner re-authentication. */
-export type SessionInfo = { tokenHash: string; createdAt: number; lastSeenAt: number; reauthAt: number | null };
+export type SessionInfo = { tokenHash: string; createdAt: number; lastSeenAt: number; reauthAt: number | null; deviceHash: string | null };
 
 /**
  * Loads the signed-in user (if any) and their active enrollment onto the context.
@@ -96,11 +109,12 @@ export async function loadUser(c: Context<AppEnv>, next: Next) {
     const t = epoch();
     const row = await c.env.DB.prepare(
       `SELECT u.id, u.email, u.name, u.role, u.exam_date, u.exam, u.onboarded_at, u.is_owner, u.status, u.status_reason, u.warnings, u.birth_date,
-              s.created_at AS s_created, s.last_seen_at AS s_seen, s.reauth_at AS s_reauth
+              u.first_name, u.last_name, u.phone, u.grad_year, u.marketing_opt_in, u.email_verified_at, u.phone_verified_at,
+              s.created_at AS s_created, s.last_seen_at AS s_seen, s.reauth_at AS s_reauth, s.device_id AS s_device
        FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`,
     )
       .bind(th)
-      .first<User & { s_created: number | null; s_seen: number | null; s_reauth: number | null }>();
+      .first<User & { s_created: number | null; s_seen: number | null; s_reauth: number | null; s_device: string | null }>();
     const created = row?.s_created ?? t;
     const seen = row?.s_seen ?? t;
     if (row && (t - seen > IDLE_SECONDS || t - created > MAX_SESSION_SECONDS)) {
@@ -108,9 +122,9 @@ export async function loadUser(c: Context<AppEnv>, next: Next) {
       deleteCookie(c, COOKIE, { path: '/' });
       c.set('sessionEnded', t - created > MAX_SESSION_SECONDS ? 'expired' : 'idle');
     } else if (row) {
-      const { s_created, s_seen, s_reauth, ...user } = row;
+      const { s_created, s_seen, s_reauth, s_device, ...user } = row;
       c.set('user', user as User);
-      c.set('session', { tokenHash: th, createdAt: created, lastSeenAt: seen, reauthAt: s_reauth ?? null });
+      c.set('session', { tokenHash: th, createdAt: created, lastSeenAt: seen, reauthAt: s_reauth ?? null, deviceHash: s_device ?? null });
       // Activity extends the session (written at most once a minute). The status check does not count.
       if (c.req.path !== '/session/status' && t - seen >= 60) {
         await c.env.DB.prepare('UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?').bind(t, th).run();
@@ -213,6 +227,8 @@ const OWNER_ONLY: RegExp[] = [
   /^\/admin\/security\/(reinstate|lockdown)$/,
   /^\/admin\/agreement$/,
   /^\/admin\/views\/(grant|dismiss)$/,
+  /^\/admin\/free-lectures\/\d+\/publish$/,
+  /^\/admin\/requests\/privacy\/\d+$/,
 ];
 export const ownerOnly = (method: string, path: string) => method === 'POST' && OWNER_ONLY.some((re) => re.test(path.replace(/\/+$/, '')));
 
@@ -248,7 +264,7 @@ const LOGGED_FIELDS = ['email', 'user_id', 'role', 'on', 'status', 'months', 'st
 /** Records every staff change in the security log (R010). The security pages log their own, more detailed entries. */
 async function logged(c: Context<AppEnv>, next: Next) {
   await next();
-  if (c.req.method !== 'POST' || /^\/admin\/(security|confirm|agreement|views)(\/|$)/.test(c.req.path) || c.res.status >= 400) return;
+  if (c.req.method !== 'POST' || /^\/admin\/(security|confirm|agreement|views|free-lectures|requests|alerts|flags)(\/|$)/.test(c.req.path) || c.res.status >= 400) return;
   let fields: Record<string, unknown> = {};
   try {
     const f = await c.req.parseBody();

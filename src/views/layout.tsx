@@ -100,7 +100,7 @@ const groups = (staff: boolean, admin: boolean): { label: string; items: NavItem
     items: [
       { key: 'ask', label: 'Ask the Room', href: '/ask', icon: 'forum' },
       { key: 'book', label: '1-on-1 Tutoring', href: '/book', icon: 'event' },
-      { key: 'programs', label: 'Programs', href: '/programs', icon: 'premium' },
+      { key: 'programs', label: 'Explore Programs', href: '/programs', icon: 'premium' },
       { key: 'plans', label: 'Plans', href: '/plans', icon: 'description' },
       { key: 'map', label: 'Portal Map', href: '/map', icon: 'apps' },
     ],
@@ -108,8 +108,8 @@ const groups = (staff: boolean, admin: boolean): { label: string; items: NavItem
   {
     label: 'Study',
     items: [
-      { key: 'lectures', label: 'Lectures', href: '/lectures', icon: 'play_circle' },
-      { key: 'free-lectures', label: 'Free lectures', href: '/free-lectures', icon: 'live' },
+      { key: 'lectures', label: 'My Courses', href: '/lectures', icon: 'play_circle' },
+      { key: 'free-lectures', label: 'Free Lectures', href: '/free-lectures', icon: 'live' },
       { key: 'topics', label: 'Topics', href: '/topics', icon: 'menu_book' },
       { key: 'book-library', label: 'USMLE100 Book', href: '/course-book', icon: 'book' },
       { key: 'warmup', label: 'Daily Warmup', href: '/warmup', icon: 'bolt' },
@@ -147,8 +147,10 @@ const groups = (staff: boolean, admin: boolean): { label: string; items: NavItem
                   { key: 'admin-students', label: 'Students', href: '/admin/students', icon: 'person' as IconName },
                   { key: 'admin-settings', label: 'Site settings', href: '/admin/settings', icon: 'info' as IconName },
                   { key: 'admin-team', label: 'Team', href: '/admin/team', icon: 'groups' as IconName },
+                  { key: 'admin-requests', label: 'Requests & alerts', href: '/admin/requests', icon: 'flag' as IconName },
                   { key: 'admin-security', label: 'Security', href: '/admin/security', icon: 'shield' as IconName },
                   { key: 'admin-views', label: 'Lecture views', href: '/admin/views', icon: 'play_circle' as IconName },
+                  { key: 'admin-free', label: 'Free lectures', href: '/admin/free-lectures', icon: 'live' as IconName },
                   { key: 'admin-agreement', label: 'Student agreement', href: '/admin/agreement', icon: 'description' as IconName },
                 ]
               : []),
@@ -216,6 +218,11 @@ export function PortalLayout(props: { title: string; active: string; user: User;
               </>
             ))}
             <div class="nav-label"></div>
+            <a href="/account" class={'nav-item' + (props.active === 'account' ? ' active' : '')}>
+              <Icon name="person" />
+              My account
+              <Icon name="chevron_right" class="chev" />
+            </a>
             <form method="post" action="/sign-out">
               <button type="submit" class="nav-item" style="width:100%;border:0;background:none;cursor:pointer">
                 <Icon name="logout" />

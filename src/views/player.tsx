@@ -7,8 +7,8 @@ import { Icon } from './icons';
  * pauses when the tab is hidden or progress can't be confirmed for 30 seconds, and keeps a moving watermark
  * (name, account number, viewing-session code) over the video, also in full screen.
  */
-export const ProtectedPlayer = (p: { lectureId: number; title: string }) => (
-  <div class="pp" id="pp" data-lecture={String(p.lectureId)} data-title={p.title}>
+export const ProtectedPlayer = (p: { item: string; title: string }) => (
+  <div class="pp" id="pp" data-item={p.item} data-title={p.title}>
     <div class="pp-stage">
       <div class="pp-frame"></div>
       <div class="pp-wm" aria-hidden="true"></div>
@@ -29,7 +29,7 @@ export const ProtectedPlayer = (p: { lectureId: number; title: string }) => (
 
 export const PLAYER_JS = `(function(){
 var root=document.getElementById('pp');if(!root||root.dataset.init)return;root.dataset.init='1';
-var LID=+root.dataset.lecture,box=root.querySelector('.pp-frame'),wm=root.querySelector('.pp-wm'),ov=root.querySelector('.pp-overlay'),msg=root.querySelector('.pp-msg'),acts=root.querySelector('.pp-actions'),endB=root.querySelector('[data-pp-end]'),fsB=root.querySelector('[data-pp-fs]'),stage=root.querySelector('.pp-stage');
+var ITEM=root.dataset.item,box=root.querySelector('.pp-frame'),wm=root.querySelector('.pp-wm'),ov=root.querySelector('.pp-overlay'),msg=root.querySelector('.pp-msg'),acts=root.querySelector('.pp-actions'),endB=root.querySelector('[data-pp-end]'),fsB=root.querySelector('[data-pp-fs]'),stage=root.querySelector('.pp-stage');
 function rand(){var a=new Uint8Array(12);crypto.getRandomValues(a);return Array.prototype.map.call(a,function(b){return('0'+b.toString(16)).slice(-2)}).join('')}
 var TAB;try{TAB=sessionStorage.getItem('u100tab');if(!TAB){TAB=rand();sessionStorage.setItem('u100tab',TAB)}}catch(e){TAB=rand()}
 var S={sid:null,nonce:null,frame:null,origin:'',ready:false,playing:false,last:null,ranges:[],pos:0,dur:0,okAt:Date.now(),block:null,resume:0,wasPlaying:false,timer:null,lid:0};
@@ -41,10 +41,14 @@ function unblock(){S.block=null;hide()}
 function setPlaying(v){S.playing=v;root.classList.toggle('pp-live',v)}
 function cmd(m,v,l){if(!S.frame||!S.frame.contentWindow)return;var o={context:'player.js',version:'0.0.11',method:m};if(v!==undefined)o.value=v;if(l)o.listener=l;S.frame.contentWindow.postMessage(JSON.stringify(o),S.origin)}
 function teardown(){if(S.frame){S.frame.remove();S.frame=null}S.ready=false;setPlaying(false);S.last=null;clearTimeout(S.timer);endB.hidden=true;fsB.hidden=true}
-function claim(){teardown();show('Loading the lecture…');post('/play/claim',{lecture:LID,tab:TAB}).then(function(r){if(r.status===401){location.href='/sign-in?ended=idle&next='+encodeURIComponent(location.pathname);return null}return r.json()}).then(function(j){if(!j)return;handle(j)}).catch(function(){show('We couldn’t load the lecture. Check your connection.',[{label:'Try again',primary:true,fn:claim}])})}
+function claim(){teardown();show('Loading the lecture…');post('/play/claim',{item:ITEM,tab:TAB}).then(function(r){if(r.status===401){location.href='/sign-in?ended=idle&next='+encodeURIComponent(location.pathname);return null}return r.json()}).then(function(j){if(!j)return;handle(j)}).catch(function(){show('We couldn’t load the lecture. Check your connection.',[{label:'Try again',primary:true,fn:claim}])})}
 function handle(j){
+ if(j.state==='account'){location.href=j.url;return}
  if(j.state==='busy'){S.block='busy';show('Another lecture'+(j.title?' (“'+j.title+'”)':'')+' is open in another tab or window. Close it or press End Lecture there, then try again. A closed tab is released automatically within 2 minutes.',[{label:'Try again',primary:true,fn:claim}]);return}
- if(j.state==='locked'){S.block='locked';var b=[];if(j.request)b.push({label:j.requested?'Request sent':'Ask for more views',primary:true,fn:function(){if(j.requested)return;post('/play/request',{lecture:LID}).then(function(){j.requested=true;handle(j)})}});show('You have used all '+j.allowed+' views of this lecture'+(j.requested?'. Your request for more views has been sent to USMLE100.':'. You can ask USMLE100 for more views.'),b);return}
+ if(j.state==='locked'){S.block='locked';var b=[];if(j.request)b.push({label:j.requested?'Request sent':'Ask for more views',primary:true,fn:function(){if(j.requested)return;post('/play/request',{item:ITEM}).then(function(){j.requested=true;handle(j)})}});show('You have used all '+j.allowed+' views of this lecture'+(j.requested?'. Your request for more views has been sent to USMLE100.':'. You can ask USMLE100 for more views.'),b);return}
+ if(j.state==='sharing'){S.block='sharing';show(j.locked?'Your account has been locked because your lectures were played on two devices in different places at the same time. Please contact USMLE100.':'This lecture is already playing on another device in a different place. Your account is for you alone: a warning has been recorded, and a repeat will lock your account.',j.locked?[{label:'OK',primary:true,href:'/account/suspended'}]:[{label:'Try again',primary:true,fn:claim}]);return}
+ if(j.state==='redirect'){location.href=j.url;return}
+ if(j.state==='profile'){show('Before you watch, please add your phone number, the exam you’re preparing for and your graduation year.',[{label:'Complete my details',primary:true,href:'/account?next='+encodeURIComponent(location.pathname)}]);return}
  if(j.state==='novideo'){show(j.message||'The video for this lecture isn’t available yet.');return}
  if(j.state!=='ok'){show('This lecture isn’t available to you.');return}
  S.sid=j.sid;S.nonce=j.nonce;S.resume=j.pos||0;S.okAt=Date.now();
@@ -60,8 +64,9 @@ function add(a,b){var r=S.ranges[S.ranges.length-1];if(r&&Math.abs(r[1]-a)<0.01)
 function schedule(ms){clearTimeout(S.timer);S.timer=setTimeout(beat,ms)}
 var inflight=false;
 function beat(){if(!S.sid||!S.frame){return}if(inflight){schedule(2000);return}inflight=true;var sent=S.ranges.slice();var n=sent.length;
- post('/play/beat',{sid:S.sid,tab:TAB,nonce:S.nonce,playing:S.playing,pos:S.pos,dur:S.dur,add:sent}).then(function(r){if(r.status===401){location.href='/sign-in?ended=idle&next='+encodeURIComponent(location.pathname);return null}if(!r.ok)throw 0;return r.json()}).then(function(j){inflight=false;if(!j)return;S.ranges.splice(0,n);S.okAt=Date.now();
+ post('/play/beat',{sid:S.sid,tab:TAB,nonce:S.nonce,playing:S.playing,pos:S.pos,dur:S.dur,add:sent}).then(function(r){if(r.status===401){location.href='/sign-in?ended=idle&next='+encodeURIComponent(location.pathname);return null}if(!r.ok&&r.status!==403&&r.status!==503)throw 0;return r.json()}).then(function(j){inflight=false;if(!j)return;S.ranges.splice(0,n);S.okAt=Date.now();
   if(j.state==='ok'){if(S.block==='offline'){unblock()}schedule(S.playing?10000:30000);return}
+  if(j.state==='account'){location.href=j.url;return}
   if(j.state==='tab'){teardown();block('tab','This lecture was opened in another tab or window, so it stopped here.',[{label:'Watch here instead',primary:true,fn:claim}]);return}
   if(j.state==='done'){var why=j.reason==='expired'?'This viewing’s 24 hours have ended.':'You’ve watched 65% of this lecture, so this viewing is complete.';teardown();S.sid=null;block('done',why+' Starting again uses another view, and the lecture resumes where you stopped.',[{label:'Start another viewing',primary:true,fn:claim}]);return}
   teardown();block('gone','This lecture is no longer available to you.')}).catch(function(){inflight=false;

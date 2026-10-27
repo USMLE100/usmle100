@@ -1,3 +1,4 @@
+import { ProtectedPlayer } from '../views/player';
 import { Hono, type Context } from 'hono';
 import type { AppEnv, User } from '../lib/types';
 import { isStaff } from '../lib/types';
@@ -480,7 +481,6 @@ portal.get('/evening/:id', async (c) => {
   if (!e || (e.status !== 'live' && !isStaff(user))) return c.notFound();
   // Only the classes in the student's current month.
   if (!acc.staff && !acc.visible.has(e.id)) return c.redirect('/evening');
-  const src = e.bunny_video_id ? await bunnyEmbedUrl(c.env, e.bunny_video_id) : null;
   const watched = await c.env.DB.prepare('SELECT 1 FROM evening_progress WHERE user_id = ? AND session_id = ?').bind(user.id, e.id).first();
   return c.html(
     <PortalLayout shell={c.get('shell')} title={e.title} active="evening" user={user}>
@@ -489,14 +489,7 @@ portal.get('/evening/:id', async (c) => {
         <Eyebrow>{fmtDate(new Date(e.session_date + 'T00:00:00Z'), { weekday: 'long', month: 'long', day: 'numeric' })}</Eyebrow>
         <h1>{e.title}</h1>
       </div>
-      {src ? (
-        <div class="video-wrap">
-          <iframe src={src} title={e.title} loading="lazy" data-lecture allow="accelerometer; gyroscope; autoplay; encrypted-media" allowfullscreen></iframe>
-          <span class="watermark" aria-hidden="true">{user.email}</span>
-        </div>
-      ) : (
-        <Flash kind="error">{e.bunny_video_id ? 'This video can’t be played right now. Please try again later.' : 'The video for this session isn’t ready yet.'}</Flash>
-      )}
+      {e.bunny_video_id ? <ProtectedPlayer item={`E:${e.id}`} title={e.title} /> : <Flash kind="error">The video for this session isn’t ready yet.</Flash>}
       <section class="card" style="flex-direction:row;align-items:center;flex-wrap:wrap;gap:10px">
         {watched ? (
           <span class="tag" style="font-size:13px;padding:6px 12px"><Icon name="check_circle" size={16} />&nbsp;Watched</span>

@@ -76,3 +76,22 @@ export async function pruneLoginAttempts(db: D1Database) {
   const t = now();
   await db.prepare('DELETE FROM login_attempts WHERE window_start < ? AND (locked_until IS NULL OR locked_until < ?)').bind(t - WINDOW_SECONDS, t).run();
 }
+
+/**
+ * A general counter for other actions (sign-ups, question-bank paging, Course Book opening).
+ * Counts one hit and returns false once more than `max` hits fall within `windowSeconds`.
+ */
+export async function rateHit(db: D1Database, key: string, max: number, windowSeconds: number) {
+  const t = now();
+  const row = await db
+    .prepare(
+      `INSERT INTO login_attempts (key, failures, window_start) VALUES (?1, 1, ?2)
+       ON CONFLICT (key) DO UPDATE SET
+         failures = CASE WHEN window_start < ?3 THEN 1 ELSE failures + 1 END,
+         window_start = CASE WHEN window_start < ?3 THEN ?2 ELSE window_start END
+       RETURNING failures`,
+    )
+    .bind(key, t, t - windowSeconds)
+    .first<{ failures: number }>();
+  return (row?.failures ?? 0) <= max;
+}

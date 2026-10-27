@@ -1,6 +1,22 @@
--- Lecture viewing limits (R036-R071): free preview lectures, viewing sessions, one protected tab, extra views.
--- An admin marks lectures as free previews. Removing the mark revokes free access at once; view history is kept.
-ALTER TABLE lectures ADD COLUMN is_free INTEGER NOT NULL DEFAULT 0;
+-- Lecture viewing limits (R036-R071): free lectures, viewing sessions, one protected tab, extra views.
+-- Videos are named by an item key: 'L:<lecture id>' (course lecture), 'E:<evening id>' (Evening Questions class),
+-- 'F:<free_videos id>' (an entry in the owner's Free Lectures list).
+
+-- The Free Lectures list. Each entry points at a course lecture, an Evening class, or another Bunny video.
+-- Entries are never deleted: unpublishing removes free access at once and keeps everyone's view counts.
+CREATE TABLE free_videos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source TEXT NOT NULL UNIQUE,         -- 'L:12', 'E:5' or 'V:<bunny video id>'
+  title TEXT NOT NULL,
+  description TEXT,
+  category TEXT NOT NULL DEFAULT 'educational' CHECK (category IN ('sample', 'evening', 'educational', 'info')),
+  duration_seconds INTEGER,            -- only for 'V:' videos (others use their lecture's length)
+  sort INTEGER NOT NULL DEFAULT 0,
+  published INTEGER NOT NULL DEFAULT 0,
+  published_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_by INTEGER REFERENCES users(id)
+);
 
 -- One viewing session = at most one view. The 24-hour window starts when playback actually begins.
 -- A view is used when 65% of the video's unique content is watched in the session, or when a started
@@ -8,7 +24,7 @@ ALTER TABLE lectures ADD COLUMN is_free INTEGER NOT NULL DEFAULT 0;
 CREATE TABLE view_sessions (
   id TEXT PRIMARY KEY,                 -- random code, also shown in the watermark
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  lecture_id INTEGER NOT NULL REFERENCES lectures(id) ON DELETE CASCADE,
+  item TEXT NOT NULL,                  -- 'L:12' for a paid lecture, 'F:3' for a free list entry
   kind TEXT NOT NULL CHECK (kind IN ('free', 'paid')),
   enrollment_id INTEGER,
   created_at INTEGER NOT NULL,
@@ -22,15 +38,15 @@ CREATE TABLE view_sessions (
   counted_at INTEGER,
   counted_reason TEXT                  -- '65%' or 'expired'
 );
-CREATE INDEX view_sessions_user_lecture ON view_sessions(user_id, lecture_id, kind);
+CREATE INDEX view_sessions_user_item ON view_sessions(user_id, item, kind);
 
 -- Where the student stopped, so playback resumes at the exact point (R065).
-CREATE TABLE lecture_positions (
+CREATE TABLE video_positions (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  lecture_id INTEGER NOT NULL REFERENCES lectures(id) ON DELETE CASCADE,
+  item TEXT NOT NULL,
   seconds REAL NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL,
-  PRIMARY KEY (user_id, lecture_id)
+  PRIMARY KEY (user_id, item)
 );
 
 -- One protected lecture tab per account (R060-R062). Released by End Lecture, closing the tab,
@@ -39,8 +55,10 @@ CREATE TABLE play_tabs (
   user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   tab TEXT NOT NULL,
   nonce TEXT NOT NULL,
-  lecture_id INTEGER NOT NULL,
+  item TEXT NOT NULL,
   session_id TEXT,
+  device_hash TEXT,
+  ip TEXT,
   seen_at INTEGER NOT NULL
 );
 
@@ -48,7 +66,7 @@ CREATE TABLE play_tabs (
 CREATE TABLE view_grants (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  lecture_id INTEGER NOT NULL REFERENCES lectures(id) ON DELETE CASCADE,
+  item TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('free', 'paid')),
   enrollment_id INTEGER,
   extra INTEGER NOT NULL,
@@ -61,7 +79,7 @@ CREATE TABLE view_grants (
 CREATE TABLE view_requests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  lecture_id INTEGER NOT NULL REFERENCES lectures(id) ON DELETE CASCADE,
+  item TEXT NOT NULL,
   kind TEXT NOT NULL,
   note TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -77,5 +95,6 @@ CREATE TABLE book_view_sessions (
   chapter_id INTEGER NOT NULL,
   key TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  ip TEXT
+  ip TEXT,
+  used_at INTEGER
 );

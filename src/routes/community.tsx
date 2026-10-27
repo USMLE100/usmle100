@@ -1,3 +1,4 @@
+import { EXAMS } from '../lib/profile';
 import { Hono, type Context } from 'hono';
 import type { AppEnv, User } from '../lib/types';
 import { isAdmin, isStaff } from '../lib/types';
@@ -565,7 +566,6 @@ community.get('/plans', async (c) => {
 
 // ---------- Onboarding ----------
 
-const EXAMS = ['USMLE Step 1', 'USMLE Step 2', 'USMLE Step 3', 'COMLEX 1', 'COMLEX 2', 'COMLEX 3', 'CBSE', 'CCSE', 'COMP'];
 const WHEN: [string, string, number][] = [['1m', 'In 1 month', 30], ['3m', '3 months', 91], ['6m', '6 months', 182], ['1y', '1 year', 365]];
 
 community.get('/welcome', async (c) => {

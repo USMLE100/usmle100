@@ -1,5 +1,6 @@
 import { env, exports } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SIGNUP, cookies } from './owner';
 import { readChapter } from './reader';
 
 // Payments: Course Book checkout and package enrollment. Stripe's API is mocked; nothing reaches Stripe.
@@ -23,8 +24,8 @@ async function req(path: string, opts: { cookie?: string; form?: Record<string, 
 let n = 0;
 async function student(pkg: string | null = null) {
   const email = `pay${++n}@example.com`;
-  const res = await req('/sign-up', { form: { name: 'Pay Test', email, password: 'correct-horse-battery' } });
-  const cookie = (res.headers.get('set-cookie') ?? '').split(';')[0];
+  const res = await req('/sign-up', { form: { ...SIGNUP, email, password: 'correct-horse-battery' } });
+  const cookie = cookies(res);
   const u = (await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: number }>())!;
   if (pkg) await db.prepare("INSERT INTO enrollments (user_id, package_id, status, paid_at) VALUES (?, ?, 'active', datetime('now'))").bind(u.id, pkg).run();
   return { cookie, id: u.id, email };

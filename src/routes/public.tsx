@@ -1,10 +1,12 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../lib/types';
 import { PublicLayout, PortalLayout, Flash, LogoMark } from '../views/layout';
 import { Icon } from '../views/icons';
-import { createSession, destroySession, hashPassword, verifyPassword, requireUser } from '../lib/auth';
-import { accountLocked, clearFailures, unlockAccount, emailKey, ipKey, lockedFor, recordFailure } from '../lib/ratelimit';
+import { createSession, destroySession, hashPassword, verifyPassword, requireUser, sha256Hex } from '../lib/auth';
+import { checkDevice, deviceLabel, deviceToken, type DeviceCheck } from '../lib/devices';
+import { accountLocked, clearFailures, rateHit, unlockAccount, emailKey, ipKey, lockedFor, recordFailure } from '../lib/ratelimit';
 import { MIN_PASSWORD, passwordProblem } from '../lib/passwords';
+import { EXAMS, MARKETING_TEXT, gradYears, normalizePhone, validName } from '../lib/profile';
 import { audit } from '../lib/audit';
 import { consumeResetToken, resetTokenUser } from '../lib/reset';
 import { handleRefund, activateEnrollment, createCheckoutSession, fulfil, fulfilBookPurchase, retrieveCheckoutSession, verifyWebhook } from '../lib/stripe';
@@ -74,6 +76,8 @@ publicRoutes.get('/', async (c) => {
   const settings = await getSettings(c.env.DB);
   const pkgs = (await c.env.DB.prepare('SELECT price_cents FROM packages ORDER BY price_cents LIMIT 1').all<{ price_cents: number }>()).results;
   const from = pkgs[0] ? money(pkgs[0].price_cents) : null;
+  // Titles only: the videos themselves need an account (owner: register before watching anything).
+  const free = (await c.env.DB.prepare('SELECT id, title, category FROM free_videos WHERE published = 1 ORDER BY sort, id LIMIT 6').all<{ id: number; title: string; category: string }>()).results;
   return c.html(
     <PublicLayout title="Board prep, taught live by doctors" user={user} legal={{ terms: !!settings.terms_text, privacy: !!settings.privacy_text, refunds: !!settings.refund_text }}>
       <section class="hero hero-dark">
@@ -127,6 +131,25 @@ publicRoutes.get('/', async (c) => {
         </div>
       </section>
 
+      {free.length > 0 && (
+        <section class="ways" id="free-lectures">
+          <div class="wrap">
+            <h2>Watch free lectures</h2>
+            <p class="muted" style="margin-top:-8px">See how we teach before you enroll. Create a free account to watch.</p>
+            <div class="addons">
+              {free.map((f) => (
+                <a class="addon tile-green" href={user ? `/free-lectures/${f.id}` : `/sign-up?next=${encodeURIComponent('/free-lectures/' + f.id)}`}>
+                  <span class="ti"><Icon name="play" size={22} /></span>
+                  <h3>{f.title}</h3>
+                  <p>{f.category === 'info' ? 'About USMLE100' : f.category === 'evening' ? 'Evening Questions class' : f.category === 'sample' ? 'Sample class' : 'Free lecture'}</p>
+                  <span class="p">{user ? 'Watch now' : 'Free with an account'}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
       <section class="wrap" style="padding-bottom:56px">
         <div class="cta-band">
           <h2>Ready to start?</h2>
@@ -165,6 +188,10 @@ const FAQ = (p: { start: string | null }) => {
     ['Are these one-time payments?', 'Yes. Each package is a one-time enrollment price, not a subscription. Evening Questions bought on its own is paid month by month.'],
     ['How long is the program?', `100 days: 90 weekday lecture days, then a 10-weekday exam window.${p.start ? ` The next cohort starts on ${p.start}.` : ''}`],
     ['How long can I watch the lecture recordings?', 'Until 60 days after the last day of your program (Day 100).'],
+    [
+      'How many times can I watch each recording?',
+      'Recordings stream in your portal only; they can’t be downloaded. Each lecture can be watched up to 5 times per enrollment. A viewing counts once you’ve watched 65% of it, or 24 hours after you press play, and you can pause and come back within those 24 hours. Your name and account number appear on the video, and your account works on up to 2 registered devices.',
+    ],
     ['How do Evening Questions work?', 'Live question sessions on Monday, Wednesday and Friday evenings. Each month covers the next 12 classes from your start date, and you can rewatch them until 2 days after the 12th class goes up. Companion, Complete and MAX include 4 months.'],
     ['How many tutoring sessions are included?', 'Complete includes 10 private one-on-one sessions and MAX includes 40, each 60 minutes. Extra sessions are $50 each.'],
     ['Can I buy tutoring, Evening Questions or the Course Book separately?', 'Yes: one-on-one tutoring is $50 per session, Evening Questions is $160 per month and the Course Book is $199. Use the buttons above to ask us.'],
@@ -334,13 +361,27 @@ const PwField = (p: { label: string; name: string; autocomplete: string; minleng
 );
 const EYE_JS = `document.querySelectorAll('[data-eye]').forEach(function(b){b.addEventListener('click',function(){var i=b.previousElementSibling,show=i.type==='password';i.type=show?'text':'password';b.setAttribute('aria-label',show?'Hide password':'Show password');b.classList.toggle('on',show);});});`;
 
+/** Students may use 2 registered devices; staff are not limited but their device is still recorded. */
+async function deviceGate(c: Context<AppEnv>, userId: number, role: string): Promise<DeviceCheck> {
+  if (role !== 'student') return { ok: true, hash: await sha256Hex(deviceToken(c)) };
+  return checkDevice(c, userId);
+}
+const DEVICE_MSG: Record<'new' | 'pending' | 'declined', string> = {
+  new: 'This is a new device. Your account can be used on 2 registered devices and both are in use, so USMLE100 must approve replacing one. We’ve sent the request. Until it’s approved, please sign in on one of your registered devices.',
+  pending: 'This device is still waiting for USMLE100 to approve it. Until then, please sign in on one of your registered devices.',
+  declined: 'This device wasn’t approved for your account. Please sign in on one of your registered devices, or contact USMLE100.',
+};
+
 const ENDED: Record<string, string> = {
   idle: 'You were signed out after 30 minutes without activity. Please sign in again.',
   expired: 'For your security, sign-ins last at most 24 hours. Please sign in again.',
   out: 'You have been signed out.',
+  password: 'Your password was changed and you were signed out everywhere. Please sign in with your new password.',
+  revoked: 'That sign-in was ended. Please sign in again.',
 };
 
-const AuthPage = (p: { mode: 'in' | 'up'; error?: string; notice?: string; email?: string; name?: string; next?: string; user: any; contact?: string }) => (
+type SignupForm = { first?: string; last?: string; phone?: string; exam?: string; grad?: string; marketing?: boolean };
+const AuthPage = (p: { mode: 'in' | 'up'; error?: string; notice?: string; email?: string; name?: string; form?: SignupForm; next?: string; user: any; contact?: string }) => (
   <PublicLayout title={p.mode === 'in' ? 'Sign in' : 'Create account'} user={p.user} plain>
     <div class="auth">
       <AuthBrand />
@@ -352,17 +393,27 @@ const AuthPage = (p: { mode: 'in' | 'up'; error?: string; notice?: string; email
         <form method="post" class="stack" style="gap:14px">
           {p.next && <input type="hidden" name="next" value={p.next} />}
           {p.mode === 'up' && (
-            <label class="field">
-              Full name
-              <input type="text" name="name" required autocomplete="name" value={p.name ?? ''} />
-            </label>
+            <div class="grid" style="gap:12px">
+              <label class="field">First name<input type="text" name="first_name" required maxlength={60} autocomplete="given-name" value={p.form?.first ?? ''} /></label>
+              <label class="field">Last name<input type="text" name="last_name" required maxlength={60} autocomplete="family-name" value={p.form?.last ?? ''} /></label>
+            </div>
           )}
           <label class="field">
             Email
             <input type="email" name="email" required autocomplete="email" value={p.email ?? ''} />
           </label>
+          {p.mode === 'up' && (
+            <>
+              <label class="field">Mobile phone<input type="tel" name="phone" required autocomplete="tel" maxlength={25} placeholder="+1 555 123 4567" value={p.form?.phone ?? ''} /><span class="muted small" style="font-weight:500">Include your country code if you’re outside the US.</span></label>
+              <div class="grid" style="gap:12px">
+                <label class="field">Preparing for<select name="exam" required><option value="">Choose…</option>{EXAMS.map((e) => <option value={e} selected={p.form?.exam === e}>{e}</option>)}</select></label>
+                <label class="field">Graduation year<select name="grad_year" required><option value="">Choose…</option>{gradYears().map((y) => <option value={String(y)} selected={p.form?.grad === String(y)}>{y}</option>)}</select></label>
+              </div>
+            </>
+          )}
           <PwField label="Password" name="password" autocomplete={p.mode === 'up' ? 'new-password' : 'current-password'} minlength={p.mode === 'up' ? MIN_PASSWORD : undefined} />
           {p.mode === 'up' && <span class="muted small">At least {MIN_PASSWORD} characters. A short phrase of a few words works well.</span>}
+          {p.mode === 'up' && <label class="check"><input type="checkbox" name="marketing" value="1" checked={!!p.form?.marketing} /> {MARKETING_TEXT} (optional)</label>}
           {p.mode === 'in' && (
             <div class="auth-links">
               {p.contact && <a href={`mailto:${p.contact}?subject=${encodeURIComponent('USMLE100: password reset')}`}>Forgot your password?</a>}
@@ -390,24 +441,43 @@ const safeNext = (n: unknown) => (typeof n === 'string' && n.startsWith('/') && 
 publicRoutes.get('/sign-up', (c) => c.html(<AuthPage mode="up" user={c.get('user')} next={c.req.query('next')} />));
 publicRoutes.post('/sign-up', async (c) => {
   const f = await c.req.parseBody();
-  const name = String(f.name ?? '').trim();
+  const first = String(f.first_name ?? '').trim().replace(/\s+/g, ' ');
+  const last = String(f.last_name ?? '').trim().replace(/\s+/g, ' ');
   const email = String(f.email ?? '').trim().toLowerCase();
   const password = String(f.password ?? '');
-  const again = (error: string) => c.html(<AuthPage mode="up" error={error} email={email} name={name} user={null} next={typeof f.next === 'string' ? f.next : undefined} />, 400);
-  if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return again('Please enter your name and a valid email.');
+  const phoneRaw = String(f.phone ?? '');
+  const exam = String(f.exam ?? '');
+  const grad = String(f.grad_year ?? '');
+  const marketing = f.marketing === '1';
+  const form: SignupForm = { first, last, phone: phoneRaw, exam, grad, marketing };
+  const again = (error: string, status: 400 | 429 = 400) => c.html(<AuthPage mode="up" error={error} email={email} form={form} user={null} next={typeof f.next === 'string' ? f.next : undefined} />, status);
+  // Generous limit per network address, so a school network still works but bots can't flood the student list.
+  const ip = c.req.header('cf-connecting-ip') ?? null;
+  if (ip && !(await rateHit(c.env.DB, `signup:${ip}`, 10, 3600))) return again('Too many new accounts from your network in the last hour. Please try again later.', 429);
+  if (!validName(first) || !validName(last)) return again('Please enter your first and last name.');
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 254) return again('Please enter a valid email.');
+  const phone = normalizePhone(phoneRaw);
+  if (!phone) return again('Please enter a valid mobile number. Outside the US, start with + and your country code.');
+  if (!EXAMS.includes(exam)) return again('Please choose the exam you’re preparing for.');
+  if (!gradYears().includes(Number(grad))) return again('Please choose your graduation year.');
+  const name = `${first} ${last}`;
   const bad = await passwordProblem(password);
   if (bad) return again(bad);
   const exists = await c.env.DB.prepare('SELECT 1 FROM users WHERE email = ?').bind(email).first();
   if (exists) return again('An account with that email already exists. Try signing in.');
   // Public sign-up always creates a student. Faculty and admin roles are only given by an admin (Admin -> Team).
   const { hash, salt } = await hashPassword(password);
-  const r = await c.env.DB.prepare("INSERT INTO users (email, name, password_hash, password_salt, role) VALUES (?, ?, ?, ?, 'student')")
-    .bind(email, name, hash, salt)
+  const source = typeof f.next === 'string' && f.next.startsWith('/free-lectures') ? 'free-lectures' : typeof f.next === 'string' && f.next.startsWith('/buy/') ? 'course-book' : typeof f.next === 'string' && f.next.startsWith('/webinars') ? 'webinar' : 'sign-up';
+  const r = await c.env.DB.prepare(
+    `INSERT INTO users (email, name, password_hash, password_salt, role, first_name, last_name, phone, exam, grad_year, signup_source, marketing_opt_in, marketing_consent_at, marketing_consent_text)
+     VALUES (?, ?, ?, ?, 'student', ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? THEN datetime('now') END, ?)`,
+  )
+    .bind(email, name, hash, salt, first, last, phone, exam, Number(grad), source, marketing ? 1 : 0, marketing ? 1 : 0, marketing ? MARKETING_TEXT : null)
     .run();
-  await createSession(c, Number(r.meta.last_row_id));
+  await createSession(c, Number(r.meta.last_row_id), (await deviceGate(c, Number(r.meta.last_row_id), 'student')).hash);
   await audit(c.env.DB, { actorId: Number(r.meta.last_row_id), action: 'account.created', targetUserId: Number(r.meta.last_row_id), ip: c.req.header('cf-connecting-ip') ?? null });
-  // Someone who signed up to buy something specific (the Course Book) goes back to it.
-  return c.redirect(typeof f.next === 'string' && f.next.startsWith('/buy/') ? safeNext(f.next) : '/enroll');
+  // Someone who signed up for something specific (the Course Book, free lectures, a webinar) goes back to it.
+  return c.redirect(typeof f.next === 'string' && /^\/(buy|free-lectures|webinars)(\/|$)/.test(f.next) ? safeNext(f.next) : '/enroll');
 });
 
 const contactEmail = async (db: D1Database) => (await getSettings(db)).contact_email || undefined;
@@ -432,9 +502,9 @@ publicRoutes.post('/sign-in', async (c) => {
     const minutes = Math.max(1, Math.ceil(wait / 60));
     return c.html(<AuthPage mode="in" error={`Too many sign-in attempts. Please wait ${minutes} minute${minutes === 1 ? '' : 's'} and try again.`} email={email} user={null} contact={contact} />, 429);
   }
-  const u = await c.env.DB.prepare('SELECT id, password_hash, password_salt FROM users WHERE email = ?')
+  const u = await c.env.DB.prepare('SELECT id, role, password_hash, password_salt FROM users WHERE email = ?')
     .bind(email)
-    .first<{ id: number; password_hash: string; password_salt: string }>();
+    .first<{ id: number; role: string; password_hash: string; password_salt: string }>();
   const ok = u ? await verifyPassword(password, u.password_hash, u.password_salt) : (await hashPassword(password), false);
   if (!u || !ok) {
     const nowLocked = await recordFailure(c.env.DB, email, ip);
@@ -443,8 +513,14 @@ publicRoutes.post('/sign-in', async (c) => {
     return c.html(<AuthPage mode="in" error="That email and password don’t match." email={email} user={null} contact={contact} />, 401);
   }
   await clearFailures(c.env.DB, email);
-  await createSession(c, u.id);
-  await audit(c.env.DB, { actorId: u.id, action: 'signin.ok', targetUserId: u.id, ip });
+  const where = { country: c.req.header('cf-ipcountry') ?? null, device: deviceLabel(c.req.header('user-agent') ?? '') };
+  const dev = await deviceGate(c, u.id, u.role);
+  if (!dev.ok) {
+    await audit(c.env.DB, { actorId: u.id, action: 'signin.device_blocked', targetUserId: u.id, detail: { ...where, reason: dev.reason }, ip });
+    return c.html(<AuthPage mode="in" error={DEVICE_MSG[dev.reason]} email={email} user={null} contact={contact} />, 403);
+  }
+  await createSession(c, u.id, dev.hash);
+  await audit(c.env.DB, { actorId: u.id, action: 'signin.ok', targetUserId: u.id, detail: where, ip });
   return c.redirect(safeNext(f.next));
 });
 
@@ -508,7 +584,10 @@ publicRoutes.post('/reset-password', async (c) => {
   ]);
   // A reset link is made by an administrator, so using it also lifts a sign-in lock (R029).
   await unlockAccount(c.env.DB, u.email, null);
-  await createSession(c, u.id);
+  const role = (await c.env.DB.prepare('SELECT role FROM users WHERE id = ?').bind(u.id).first<{ role: string }>())?.role ?? 'student';
+  const dev = await deviceGate(c, u.id, role);
+  if (!dev.ok) return c.html(<AuthPage mode="in" notice={'Your new password is saved. ' + DEVICE_MSG[dev.reason]} user={null} />, 403);
+  await createSession(c, u.id, dev.hash);
   await audit(c.env.DB, { actorId: u.id, action: 'password.reset', targetUserId: u.id, ip: c.req.header('cf-connecting-ip') ?? null });
   return c.redirect('/dashboard');
 });
@@ -549,6 +628,7 @@ publicRoutes.get('/enroll', requireUser, async (c) => {
         <p class="small muted">
           Not sure which fits? <a href="/programs">Compare what each includes</a>.
         </p>
+        <ViewingTerms />
         {contact && <RefundContact email={contact} />}
       </main>
     </PublicLayout>,
@@ -622,6 +702,14 @@ const BookCheckout = (p: { user: any; owned: boolean; cancelled?: boolean; pendi
 );
 
 /** Refunds are decided by USMLE100 and issued by hand in Stripe; the site only tells students who to contact. */
+/** Disclosed before checkout (R053 hides remaining counts in the portal until a lecture locks, so they're explained here). */
+const ViewingTerms = () => (
+  <p class="small muted">
+    Lecture recordings stream in the portal only, with no downloads. Each lecture can be watched up to 5 times per enrollment; a viewing counts once you’ve watched 65% of it or 24
+    hours after you press play. Your account is for you alone and works on up to 2 registered devices.
+  </p>
+);
+
 const RefundContact = (p: { email: string }) => (
   <p class="small muted">To ask for a refund, email <a href={`mailto:${p.email}?subject=${encodeURIComponent('USMLE100: refund request')}`}>{p.email}</a>.</p>
 );

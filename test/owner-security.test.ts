@@ -1,7 +1,7 @@
 import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { readChapter } from './reader';
-import { makeOwner } from './owner';
+import { SIGNUP, cookies, makeOwner } from './owner';
 import { verifyAuditChain } from '../src/lib/audit';
 
 const BASE = 'https://usmle100.test';
@@ -21,22 +21,24 @@ async function req(path: string, opts: { cookie?: string; form?: Record<string, 
   }
   return worker.fetch(new Request(BASE + path, init));
 }
-const cookieOf = (res: Response) => (res.headers.get('set-cookie') ?? '').split(';')[0];
+const cookieOf = (res: Response) => cookies(res);
 const loc = (res: Response) => res.headers.get('location') ?? '';
 
 let n = 0;
 type Role = 'student' | 'faculty' | 'admin' | 'owner';
 async function account(role: Role = 'student', pkg: string | null = 'max') {
   const email = `os${++n}-${Date.now()}@example.com`;
-  const res = await req('/sign-up', { form: { name: `Owner Sec ${n}`, email, password: PASSWORD }, ip: `198.51.100.${(n % 200) + 1}` });
+  const res = await req('/sign-up', { form: { ...SIGNUP, email, password: PASSWORD }, ip: `198.51.100.${(n % 200) + 1}` });
   const cookie = cookieOf(res);
+  browser.set(email, cookie.split('; ').filter((c) => c.startsWith('u100_device=')).join('; '));
   const id = (await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: number }>())!.id;
   if (role === 'owner') await makeOwner(db, email);
   else if (role !== 'student') await db.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, id).run();
   if (role === 'student' && pkg) await db.prepare("INSERT INTO enrollments (user_id, package_id, status, paid_at) VALUES (?, ?, 'active', datetime('now'))").bind(id, pkg).run();
   return { email, cookie, id };
 }
-const signIn = async (email: string) => cookieOf(await req('/sign-in', { form: { email, password: PASSWORD }, ip: '192.0.2.200' }));
+const browser = new Map<string, string>();
+const signIn = async (email: string) => cookieOf(await req('/sign-in', { form: { email, password: PASSWORD }, ip: '192.0.2.200', cookie: browser.get(email) }));
 const sessionsOf = async (id: number) => (await db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?').bind(id).first<{ n: number }>())!.n;
 const statusOf = async (id: number) => (await db.prepare('SELECT status FROM users WHERE id = ?').bind(id).first<{ status: string }>())!.status;
 
@@ -148,13 +150,13 @@ describe('sessions (R088–R091)', () => {
 
 describe('passwords (R094)', () => {
   it('needs 12 characters and refuses breached passwords, at sign-up and reset', async () => {
-    const short = await req('/sign-up', { form: { name: 'A', email: `short${Date.now()}@example.com`, password: 'elevenchars' } });
+    const short = await req('/sign-up', { form: { ...SIGNUP, email: `short${Date.now()}@example.com`, password: 'elevenchars' } });
     expect(short.status).toBe(400);
     expect(await short.text()).toContain('at least 12 characters');
-    const breached = await req('/sign-up', { form: { name: 'A', email: `br${Date.now()}@example.com`, password: 'password12345' } });
+    const breached = await req('/sign-up', { form: { ...SIGNUP, email: `br${Date.now()}@example.com`, password: 'password12345' } });
     expect(breached.status).toBe(400);
     expect(await breached.text()).toContain('data breach');
-    expect((await req('/sign-up', { form: { name: 'A', email: `ok${Date.now()}@example.com`, password: 'a long passphrase here' } })).status).toBe(302);
+    expect((await req('/sign-up', { form: { ...SIGNUP, email: `ok${Date.now()}@example.com`, password: 'a long passphrase here' } })).status).toBe(302);
   });
 });
 
@@ -315,7 +317,7 @@ describe('Course Book reader (R005–R007)', () => {
     expect(r.bytes).toEqual(pdf);
     // What travels over the network is not a usable PDF.
     expect(new TextDecoder().decode(r.raw!.slice(0, 4))).not.toBe('%PDF');
-    expect(r.html).toContain(`data-name="Owner Sec`);
+    expect(r.html).toContain('data-name="Test Student"');
     expect(r.html).toContain(`data-account="${s.id}"`);
     expect(r.html).not.toContain('download');
     // The same session cannot fetch again, and another student cannot use it.

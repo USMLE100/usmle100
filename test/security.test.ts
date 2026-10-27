@@ -1,6 +1,6 @@
 import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { makeOwner } from './owner';
+import { SIGNUP, cookies, makeOwner } from './owner';
 
 const BASE = 'https://usmle100.test';
 const worker = (exports as any).default as { fetch: (r: Request) => Promise<Response> };
@@ -22,9 +22,9 @@ async function req(path: string, opts: { cookie?: string; form?: Record<string, 
 let n = 0;
 /** Create an account through the public sign-up form and return its session cookie. */
 async function signUp(email = `user${++n}@example.com`) {
-  const res = await req('/sign-up', { form: { name: 'Test User', email, password: 'correct-horse-battery' } });
-  const cookie = (res.headers.get('set-cookie') ?? '').split(';')[0];
-  expect(cookie).toMatch(/^u100_session=/);
+  const res = await req('/sign-up', { form: { ...SIGNUP, email, password: 'correct-horse-battery' } });
+  const cookie = cookies(res);
+  expect(cookie).toMatch(/u100_session=/);
   return { cookie, email };
 }
 
@@ -64,7 +64,7 @@ describe('sign-up never grants staff roles', () => {
 
   it('a role field sent with the sign-up form is ignored', async () => {
     const email = 'sneaky@example.com';
-    await req('/sign-up', { form: { name: 'S', email, password: 'correct-horse-battery', role: 'admin' } });
+    await req('/sign-up', { form: { ...SIGNUP, email, password: 'correct-horse-battery', role: 'admin' } });
     expect(await roleOf(email)).toBe('student');
   });
 });
@@ -156,8 +156,8 @@ describe('everyday sign-in still works', () => {
   it('a student can sign out and back in, and is asked to enroll before the portal', async () => {
     const { email } = await as('student');
     const res = await req('/sign-in', { form: { email, password: 'correct-horse-battery' } });
-    const cookie = (res.headers.get('set-cookie') ?? '').split(';')[0];
-    expect(cookie).toMatch(/^u100_session=/);
+    const cookie = cookies(res);
+    expect(cookie).toMatch(/u100_session=/);
     const dash = await req('/dashboard', { cookie });
     expect(dash.status).toBe(302);
     expect(dash.headers.get('location')).toBe('/enroll');
