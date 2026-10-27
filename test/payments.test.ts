@@ -211,3 +211,26 @@ describe('Course Book PDF storage', () => {
     expect(got.every((b, i) => b === big[i])).toBe(true);
   });
 });
+
+describe('cohort chosen before payment (owner: no silent wrong-class assignment)', () => {
+  it('shows the cohort, saves it with the checkout, activates into it, and refuses after the close day', async () => {
+    const ymd = (d: number) => new Date(Date.now() + d * 86400e3).toISOString().slice(0, 10);
+    const now = Number((await db.prepare("INSERT INTO cohorts (name, start_date) VALUES ('Now enrolling', ?)").bind(ymd(-14)).run()).meta.last_row_id);
+    await db.prepare("INSERT INTO cohorts (name, start_date) VALUES ('Future', ?)").bind(ymd(200)).run();
+    await db.prepare("INSERT INTO settings (key, value) VALUES ('enrolling_cohort_id', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(String(now)).run();
+    const s = await student();
+    const page = await (await req('/enroll', { cookie: s.cookie })).text();
+    expect(page).toContain('You’ll join Now enrolling, which started on');
+    expect(page).toContain('All earlier lecture recordings are included');
+    const r = await req('/enroll/max', { cookie: s.cookie, form: {} });
+    expect(r.status).toBe(303);
+    const e = (await db.prepare("SELECT id, cohort_id FROM enrollments WHERE user_id = ? AND status = 'pending'").bind(s.id).first<any>())!;
+    expect(e.cohort_id).toBe(now);
+    // Enrollment closes after Day 3: the cohort is past it.
+    await db.prepare("INSERT INTO settings (key, value) VALUES ('enroll_close_day', '3') ON CONFLICT (key) DO UPDATE SET value = excluded.value").run();
+    const s2 = await student();
+    expect(await (await req('/enroll', { cookie: s2.cookie })).text()).toContain('has closed');
+    expect((await req('/enroll/max', { cookie: s2.cookie, form: {} })).headers.get('location')).toBe('/enroll?closed=1');
+    await db.prepare("DELETE FROM settings WHERE key IN ('enroll_close_day', 'enrolling_cohort_id')").run();
+  });
+});

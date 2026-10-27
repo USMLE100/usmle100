@@ -13,6 +13,7 @@ import { handleRefund, activateEnrollment, createCheckoutSession, fulfil, fulfil
 import { BOOK_PRICE_CENTS, hasBook } from '../lib/book';
 import { currentCohort, dayDate, fmtDate, money, todayUtc, ymdToUtc } from '../lib/content';
 import { getSettings } from '../lib/settings';
+import { enrollingCohort, enrollingLine } from '../lib/enrolling';
 
 export type Pkg = { id: string; name: string; tagline: string; price_cents: number; one_on_one_sessions: number; evening_q_months: number; recommended: number };
 
@@ -603,6 +604,7 @@ publicRoutes.get('/enroll', requireUser, async (c) => {
   if (c.get('enrollment')) return c.redirect('/dashboard');
   const pkgs = (await c.env.DB.prepare('SELECT * FROM packages ORDER BY sort').all<Pkg>()).results;
   const contact = (await getSettings(c.env.DB)).contact_email || undefined;
+  const enrolling = await enrollingCohort(c.env.DB);
   return c.html(
     <PublicLayout title="Choose your program" user={c.get('user')}>
       <main class="wrap page stack" style="gap:18px;max-width:1000px">
@@ -612,6 +614,8 @@ publicRoutes.get('/enroll', requireUser, async (c) => {
           <p>Your portal unlocks as soon as payment goes through. Every package is a one-time payment.</p>
         </div>
         {c.req.query('cancelled') && <Flash kind="error">Payment was cancelled. You have not been charged.</Flash>}
+        {c.req.query('closed') && <Flash kind="error">Enrollment for this cohort has closed. Please contact us about the next one.</Flash>}
+        {enrolling && <section class={'card' + (enrolling.closed ? ' flash-error' : '')} style="flex-direction:row;gap:10px;align-items:center"><Icon name="calendar" size={22} /><p style="margin:0"><strong>{enrollingLine(enrolling)}</strong></p></section>}
         <div class="pkgs">
           {pkgs.map((p) => (
             <form method="post" action={`/enroll/${p.id}`} class={'card pkg' + (p.recommended ? ' rec' : '')}>
@@ -641,8 +645,13 @@ publicRoutes.post('/enroll/:pkg', requireUser, async (c) => {
   const pkg = await c.env.DB.prepare('SELECT * FROM packages WHERE id = ?').bind(c.req.param('pkg')).first<Pkg>();
   if (!pkg) return c.text('Not found', 404);
   if (!paymentsReady(c)) return c.text('Payments are not set up yet.', 503);
-  // The price is saved with the pending enrollment; payment must match it exactly.
-  const ins = await c.env.DB.prepare("INSERT INTO enrollments (user_id, package_id, status, amount_cents) VALUES (?, ?, 'pending', ?)").bind(user.id, pkg.id, pkg.price_cents).run();
+  const enrolling = await enrollingCohort(c.env.DB);
+  // With no cohort scheduled yet, the student is placed in the first one when payment is confirmed.
+  if (enrolling?.closed) return c.redirect('/enroll?closed=1');
+  // The price and the cohort shown on the page are saved with the pending enrollment; payment activates exactly these.
+  const ins = await c.env.DB.prepare("INSERT INTO enrollments (user_id, package_id, status, amount_cents, cohort_id) VALUES (?, ?, 'pending', ?, ?)")
+    .bind(user.id, pkg.id, pkg.price_cents, enrolling?.cohort.id ?? null)
+    .run();
   const enrollmentId = Number(ins.meta.last_row_id);
 
   const siteUrl = (c.env.SITE_URL || new URL(c.req.url).origin).replace(/\/$/, '');
@@ -676,7 +685,7 @@ const BookCheckout = (p: { user: any; owned: boolean; cancelled?: boolean; pendi
       <div class="page-head">
         <div class="eyebrow">Course Book</div>
         <h1>USMLE100 Course Book</h1>
-        <p>A structured companion resource supporting organised review of high-yield concepts: written chapters and PDF handouts, read online or downloaded, in your portal.</p>
+        <p>A structured companion resource supporting organised review of high-yield concepts: written chapters you read online in your portal, personalised to you. It can’t be downloaded or shared.</p>
       </div>
       {p.cancelled && <Flash kind="error">Payment was cancelled. You have not been charged.</Flash>}
       {p.pending && <Flash>We haven’t received confirmation of your payment yet. If you were charged, your book unlocks as soon as Stripe confirms it — refresh in a minute.</Flash>}

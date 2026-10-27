@@ -363,7 +363,7 @@ const PAGES: Hit[] = [
   { href: '/lectures/workbench', title: 'Workbench', detail: 'Build your own study session', icon: 'queue_add' },
   { href: '/lectures/path', title: 'Path', detail: 'Your progress through every subject', icon: 'route' },
   { href: '/topics', title: 'Topics', detail: 'High-yield sections with objectives', icon: 'menu_book' },
-  { href: '/course-book', title: 'USMLE100 Book', detail: 'Chapters and PDF handouts', icon: 'book' },
+  { href: '/course-book', title: 'USMLE100 Book', detail: 'Chapters to read online', icon: 'book' },
   { href: '/warmup', title: 'Daily Warmup', detail: '10 questions a day', icon: 'bolt' },
   { href: '/qbank', title: 'Question Bank', detail: 'Quick blocks and custom tests', icon: 'quiz' },
   { href: '/create-test', title: 'Create a Test', detail: 'Choose pools, subjects and systems', icon: 'filter' },

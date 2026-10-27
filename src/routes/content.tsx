@@ -355,7 +355,7 @@ content.get('/book', async (c) => {
   ]);
   return c.html(
     <PortalLayout shell={c.get('shell')} title="Admin: Course Book" active="admin-book" user={c.get('user')!} wide>
-      <PageHead eyebrow="Admin" title="USMLE100 Course Book" sub="Chapters with their PDF handouts. Companion, Complete and MAX students get the book. Give it to anyone else (the $199 Course Book on its own) below." />
+      <PageHead eyebrow="Admin" title="USMLE100 Course Book" sub="Chapters (uploaded as PDFs; students read them in the watermarked reader, with no download). Companion, Complete and MAX students get the book. Give it to anyone else (the $199 Course Book on its own) below." />
       <Msgs ok={c.req.query('ok')} error={c.req.query('error')} />
       <a class="btn btn-primary" href="/admin/book/new" style="align-self:flex-start"><Icon name="upload" size={18} />Add a chapter</a>
       <div class="table-box">

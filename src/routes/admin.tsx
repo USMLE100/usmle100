@@ -3,6 +3,7 @@ import type { AppEnv } from '../lib/types';
 import { isAdmin, isOwner } from '../lib/types';
 import { requireAdminOrFacultyAllowed } from '../lib/auth';
 import { audit } from '../lib/audit';
+import { enrollingCohort, enrollingLine } from '../lib/enrolling';
 import { createResetToken, RESET_LINK_SECONDS } from '../lib/reset';
 import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { currentCohort, dayDate, defaultLecturesUntil, fmtDate, LECTURE_DAYS_AFTER_END, LETTERS, todayUtc, ymdToUtc, type Cohort } from '../lib/content';
@@ -50,6 +51,10 @@ admin.get('/lectures', async (c) => {
   const meetingIds = (await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'zoom_meeting_ids'").first<{ value: string }>())?.value ?? '';
   const webhookUrl = new URL('/zoom/webhook', c.env.SITE_URL || c.req.url).toString();
   const adminUser = isAdmin(user);
+  const cohorts = (await c.env.DB.prepare('SELECT id, name, start_date FROM cohorts ORDER BY start_date DESC').all<{ id: number; name: string; start_date: string }>()).results;
+  const enrolling = await enrollingCohort(c.env.DB);
+  const closeSetting = (await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'enroll_close_day'").first<{ value: string }>())?.value ?? '';
+  const pinned = Number((await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'enrolling_cohort_id'").first<{ value: string }>())?.value) || 0;
   return c.html(
     <PortalLayout shell={c.get('shell')} title="Admin: lectures" active="admin-lectures" user={user}>
       <Eyebrow>Admin</Eyebrow>
@@ -68,6 +73,25 @@ admin.get('/lectures', async (c) => {
       ) : (
         <>
           <p class="muted">{cohort.name} · Day 1 is {fmtDate(dayDate(cohort, 1), { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} · last lecture (Day {cohort.lecture_days}) {fmtDate(dayDate(cohort, cohort.lecture_days), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · exam window ends {fmtDate(dayDate(cohort, cohort.total_days), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</p>
+          {adminUser && enrolling && (
+            <section class="card stack" id="enrolling">
+              <h2 style="margin:0">Enrollment</h2>
+              <p class="small" style="margin:0">Students see this before paying: <strong>{enrollingLine(enrolling)}</strong></p>
+              {isOwner(user) ? (
+                <form method="post" action="/admin/enrolling" class="row" style="align-items:flex-end">
+                  <label class="field" style="flex:1 1 220px">Cohort now enrolling
+                    <select name="cohort"><option value="">Newest cohort ({cohorts[0]?.name})</option>{cohorts.map((x) => <option value={String(x.id)} selected={pinned === x.id}>{x.name} · starts {x.start_date}</option>)}</select>
+                  </label>
+                  <label class="field" style="flex:0 1 200px">Enrollment closes after Day
+                    <input type="number" name="close_day" min="1" max="90" value={closeSetting} placeholder={`${enrolling.cohort.lecture_days} (last lecture)`} />
+                  </label>
+                  <button class="btn btn-outline" type="submit">Save</button>
+                </form>
+              ) : (
+                <p class="muted small" style="margin:0">Only the owner changes this.</p>
+              )}
+            </section>
+          )}
           <section class="card" id="zoom">
             <h2>Automatic Zoom import</h2>
             <p class="muted small">When a class recording finishes in your Zoom cloud, it is copied to Bunny privately and placed on that day’s lecture. Students see it only after the owner approves it below (one approval per recording).</p>
@@ -325,6 +349,20 @@ admin.post('/zoom-imports/:id/approve', async (c) => {
   ]);
   await audit(db, { actorId: me.id, action: decline ? 'recording.declined' : 'recording.approved', detail: { import: imp.id, lecture: imp.lecture_id, evening: imp.evening_session_id }, ip: c.req.header('cf-connecting-ip') ?? null });
   return c.redirect('/admin/lectures?ok=1#zoom');
+});
+
+/** Owner only (OWNER_ONLY): which cohort new purchases join, and the last day to join it. */
+admin.post('/enrolling', async (c) => {
+  const f = await c.req.parseBody();
+  const cohort = Number(f.cohort) || 0;
+  const close = Number(f.close_day) || 0;
+  const db = c.env.DB;
+  if (cohort && !(await db.prepare('SELECT 1 FROM cohorts WHERE id = ?').bind(cohort).first())) return c.redirect('/admin/lectures?error=1');
+  await db.batch([
+    db.prepare("INSERT INTO settings (key, value) VALUES ('enrolling_cohort_id', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(cohort ? String(cohort) : ''),
+    db.prepare("INSERT INTO settings (key, value) VALUES ('enroll_close_day', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(close >= 1 && close <= 90 ? String(close) : ''),
+  ]);
+  return c.redirect('/admin/lectures?ok=1#enrolling');
 });
 
 // ---------- Team (admin only): who is faculty or admin ----------
