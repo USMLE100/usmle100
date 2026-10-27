@@ -493,6 +493,7 @@ security.get('/requests', async (c) => {
   if (me.role !== 'admin') return c.text('Not found', 404);
   const db = c.env.DB;
   const owner = isOwner(me);
+  const waiting = (await db.prepare("SELECT COUNT(*) AS n FROM zoom_imports WHERE approved_at IS NULL AND declined_at IS NULL AND status <> 'failed' AND (lecture_id IS NOT NULL OR evening_session_id IS NOT NULL)").first<{ n: number }>())?.n ?? 0;
   const [devices, contacts, privacy, alerts, flags] = await Promise.all([
     db
       .prepare(
@@ -516,6 +517,13 @@ security.get('/requests', async (c) => {
       <h1>Requests and alerts</h1>
       {c.req.query('ok') && <Flash>{c.req.query('ok')}</Flash>}
       {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
+
+      {waiting > 0 && (
+        <section class="card row" style="justify-content:space-between;align-items:center">
+          <strong>{waiting} class recording{waiting === 1 ? '' : 's'} waiting for approval</strong>
+          <a class="btn btn-primary btn-sm" href="/admin/lectures#zoom">Review</a>
+        </section>
+      )}
 
       <section class="card stack">
         <h2 style="margin:0">Alerts</h2>

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../lib/types';
 import { isAdmin, isOwner } from '../lib/types';
 import { requireAdminOrFacultyAllowed } from '../lib/auth';
+import { audit } from '../lib/audit';
 import { createResetToken, RESET_LINK_SECONDS } from '../lib/reset';
 import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { currentCohort, dayDate, defaultLecturesUntil, fmtDate, LECTURE_DAYS_AFTER_END, LETTERS, todayUtc, ymdToUtc, type Cohort } from '../lib/content';
@@ -69,7 +70,7 @@ admin.get('/lectures', async (c) => {
           <p class="muted">{cohort.name} · Day 1 is {fmtDate(dayDate(cohort, 1), { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} · last lecture (Day {cohort.lecture_days}) {fmtDate(dayDate(cohort, cohort.lecture_days), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · exam window ends {fmtDate(dayDate(cohort, cohort.total_days), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</p>
           <section class="card" id="zoom">
             <h2>Automatic Zoom import</h2>
-            <p class="muted small">When a class recording finishes in your Zoom cloud, it is copied to Bunny and attached to that day’s lecture. It goes live for students when Bunny has finished preparing it, usually 10–30 minutes later.</p>
+            <p class="muted small">When a class recording finishes in your Zoom cloud, it is copied to Bunny privately and placed on that day’s lecture. Students see it only after the owner approves it below (one approval per recording).</p>
             {adminUser && <>
             <ul class="small" style="margin:0;padding-left:18px">
               <li>Bunny connection: {c.env.BUNNY_API_KEY ? <strong>connected</strong> : <span class="chip chip-rust">add BUNNY_API_KEY in Cloudflare</span>}</li>
@@ -82,12 +83,12 @@ admin.get('/lectures', async (c) => {
               </label>
               <button class="btn btn-outline" type="submit">Save</button>
             </form>
-            <p class="muted small">{meetingIdList(meetingIds).length ? 'Recordings of this meeting become that day’s lecture and go live on their own. Other meetings are ignored, except the Evening Questions meeting.' : 'Add your lecture meeting ID so lectures go live on their own.'} <a href="/admin/evening">Evening Questions meeting →</a></p>
+            <p class="muted small">{meetingIdList(meetingIds).length ? 'Recordings of this meeting are placed on that day’s lecture and wait for the owner’s approval. Other meetings are ignored, except the Evening Questions meeting.' : 'Add your lecture meeting ID so recordings are placed on the right day.'} <a href="/admin/evening">Evening Questions meeting →</a></p>
             </>}
             {imports.length > 0 && (
               <div class="table-box">
                 <table class="t">
-                  <thead><tr><th scope="col">Recording</th><th scope="col">Status</th><th scope="col">Day</th></tr></thead>
+                  <thead><tr><th scope="col">Recording</th><th scope="col">Status</th><th scope="col">Day</th><th scope="col">Approval</th></tr></thead>
                   <tbody>
                     {imports.map((i: any) => {
                       const lec = lectures.find((l: any) => l.id === i.lecture_id);
@@ -112,6 +113,27 @@ admin.get('/lectures', async (c) => {
                                   <button class="btn btn-ghost" type="submit">Use as evening class</button>
                                 </form>
                               </div>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td>
+                            {i.approved_at ? (
+                              <span class="chip">Approved</span>
+                            ) : i.declined_at ? (
+                              <span class="chip chip-gray">Declined</span>
+                            ) : (lec || i.evening_date) && i.status !== 'failed' ? (
+                              isOwner(user) ? (
+                                <form method="post" action={`/admin/zoom-imports/${i.id}/approve`} class="stack" style="gap:6px">
+                                  <span class="small">Publish as {lec ? `Lecture Day ${lec.day_number}` : 'the evening class'} of {i.start_time ? new Date(i.start_time).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'that day'} ET?</span>
+                                  <div class="row" style="gap:6px">
+                                    <button class="btn btn-primary btn-sm" type="submit" name="decision" value="approve">Approve</button>
+                                    <button class="btn btn-ghost btn-sm" type="submit" name="decision" value="decline">Decline</button>
+                                  </div>
+                                </form>
+                              ) : (
+                                <span class="chip chip-sand">Waiting for the owner</span>
+                              )
                             ) : (
                               '—'
                             )}
@@ -242,16 +264,16 @@ admin.post('/zoom-imports/:id/assign', async (c) => {
   const day = Number(f.day);
   const imp = await db.prepare('SELECT * FROM zoom_imports WHERE id = ?').bind(Number(c.req.param('id'))).first<any>();
   if (!cohort || !imp || !Number.isInteger(day) || day < 1 || day > cohort.lecture_days) return c.redirect('/admin/lectures');
-  const ready = imp.status === 'ready' && imp.bunny_video_id;
+  // Choosing the day doesn't publish it: the owner approves the recording for that day (a new choice needs a new approval).
   let lec = await db.prepare('SELECT id FROM lectures WHERE cohort_id = ? AND day_number = ?').bind(cohort.id, day).first<{ id: number }>();
   if (lec) {
-    await db.prepare('UPDATE lectures SET bunny_video_id = ?, status = ? WHERE id = ?').bind(imp.bunny_video_id, ready ? 'live' : 'processing', lec.id).run();
+    await db.prepare("UPDATE lectures SET bunny_video_id = ?, status = 'processing' WHERE id = ?").bind(imp.bunny_video_id, lec.id).run();
   } else {
-    const r = await db.prepare('INSERT INTO lectures (cohort_id, day_number, title, zoom_url, bunny_video_id, status) VALUES (?, ?, ?, ?, ?, ?)')
-      .bind(cohort.id, day, imp.topic || `Day ${day} lecture`, imp.share_url, imp.bunny_video_id, ready ? 'live' : 'processing').run();
+    const r = await db.prepare("INSERT INTO lectures (cohort_id, day_number, title, zoom_url, bunny_video_id, status) VALUES (?, ?, ?, ?, ?, 'processing')")
+      .bind(cohort.id, day, imp.topic || `Day ${day} lecture`, imp.share_url, imp.bunny_video_id).run();
     lec = { id: Number(r.meta.last_row_id) };
   }
-  await db.prepare("UPDATE zoom_imports SET lecture_id = ?, evening_session_id = NULL, auto_live = 1, note = NULL, updated_at = datetime('now') WHERE id = ?").bind(lec.id, imp.id).run();
+  await db.prepare("UPDATE zoom_imports SET lecture_id = ?, evening_session_id = NULL, approved_at = NULL, approved_by = NULL, note = NULL, updated_at = datetime('now') WHERE id = ?").bind(lec.id, imp.id).run();
   return c.redirect('/admin/lectures?ok=1#zoom');
 });
 
@@ -261,18 +283,48 @@ admin.post('/zoom-imports/:id/assign-evening', async (c) => {
   const imp = await db.prepare('SELECT * FROM zoom_imports WHERE id = ?').bind(Number(c.req.param('id'))).first<any>();
   if (!imp) return c.redirect('/admin/lectures');
   const date = new Date(todayUtc(new Date(imp.start_time || Date.now()))).toISOString().slice(0, 10);
-  const ready = imp.status === 'ready' && imp.bunny_video_id;
   let ev = await db.prepare('SELECT id FROM evening_sessions WHERE session_date = ?').bind(date).first<{ id: number }>();
   if (ev) {
-    await db.prepare("UPDATE evening_sessions SET bunny_video_id = ?, status = ?, live_at = CASE WHEN ?2 = 'live' THEN COALESCE(live_at, datetime('now')) END WHERE id = ?").bind(imp.bunny_video_id, ready ? 'live' : 'processing', ev.id).run();
+    await db.prepare("UPDATE evening_sessions SET bunny_video_id = ?, status = 'processing' WHERE id = ?").bind(imp.bunny_video_id, ev.id).run();
   } else {
     const label = fmtDate(new Date(date + 'T00:00:00Z'), { weekday: 'long', month: 'long', day: 'numeric' });
-    const r = await db.prepare("INSERT INTO evening_sessions (session_date, title, zoom_url, bunny_video_id, status, live_at) VALUES (?, ?, ?, ?, ?5, CASE WHEN ?5 = 'live' THEN datetime('now') END)")
-      .bind(date, `Evening Questions · ${label}`, imp.share_url, imp.bunny_video_id, ready ? 'live' : 'processing').run();
+    const r = await db.prepare("INSERT INTO evening_sessions (session_date, title, zoom_url, bunny_video_id, status) VALUES (?, ?, ?, ?, 'processing')")
+      .bind(date, `Evening Questions · ${label}`, imp.share_url, imp.bunny_video_id).run();
     ev = { id: Number(r.meta.last_row_id) };
   }
-  await db.prepare("UPDATE zoom_imports SET evening_session_id = ?, lecture_id = NULL, auto_live = 1, note = NULL, updated_at = datetime('now') WHERE id = ?").bind(ev.id, imp.id).run();
+  await db.prepare("UPDATE zoom_imports SET evening_session_id = ?, lecture_id = NULL, approved_at = NULL, approved_by = NULL, note = NULL, updated_at = datetime('now') WHERE id = ?").bind(ev.id, imp.id).run();
   return c.redirect('/admin/evening?ok=1');
+});
+
+/**
+ * Owner only (OWNER_ONLY): the one approval that publishes an imported recording where it was placed
+ * ("Lecture Day 14 · Wed Nov 12 — approve?"). If Bunny is still preparing it, it goes live as soon as it's ready.
+ */
+admin.post('/zoom-imports/:id/approve', async (c) => {
+  const db = c.env.DB;
+  const me = c.get('user')!;
+  const imp = await db.prepare('SELECT * FROM zoom_imports WHERE id = ?').bind(Number(c.req.param('id'))).first<any>();
+  if (!imp || (!imp.lecture_id && !imp.evening_session_id)) return c.redirect('/admin/lectures?error=1#zoom');
+  const decline = (await c.req.parseBody()).decision === 'decline';
+  const ready = imp.status === 'ready' && imp.bunny_video_id;
+  await db.batch([
+    decline
+      ? db.prepare("UPDATE zoom_imports SET declined_at = datetime('now'), approved_at = NULL, updated_at = datetime('now') WHERE id = ?").bind(imp.id)
+      : db.prepare("UPDATE zoom_imports SET approved_at = datetime('now'), approved_by = ?, declined_at = NULL, updated_at = datetime('now') WHERE id = ?").bind(me.id, imp.id),
+    ...(decline
+      ? [
+          db.prepare("UPDATE lectures SET status = 'processing' WHERE id = ? AND bunny_video_id = ?").bind(imp.lecture_id, imp.bunny_video_id),
+          db.prepare("UPDATE evening_sessions SET status = 'processing' WHERE id = ? AND bunny_video_id = ?").bind(imp.evening_session_id, imp.bunny_video_id),
+        ]
+      : ready
+        ? [
+            db.prepare("UPDATE lectures SET status = 'live' WHERE id = ? AND bunny_video_id = ?").bind(imp.lecture_id, imp.bunny_video_id),
+            db.prepare("UPDATE evening_sessions SET status = 'live', live_at = COALESCE(live_at, datetime('now')) WHERE id = ? AND bunny_video_id = ?").bind(imp.evening_session_id, imp.bunny_video_id),
+          ]
+        : []),
+  ]);
+  await audit(db, { actorId: me.id, action: decline ? 'recording.declined' : 'recording.approved', detail: { import: imp.id, lecture: imp.lecture_id, evening: imp.evening_session_id }, ip: c.req.header('cf-connecting-ip') ?? null });
+  return c.redirect('/admin/lectures?ok=1#zoom');
 });
 
 // ---------- Team (admin only): who is faculty or admin ----------

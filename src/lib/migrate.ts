@@ -14,6 +14,8 @@ import m0013 from '../../migrations/0013_refunds.sql';
 import m0014 from '../../migrations/0014_owner_security.sql';
 import m0015 from '../../migrations/0015_viewing.sql';
 import m0016 from '../../migrations/0016_accounts.sql';
+import m0017 from '../../migrations/0017_recording_approval.sql';
+import m0018 from '../../migrations/0018_webinars.sql';
 
 /**
  * Database migrations run by the Worker itself on first request, so deploys
@@ -36,6 +38,8 @@ const MIGRATIONS: [string, string][] = [
   ['0014_owner_security', m0014],
   ['0015_viewing', m0015],
   ['0016_accounts', m0016],
+  ['0017_recording_approval', m0017],
+  ['0018_webinars', m0018],
 ];
 
 function statements(sql: string): string[] {

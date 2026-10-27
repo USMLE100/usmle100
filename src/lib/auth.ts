@@ -229,6 +229,7 @@ const OWNER_ONLY: RegExp[] = [
   /^\/admin\/views\/(grant|dismiss)$/,
   /^\/admin\/free-lectures\/\d+\/publish$/,
   /^\/admin\/requests\/privacy\/\d+$/,
+  /^\/admin\/zoom-imports\/\d+\/approve$/,
 ];
 export const ownerOnly = (method: string, path: string) => method === 'POST' && OWNER_ONLY.some((re) => re.test(path.replace(/\/+$/, '')));
 

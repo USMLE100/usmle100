@@ -56,6 +56,7 @@ export function PublicLayout(props: { title: string; user: User | null; children
           <Wordmark />
           <nav aria-label="Main" class="pub-nav">
             <a class="lnk hide-sm" href="/programs">Programs</a>
+            <a class="lnk hide-sm" href="/webinars">Webinars</a>
             {props.user ? (
               <a class="btn btn-primary" href="/dashboard">
                 Open portal
@@ -110,6 +111,7 @@ const groups = (staff: boolean, admin: boolean): { label: string; items: NavItem
     items: [
       { key: 'lectures', label: 'My Courses', href: '/lectures', icon: 'play_circle' },
       { key: 'free-lectures', label: 'Free Lectures', href: '/free-lectures', icon: 'live' },
+      { key: 'webinars', label: 'Live webinars', href: '/webinars', icon: 'videocam' },
       { key: 'topics', label: 'Topics', href: '/topics', icon: 'menu_book' },
       { key: 'book-library', label: 'USMLE100 Book', href: '/course-book', icon: 'book' },
       { key: 'warmup', label: 'Daily Warmup', href: '/warmup', icon: 'bolt' },
@@ -151,6 +153,7 @@ const groups = (staff: boolean, admin: boolean): { label: string; items: NavItem
                   { key: 'admin-security', label: 'Security', href: '/admin/security', icon: 'shield' as IconName },
                   { key: 'admin-views', label: 'Lecture views', href: '/admin/views', icon: 'play_circle' as IconName },
                   { key: 'admin-free', label: 'Free lectures', href: '/admin/free-lectures', icon: 'live' as IconName },
+                  { key: 'admin-webinars', label: 'Webinars', href: '/admin/webinars', icon: 'videocam' as IconName },
                   { key: 'admin-agreement', label: 'Student agreement', href: '/admin/agreement', icon: 'description' as IconName },
                 ]
               : []),

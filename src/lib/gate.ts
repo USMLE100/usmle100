@@ -10,7 +10,7 @@ import { isOwner, isStaff } from './types';
  * - Students must sign the current agreement (R012) before using the portal.
  * Staff are exempt from lockdown and the agreement; the owner can never be suspended.
  */
-const PUBLIC_EXACT = new Set(['/', '/programs', '/terms', '/privacy', '/refunds', '/sign-in', '/sign-up', '/sign-out', '/reset-password', '/stripe/webhook', '/styles.css', '/favicon.ico']);
+const PUBLIC_EXACT = new Set(['/', '/programs', '/terms', '/privacy', '/refunds', '/sign-in', '/sign-up', '/sign-out', '/reset-password', '/stripe/webhook', '/styles.css', '/favicon.ico', '/webinars']);
 const isPublic = (p: string) => PUBLIC_EXACT.has(p) || /\.[a-z0-9]{2,5}$/i.test(p);
 const isCheckout = (p: string) => p === '/enroll' || p.startsWith('/enroll/') || p.startsWith('/buy/');
 const isSession = (p: string) => p.startsWith('/session/');

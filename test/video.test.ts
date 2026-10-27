@@ -3,12 +3,23 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { importRecording, syncImports } from '../src/lib/zoom';
 import { syncDurations } from '../src/lib/catalog';
 import { ensureMigrated } from '../src/lib/migrate';
+import { SIGNUP, cookies, makeOwner } from './owner';
 
 // Zoom → Bunny → lecture, with Zoom and Bunny mocked. This checks USMLE100's own logic, not the real services.
 const e = env as any;
 const db = e.DB as D1Database;
 const worker = (exports as any).default as { fetch: (r: Request) => Promise<Response> };
 afterEach(() => vi.restoreAllMocks());
+
+let n = 0;
+async function account(role: 'admin' | 'owner') {
+  const email = `video${++n}-${Date.now()}@example.com`;
+  const res = await worker.fetch(new Request('https://usmle100.test/sign-up', { method: 'POST', body: new URLSearchParams({ ...SIGNUP, email, password: 'correct-horse-battery' }), headers: { origin: 'https://usmle100.test', 'content-type': 'application/x-www-form-urlencoded' }, redirect: 'manual' }));
+  const cookie = cookies(res);
+  if (role === 'owner') await makeOwner(db, email);
+  else await db.prepare("UPDATE users SET role = 'admin' WHERE email = ?").bind(email).run();
+  return { cookie };
+}
 
 const recording = (meetingId: string, start: string, fileId: string) => ({
   download_token: 'zoom-download-token',
@@ -22,7 +33,7 @@ const recording = (meetingId: string, start: string, fileId: string) => ({
 });
 
 describe('Zoom recording to lecture', () => {
-  it('a lecture recording is sent to Bunny, attached to that day, goes live when ready, and gets its length', async () => {
+  it('a lecture recording is sent to Bunny, attached to that day, waits for the owner’s approval, then goes live, and gets its length', async () => {
     await ensureMigrated(db);
     await db.prepare("INSERT INTO cohorts (name, start_date) VALUES ('Video test', '2026-10-05')").run();
     await db.prepare("INSERT INTO settings (key, value) VALUES ('zoom_meeting_ids', '11122233344') ON CONFLICT (key) DO UPDATE SET value = excluded.value").run();
@@ -59,8 +70,18 @@ describe('Zoom recording to lecture', () => {
     await syncDurations(e);
     const after = (await db.prepare('SELECT * FROM lectures WHERE id = ?').bind(lec.id).first<any>())!;
     expect(after.bunny_video_id).toBe('guid-123');
-    expect(after.status).toBe('live');
     expect(after.duration_seconds).toBe(13512);
+    // Ready, but students see nothing until the owner's one approval.
+    expect(after.status).toBe('processing');
+    expect(await db.prepare("SELECT 1 FROM staff_alerts WHERE kind = 'recording.approval'").first()).not.toBeNull();
+    const imp = (await db.prepare("SELECT id FROM zoom_imports WHERE zoom_file_id = 'file-1'").first<{ id: number }>())!;
+    const owner = await account('owner');
+    const admin = await account('admin');
+    const approve = (cookie: string) =>
+      worker.fetch(new Request(`https://usmle100.test/admin/zoom-imports/${imp.id}/approve`, { method: 'POST', body: new URLSearchParams({ decision: 'approve' }), headers: { cookie, origin: 'https://usmle100.test', 'content-type': 'application/x-www-form-urlencoded' }, redirect: 'manual' }));
+    expect((await approve(admin.cookie)).status).toBe(403);
+    expect((await approve(owner.cookie)).status).toBe(302);
+    expect((await db.prepare('SELECT status FROM lectures WHERE id = ?').bind(lec.id).first<any>())!.status).toBe('live');
   });
 
   it('recordings of other meetings are ignored once class meeting IDs are saved', async () => {

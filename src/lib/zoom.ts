@@ -138,6 +138,11 @@ export async function importRecording(env: Env, payload: any) {
     .run();
   if (!ins.meta.changes) return;
   const importId = Number(ins.meta.last_row_id);
+  // Nothing is published until the owner approves it (one approval per recording).
+  await db
+    .prepare("INSERT INTO staff_alerts (level, kind, message) VALUES ('info', 'recording.approval', ?)")
+    .bind(`New Zoom recording “${topic}” is waiting for your approval in Admin → Lectures.`)
+    .run();
 
   const fail = (why: string) => db.prepare("UPDATE zoom_imports SET status = 'failed', note = ?, updated_at = datetime('now') WHERE id = ?").bind(why, importId).run();
   if (!env.BUNNY_API_KEY || !env.BUNNY_LIBRARY_ID) return fail('The Bunny API key is not set in Cloudflare yet.');
@@ -198,10 +203,10 @@ export async function syncImports(env: Env) {
     if (READY.includes(video.status)) {
       await db.batch([
         db.prepare("UPDATE zoom_imports SET status = 'ready', updated_at = datetime('now') WHERE id = ?").bind(imp.id),
-        ...(imp.auto_live && imp.lecture_id
+        ...(imp.approved_at && imp.lecture_id
           ? [db.prepare("UPDATE lectures SET status = 'live' WHERE id = ? AND bunny_video_id = ?").bind(imp.lecture_id, vid)]
           : []),
-        ...(imp.auto_live && imp.evening_session_id
+        ...(imp.approved_at && imp.evening_session_id
           ? [db.prepare("UPDATE evening_sessions SET status = 'live', live_at = COALESCE(live_at, datetime('now')) WHERE id = ? AND bunny_video_id = ?").bind(imp.evening_session_id, vid)]
           : []),
       ]);
