@@ -170,7 +170,16 @@ npx wrangler dev       # local site; add .dev.vars with DEV_FAKE_PAYMENTS=1 to t
 - **Tests and checks:**
   - `test/environment.test.ts` (11 tests);
   - a local simulation with `wrangler dev --var ENVIRONMENT:preview`: an old production-like copy answered 503 and was left untouched (25 tables before and after, no migrations applied); an empty database answered 200, was migrated to 75 tables and marked development.
-- **Setup:** `scripts/setup-staging.sh`. The owner runs it once after `npx wrangler login`.
+- **Database:** `usmle100-dev` (`7cf62a77-9fc6-46ab-b9fa-bdf16f5dcef3`). The owner created it in the dashboard on 28 Oct and it is bound under `[[previews.d1_databases]]`.
+- **`npm run check:staging`** (also part of `npm test`) reads `wrangler.toml` the way Wrangler does. It fails if a Preview could reach the production database, or if any live storage binding is not re-bound for Previews.
+- **Captured upload (28 Oct):** `wrangler preview --name v12-frontend` was run against a local stand-in for Cloudflare's API (no real token; nothing reached Cloudflare). The upload carried exactly these bindings:
+  - `DB` = d1 `usmle100-dev` / `7cf62a77…`;
+  - `ENVIRONMENT=preview`;
+  - empty `BUNNY_LIBRARY_ID`;
+  - `PREVIEW_ALLOW_ZOOM=0`.
+
+  The production database id appeared nowhere. Settings from the dashboard's "Previews Base" are added by Cloudflare's servers and aren't visible in this test; the runtime guards cover them.
+- **Setup:** the remaining staging secrets are added in the dashboard under Settings → Variables and secrets → **Previews Base** (or with `scripts/setup-staging.sh` from a computer).
 - Never change the branch build command to `wrangler versions upload`: that uploads a version of the production Worker with production bindings.
 
 ## Secrets and accounts

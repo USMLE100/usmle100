@@ -15,7 +15,10 @@ All real-service testing happens on an isolated staging **Preview**, never on th
 - **Bunny:** the Bunny API key is ignored if it points at the live library (785730). Staging uses its own library.
 - Previews have no crons and send `X-Robots-Tag: noindex`.
 
-**Status today:** preview builds are **off**, and that is safe. If they were turned on without this branch's settings, Wrangler stops with "missing a `previews` block", so nothing would deploy.
+**Status (28 Oct):**
+- Preview builds are **off**.
+- The staging database `usmle100-dev` exists and is bound for Previews, verified by `npm run check:staging`.
+- Remaining before turning previews on: the staging secrets (at least the Stripe **test** key) in Settings → Variables and secrets → **Previews Base**. You can add them from a phone.
 
 **What you do, once (about 15 minutes):**
 1. On your computer, in the repository on branch `v12-frontend`:

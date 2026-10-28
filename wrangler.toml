@@ -63,13 +63,12 @@ BUNNY_LIBRARY_ID = ""
 # "1" only after the owner approves testing recording approval with a staging Zoom app.
 PREVIEW_ALLOW_ZOOM = "0"
 
-# The development database. Create it once (it starts empty; the Worker builds the tables on first visit):
-#   npx wrangler d1 create usmle100-dev
-# then paste its database_id below. Until then, preview builds fail instead of running.
+# The development database usmle100-dev (created by the owner 28 Oct 2026, empty; the Worker builds its tables
+# on first visit). Never put the production id (d1ff7fee-…) here: `npm run check:staging` fails if anyone does.
 [[previews.d1_databases]]
 binding = "DB"
 database_name = "usmle100-dev"
-database_id = "REPLACE_WITH_USMLE100_DEV_DATABASE_ID"
+database_id = "7cf62a77-9fc6-46ab-b9fa-bdf16f5dcef3"
 migrations_dir = "migrations"
 
 # Error and request logs in the Cloudflare dashboard (Workers → usmle100 → Logs). Free.

@@ -67,6 +67,10 @@ No integration is claimed to work against the real service.
 - If it is ever bound to the production database, it stops **before** migrations.
 - Live Stripe keys, Zoom, Sender and live-library Bunny write keys are removed outside production.
 
+**Update (28 Oct):** the owner created `usmle100-dev` (`7cf62a77-9fc6-46ab-b9fa-bdf16f5dcef3`), and it is now bound for Previews.
+- `npm run check:staging` passes. With the production id swapped in as a deliberate test, it fails 3 checks.
+- A captured `wrangler preview` upload (against a local stand-in for Cloudflare's API, nothing sent) bound `DB` to `usmle100-dev` only, with `ENVIRONMENT=preview`. The production database id was absent.
+
 **Not yet verified on Cloudflare itself:**
 - the effective bindings of a real Preview;
 - how the dashboard "Previews Base" interacts with the config file.
