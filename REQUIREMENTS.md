@@ -1,6 +1,6 @@
 # USMLE100 requirements checklist
 
-Branch `v12-frontend`. Last updated 27 Oct 2026. Nothing here is merged or deployed.
+Branch `v12-frontend`. Last updated 28 Oct 2026. Nothing here is merged or deployed.
 
 **Sources**
 - **Conv** — the owner's 197-page conversation export, pages 1–124: V12 design, Phase 1/2 features, payments, refunds, Free Lectures, registration, webinars, Zoom approval and cohorts.
@@ -15,9 +15,9 @@ Branch `v12-frontend`. Last updated 27 Oct 2026. Nothing here is merged or deplo
 - **Not built**: deliberately not built; the reason is given.
 
 **Test files** live in `test/`:
-- 13 automated files, 128 tests (`npm test`).
+- 14 automated files, 141 tests (`npm test`).
 - Browser checks in the local preview: a 109-page review, 26 end-to-end workflows, and 17 player checks with a stand-in Bunny player.
-- Every external service (Stripe, Bunny, Zoom, Resend, Twilio, Sender) is simulated in tests. Real-service checks are listed in LAUNCH.md.
+- Every external service (Stripe, Bunny, Zoom, Resend, Twilio, Sender) is **simulated** in tests. None has yet been tested against the real service: that needs staging credentials (LAUNCH.md §0 and §8).
 
 ## A. Ownership, administration and staff
 
@@ -176,7 +176,8 @@ Branch `v12-frontend`. Last updated 27 Oct 2026. Nothing here is merged or deplo
 |---|---|---|---|---|
 | Tamper-evident security and financial log, 24 months, chain check on the Security page | R010, Bus. Q3 | `lib/audit` | owner-security | Done |
 | Owner-controlled deletion (anonymises; keeps payment records); data copy on request | p134, add. Q6 | Admin → Requests & alerts | accounts | Done |
-| Backups: point-in-time restore to any minute (D1 Time Travel, 7 days free / 30 days paid) | Q5 (RPO 1 h, RTO 12 h) | HANDOVER "Backups" | — | Owner: a separate encrypted export to R2 needs approval; test restores regularly |
+| Backups: point-in-time restore to any minute (D1 Time Travel, 7 days free / 30 days paid) | Q5 (RPO 1 h, RTO 12 h) | HANDOVER "Backups" | local drill 28 Oct: two-file export/restore, fingerprints identical | Local drill done. Plain exports don't replay; fixed with `scripts/make-restore-file.mjs`. **Owner**: remote and Time Travel drills on `usmle100-dev` need Cloudflare access; a separate encrypted export to R2 needs approval |
+| Isolated staging: Preview with its own database, test-only Stripe, no Zoom/Sender, no live Bunny writes, refuses the production database before migrating | owner 27–28 Oct | `lib/environment`, `wrangler.toml [previews]`, `scripts/setup-staging.sh` | environment (11), local preview simulation | Done in code. **Owner**: run `scripts/setup-staging.sh`, then turn on preview builds (LAUNCH §0) |
 | Secrets only in Cloudflare; nothing in the repository | Conv | HANDOVER | — | Done |
 | Privacy Policy and Terms text | Conv p98 | Admin → Site settings | — | Owner (attorney) |
 

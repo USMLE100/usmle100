@@ -22,6 +22,7 @@ migrations_dir = "migrations"
 crons = ["*/5 * * * *"]
 
 [vars]
+ENVIRONMENT = "production"
 BUNNY_LIBRARY_ID = "785730"
 # SITE_URL = "https://usmle100.com"   # uncomment once usmle100.com points at this Worker (see LAUNCH.md)
 # Secrets (Cloudflare dashboard → Worker → Settings → Variables and Secrets, type "Secret"; never committed):
@@ -34,6 +35,42 @@ BUNNY_LIBRARY_ID = "785730"
 #   { pattern = "usmle100.com", custom_domain = true },
 #   { pattern = "www.usmle100.com", custom_domain = true },
 # ]
+
+# ---------------------------------------------------------------------------------------------------------
+# Worker Previews (Cloudflare "preview builds" for branches other than main; `npx wrangler preview`).
+# Previews do NOT inherit anything above: they get only what is listed here, plus Preview secrets.
+# No crons, routes or custom domains run on Previews.
+#
+# Safety (src/lib/environment.ts), because ENVIRONMENT is not "production" here:
+#   - only Stripe TEST keys (sk_test_/rk_test_) work; a live key is ignored, so no real card can be charged;
+#   - Zoom and the Sender marketing sync are off; the Bunny API key is ignored for the live video library;
+#   - the Worker refuses to run (before any migration) on a database marked production or one that already
+#     holds accounts, so a Preview can never read or change live student records.
+#
+# Preview secrets (Stripe TEST keys only) are set with:
+#   npx wrangler preview base-config secret put STRIPE_SECRET_KEY       (sk_test_...)
+#   npx wrangler preview base-config secret put STRIPE_WEBHOOK_SECRET   (from a Stripe test-mode webhook)
+#   npx wrangler preview base-config secret put BUNNY_TOKEN_KEY         (the STAGING library's token key)
+#   optional: BUNNY_API_KEY (staging library), RESEND_API_KEY + EMAIL_FROM (test sender)
+# scripts/setup-staging.sh does all of this interactively (values are never printed or committed).
+# Never set DEV_FAKE_PAYMENTS on a Preview (it only works on plain http anyway).
+# ---------------------------------------------------------------------------------------------------------
+[previews.vars]
+ENVIRONMENT = "preview"
+# A separate Bunny Stream library for staging (its own token key and allowed domains). Empty = videos off on previews.
+# Fill in with scripts/setup-staging.sh or by hand; never the live library 785730 (its API key would be ignored anyway).
+BUNNY_LIBRARY_ID = ""
+# "1" only after the owner approves testing recording approval with a staging Zoom app.
+PREVIEW_ALLOW_ZOOM = "0"
+
+# The development database. Create it once (it starts empty; the Worker builds the tables on first visit):
+#   npx wrangler d1 create usmle100-dev
+# then paste its database_id below. Until then, preview builds fail instead of running.
+[[previews.d1_databases]]
+binding = "DB"
+database_name = "usmle100-dev"
+database_id = "REPLACE_WITH_USMLE100_DEV_DATABASE_ID"
+migrations_dir = "migrations"
 
 # Error and request logs in the Cloudflare dashboard (Workers → usmle100 → Logs). Free.
 [observability]

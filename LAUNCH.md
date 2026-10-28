@@ -3,10 +3,50 @@
 Each step below needs a real account, key or domain, so it is done by the owner in a dashboard. The code for every step is already in place on the `v12-frontend` branch.
 Never paste keys into chat, email or GitHub. In Cloudflare, always add keys as type **Secret**.
 
+## 0. Staging first (isolated Preview for `v12-frontend`)
+
+All real-service testing happens on an isolated staging **Preview**, never on the live Worker. Previews are Cloudflare's per-branch copies of the Worker. They get **only** the settings in the `[previews…]` part of `wrangler.toml` plus Preview secrets, never the production database, secrets, crons or domain.
+
+**Built-in safety** (`src/lib/environment.ts`, tested in `test/environment.test.ts`). These hold even if a production key is copied into Preview settings by mistake:
+- The live Worker has `ENVIRONMENT = "production"`; Previews have `"preview"`.
+- **Database:** a Preview refuses to start, **before running any migration**, if its database is marked production or already holds accounts it didn't create. It answers 503 and changes nothing. A brand-new database is marked "development" on first visit.
+- **Stripe:** only test keys (`sk_test_`/`rk_test_`) work. A live key is ignored, so payments show "not set up" and no real card can be charged.
+- **Zoom and Sender** (marketing sync) are off on Previews. Zoom can be opted in later with `PREVIEW_ALLOW_ZOOM = "1"`, only with your approval.
+- **Bunny:** the Bunny API key is ignored if it points at the live library (785730). Staging uses its own library.
+- Previews have no crons and send `X-Robots-Tag: noindex`.
+
+**Status today:** preview builds are **off**, and that is safe. If they were turned on without this branch's settings, Wrangler stops with "missing a `previews` block", so nothing would deploy.
+
+**What you do, once (about 15 minutes):**
+1. On your computer, in the repository on branch `v12-frontend`:
+   - run `npx wrangler login`;
+   - then run `bash scripts/setup-staging.sh`.
+
+   It creates the empty `usmle100-dev` database and writes its id into `wrangler.toml`. It then asks for test credentials. What you type is hidden and never saved to disk or git. Press Enter to skip any of them:
+   - **Stripe test** secret key, `sk_test_…`. A live key is refused.
+   - **Stripe test** webhook secret. You can add it in step 3.
+   - **Bunny staging library**: its id, token key and API key. Create a separate library in Bunny first. This needs your OK because Bunny bills storage and bandwidth.
+   - **Resend** key and test sender.
+
+   It then creates the Preview `v12-frontend`, prints its URL and runs 4 checks: page answers, hidden from search, unsigned webhook refused, database marked development.
+2. Commit the changed `wrangler.toml` (the dev database id) to `v12-frontend` and push. Ask Claude to do it if you prefer.
+3. **Stripe test mode** → Developers → Webhooks → Add endpoint:
+   - URL: `<preview URL>/stripe/webhook`;
+   - events: the six in step 1.3.
+
+   Then run `npx wrangler preview secret put STRIPE_WEBHOOK_SECRET --name v12-frontend` and paste its `whsec_…`.
+4. **Cloudflare dashboard** → Workers & Pages → usmle100 → Settings:
+   - **Variables and secrets / Bindings → "Previews Base":** do **not** import production values. The safe state is empty or test-only. The guards above ignore production keys anyway, but don't rely on that.
+   - **Build → Builds for non-production branches:** turn it on. Keep the preview command `npx wrangler preview`. Do **not** change it to `npx wrangler versions upload`: that command uploads a version of the live Worker with the **production** database and secrets.
+   - Optional: protect the preview URLs with Cloudflare Access (Zero Trust, free for up to 50 users) so only you and reviewers can open staging.
+5. Push any commit to `v12-frontend`. The build log should end with a Preview URL. Open it: the site works, and it starts with an empty database.
+
+**Do not** turn on preview builds before step 1 has finished with "Staging is ready".
+
 ## 1. Stripe (payments)
 
-1. In the Stripe Dashboard, get the **secret key**: a test-mode key (`sk_test_…`) to try things out first, then the live key (`sk_live_…`).
-2. Add it in Cloudflare → Workers & Pages → usmle100 → Settings → Variables and Secrets, type Secret, named `STRIPE_SECRET_KEY`.
+1. **Test mode happens on staging** (step 0): its test key and test webhook go on the Preview only. The live key (`sk_live_…`) goes on production only at launch, after your approval.
+2. At launch, add the live key in Cloudflare → Workers & Pages → usmle100 → Settings → Variables and Secrets (Production), type Secret, named `STRIPE_SECRET_KEY`.
 3. In Stripe → Developers → Webhooks → Add endpoint:
    - **URL:** `https://<site address>/stripe/webhook`. Today that is `https://usmle100.info-usmle100.workers.dev/stripe/webhook`; it becomes `https://usmle100.com/stripe/webhook` once the domain is connected.
    - **Events:** `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `charge.refunded`, `charge.dispute.created`, `charge.dispute.closed` and `charge.dispute.funds_reinstated`.
@@ -109,12 +149,13 @@ Until these keys exist, the following stay off:
 
 ## 8. Before going live
 
-1. Write down the current time for a possible database rollback (see `HANDOVER.md` → Backups).
-2. Make sure `DEV_FAKE_PAYMENTS` is **not** set in Cloudflare.
-3. Merge `v12-frontend` into `main` (this deploys; database changes apply automatically).
-4. Do the real-service checks:
-   - Stripe test purchases and refund (step 1);
-   - the Bunny checks (step 3.5);
-   - one Zoom recording (step 4);
-   - then switch Stripe to live keys.
-5. Consider making the GitHub repository private, and turn on 2-factor sign-in for Cloudflare, GitHub, Stripe, Bunny and Zoom.
+1. On **staging** (step 0), do the real-service checks with test credentials, before any merge:
+   - Stripe test purchases (package and Course Book), a full refund and a test dispute (step 1);
+   - the Bunny checks on the staging library (step 3.5);
+   - one Zoom recording through approval, only if you opted staging into Zoom (step 4);
+   - email codes and password reset through Resend (step 6).
+2. Write down the current time for a possible database rollback (see `HANDOVER.md` → Backups).
+3. Make sure `DEV_FAKE_PAYMENTS` is **not** set in Cloudflare (Production).
+4. With your approval only: merge `v12-frontend` into `main`. This deploys, and database changes apply automatically. The live Worker then marks its database "production", so no Preview can ever start on it.
+5. Add the live Stripe key and the live webhook (step 1). Then do one small real purchase and refund it.
+6. Consider making the GitHub repository private, and turn on 2-factor sign-in for Cloudflare, GitHub, Stripe, Bunny and Zoom.

@@ -9,6 +9,7 @@ import { zoom } from './routes/zoom';
 import { loadUser, pruneSessions, sameOrigin } from './lib/auth';
 import { loadShell } from './lib/shell';
 import { ensureMigrated } from './lib/migrate';
+import { checkDatabase, isProduction, markDatabase, safeEnv } from './lib/environment';
 import { publicRoutes } from './routes/public';
 import { portal } from './routes/portal';
 import { admin } from './routes/admin';
@@ -50,8 +51,13 @@ app.use(
   }),
 );
 app.use('*', async (c, next) => {
+  // A preview must never touch the production database (lib/environment): checked before any migration runs.
+  const refuse = await checkDatabase(c.env);
+  if (refuse) return c.text(refuse, 503);
   await ensureMigrated(c.env.DB);
+  await markDatabase(c.env);
   await next();
+  if (!isProduction(c.env)) c.header('X-Robots-Tag', 'noindex, nofollow');
 });
 app.use('*', loadUser);
 app.use('*', sameOrigin);
@@ -103,11 +109,13 @@ app.onError((err, c) => {
 });
 
 export default {
-  fetch: app.fetch,
+  // Previews get a fenced-off copy of the settings: no live Stripe key, Zoom or marketing sync (lib/environment).
+  fetch: (req: Request, env: Env, ctx: ExecutionContext) => app.fetch(req, safeEnv(env), ctx),
   /** Every few minutes: link Zoom recordings that Bunny has copied and put finished ones live. */
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
+  async scheduled(_event: ScheduledController, rawEnv: Env, ctx: ExecutionContext) {
+    const env = safeEnv(rawEnv);
     ctx.waitUntil(
-      ensureMigrated(env.DB).then(() => Promise.all([syncImports(env).then(() => syncDurations(env)), pruneLoginAttempts(env.DB), pruneResetTokens(env.DB), pruneAudit(env.DB), retryNotices(env).catch(console.error), emailStaffAlerts(env).catch(console.error), syncMarketing(env).catch(console.error), escalateCases(env.DB).catch(console.error), pruneSessions(env.DB).catch(console.error)])),
+      checkDatabase(env).then(async (refuse) => refuse ? undefined : ensureMigrated(env.DB).then(() => markDatabase(env)).then(() => Promise.all([syncImports(env).then(() => syncDurations(env)), pruneLoginAttempts(env.DB), pruneResetTokens(env.DB), pruneAudit(env.DB), retryNotices(env).catch(console.error), emailStaffAlerts(env).catch(console.error), syncMarketing(env).catch(console.error), escalateCases(env.DB).catch(console.error), pruneSessions(env.DB).catch(console.error)]))),
     );
   },
 };

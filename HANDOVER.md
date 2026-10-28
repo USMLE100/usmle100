@@ -135,7 +135,43 @@ npx wrangler dev       # local site; add .dev.vars with DEV_FAKE_PAYMENTS=1 to t
   3. Check the latest Stripe events against enrollments and Course Book purchases.
   4. Check lecture-view records for activity after the restore point. Students may need views restored through Admin → Lecture views.
   5. Turn the lockdown off.
-- **Restore test:** about every 3 months, export the database and import it into a scratch database (`wrangler d1 create usmle100-restore-test`, then `wrangler d1 execute ... --file`). Then compare row counts.
+- **Exports need two files.** A plain `wrangler d1 export` **cannot be replayed as is**. Found in the 28 Oct drill: `no such table: main.sections`. Some tables gained a column that points at a table created later, so the rows arrive before that table exists. Always export schema and data separately and build a restore file:
+  ```
+  npx wrangler d1 export <db> --remote --no-data   --output schema.sql
+  npx wrangler d1 export <db> --remote --no-schema --output data.sql
+  node scripts/make-restore-file.mjs schema.sql data.sql restore.sql
+  npx wrangler d1 execute <new empty db> --remote --file restore.sql
+  ```
+  Any nightly export job (above) must save both files.
+- **Proving a restore:** `node scripts/db-fingerprint.mjs <db> --local|--remote --out x.json` records every table's row count and SHA-256, plus the payment, enrollment, refund, dispute and lecture-view figures. Then `node scripts/db-fingerprint.mjs --compare before.json after.json` must print IDENTICAL. It is read-only and refuses to read the production database remotely.
+- **Drill, 28 Oct 2026** (local D1 in Wrangler 4.151.3; disposable test data):
+  - data: 74 tables, 11 users, 7 enrollments (1 refunded), 2 Course Book purchases, 1 refund, 1 dispute, 13 lecture-progress rows and 3 lecture-view sessions;
+  - export took 4.6 s;
+  - the plain export failed to replay; the two-file restore succeeded (476 statements, 3.7 s);
+  - fingerprints: IDENTICAL across all 74 tables and all reconciliation figures;
+  - counters correct, no foreign-key errors;
+  - the site served `/` and `/sign-in` from the restored copy.
+- **Not yet verified** (needs Cloudflare access; run on `usmle100-dev` once staging exists):
+  - a remote export/restore;
+  - a D1 Time Travel restore. The steps: fingerprint, write test rows, `time-travel restore usmle100-dev --timestamp=<before>`, fingerprint again and compare.
+  - Remote timings will be longer than local ones. The 12-hour RTO and 1-hour RPO rest on Time Travel's documented per-minute restore, which has not yet been timed here.
+- **Restore test:** about every 3 months, run the two-file restore into a scratch database (`wrangler d1 create usmle100-restore-test`) and compare fingerprints. Never restore into `usmle100` except as a deliberate rollback.
+
+## Staging (Worker Previews)
+
+- **What runs there:** branch builds run `npx wrangler preview`, which creates the Preview `v12-frontend`.
+  - Its settings come only from `[previews.vars]` and `[[previews.d1_databases]]` in `wrangler.toml`, plus Preview secrets.
+  - Its database is `usmle100-dev`.
+  - No crons, routes or custom domains run on it.
+- **The guards** are in `src/lib/environment.ts` (see LAUNCH.md §0):
+  - `safeEnv` removes live Stripe keys, Zoom, Sender and live-library Bunny write keys.
+  - `checkDatabase` runs before migrations and refuses a production or unknown non-empty database.
+  - `markDatabase` marks the live database "production" and new staging databases "development".
+- **Tests and checks:**
+  - `test/environment.test.ts` (11 tests);
+  - a local simulation with `wrangler dev --var ENVIRONMENT:preview`: an old production-like copy answered 503 and was left untouched (25 tables before and after, no migrations applied); an empty database answered 200, was migrated to 75 tables and marked development.
+- **Setup:** `scripts/setup-staging.sh`. The owner runs it once after `npx wrangler login`.
+- Never change the branch build command to `wrangler versions upload`: that uploads a version of the production Worker with production bindings.
 
 ## Secrets and accounts
 

@@ -3,6 +3,10 @@ export type Env = {
   ASSETS: Fetcher;
   /** Public address, e.g. https://usmle100.com. If unset, taken from each request. */
   SITE_URL?: string;
+  /** "production" on the live Worker, "preview" on Worker Previews (wrangler.toml). Anything else is treated as a test environment. */
+  ENVIRONMENT?: string;
+  /** Previews only: "1" lets a preview use Zoom credentials (for testing recording approval with a staging Zoom app). */
+  PREVIEW_ALLOW_ZOOM?: string;
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   BUNNY_LIBRARY_ID?: string;
