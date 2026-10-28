@@ -91,3 +91,23 @@ describe('a preview never runs on the production database', () => {
     expect(res.headers.get('x-robots-tag')).toBe('noindex, nofollow');
   });
 });
+
+describe('staging status page', () => {
+  it('does not exist in production', async () => {
+    const res = await worker.fetch(new Request('https://x.example/__staging'), base, ctx);
+    expect(res.status).toBe(404);
+  });
+  it('on a preview, reports modes but never a key', async () => {
+    await setMark('development');
+    const res = await worker.fetch(new Request('https://preview.example/__staging'), preview({ STRIPE_SECRET_KEY: 'rk_test_secretvalue', BUNNY_LIBRARY_ID: '' }), ctx);
+    const text = await res.text();
+    expect(res.status).toBe(200);
+    expect(JSON.parse(text)).toMatchObject({ environment: 'preview', stripe: 'test mode (restricted key)', bunny: 'off', zoom: 'off' });
+    expect(text).not.toContain('secretvalue');
+  });
+  it('a live key on a preview shows as not set', async () => {
+    await setMark('development');
+    const res = await worker.fetch(new Request('https://preview.example/__staging'), preview({ STRIPE_SECRET_KEY: 'sk_live_abc' }), ctx);
+    expect((await res.json() as any).stripe).toBe('not set');
+  });
+});

@@ -59,6 +59,22 @@ app.use('*', async (c, next) => {
   await next();
   if (!isProduction(c.env)) c.header('X-Robots-Tag', 'noindex, nofollow');
 });
+// Staging only: what this Preview is connected to, so it can be checked from a phone. Never shows a key.
+app.get('/__staging', (c) => {
+  if (isProduction(c.env)) return c.notFound();
+  const e = c.env;
+  return c.json({
+    environment: e.ENVIRONMENT ?? null,
+    database: 'development (checked before this page loaded)',
+    stripe: e.STRIPE_SECRET_KEY ? (e.STRIPE_SECRET_KEY.startsWith('rk_test_') ? 'test mode (restricted key)' : 'test mode') : 'not set',
+    stripe_webhook: e.STRIPE_WEBHOOK_SECRET ? 'set' : 'not set',
+    bunny: e.BUNNY_LIBRARY_ID ? `staging library ${e.BUNNY_LIBRARY_ID}` + (e.BUNNY_API_KEY ? ' (API key set)' : '') : 'off',
+    zoom: e.ZOOM_CLIENT_SECRET || e.ZOOM_WEBHOOK_SECRET ? 'on (owner opted in)' : 'off',
+    email: e.RESEND_API_KEY && e.EMAIL_FROM ? 'on' : 'off',
+    sms: e.TWILIO_AUTH_TOKEN ? 'on' : 'off',
+    marketing_sync: 'off',
+  });
+});
 app.use('*', loadUser);
 app.use('*', sameOrigin);
 // Top-bar and menu data (study streak, lecture progress) for signed-in page views.
