@@ -3,19 +3,31 @@ import type { Shell, User } from '../lib/types';
 import { isAdmin, isStaff } from '../lib/types';
 import { Icon, type IconName } from './icons';
 
-/** The USMLE100 "U" mark: a heavy U with an emerald dot (no white line through it). */
-export const LogoMark = (p: { size?: number; light?: boolean }) => (
-  <svg class="logo-u" width={(p.size ?? 32) * 0.8125} height={p.size ?? 32} viewBox="0 0 26 32" aria-hidden="true">
-    <path d="M4 1.5v15.5a9 9 0 0 0 18 0V1.5" fill="none" stroke={p.light ? '#ffffff' : '#232220'} stroke-width="6" />
-    <circle cx="13" cy="19.5" r="3.6" fill={p.light ? '#9fd8bf' : '#2e936f'} />
-  </svg>
-);
+/** The official USMLE100 "U" mark (traced from the owner's logo): split U with the gold dot. */
+export const LogoMark = (p: { size?: number; light?: boolean }) => {
+  const h = p.size ?? 32;
+  return <img class="logo-u" src={p.light ? '/brand/mark-light.svg' : '/brand/mark.svg'} width={Math.round((h * 198) / 243)} height={h} alt="" />;
+};
 
+/** The official "USMLE100" wordmark ("100" in the brand gold), traced from the owner's logo. */
+export const LogoWord = (p: { height?: number; light?: boolean }) => {
+  const h = p.height ?? 20;
+  return <img class="logo-word" src={p.light ? '/brand/wordmark-light.svg' : '/brand/wordmark.svg'} width={Math.round((h * 905) / 135)} height={h} alt="USMLE100" />;
+};
+
+export const LogoTagline = (p: { height?: number; light?: boolean }) => {
+  const h = p.height ?? 14;
+  return <img class="logo-tag" src={p.light ? '/brand/tagline-light.svg' : '/brand/tagline.svg'} width={Math.round((h * 690) / 52)} height={h} alt="Get In. Get Out. Get Licensed." />;
+};
+
+/** The full lockup from the owner's logo: mark | wordmark with the tagline underneath. */
 const Wordmark = () => (
-  <a href="/" class="logo" aria-label="USMLE100 home">
+  <a href="/" class="logo logo-lockup" aria-label="USMLE100 home">
     <LogoMark />
-    <span class="logo-word">
-      USMLE<span>100</span>
+    <span class="logo-rule" aria-hidden="true" />
+    <span class="logo-stack">
+      <LogoWord />
+      <LogoTagline height={10} />
     </span>
   </a>
 );
@@ -36,6 +48,7 @@ function Doc(props: { title: string; children: Child; bodyClass?: string }) {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
         <meta name="theme-color" content="#ffffff" />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <title>{props.title} · USMLE100</title>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
@@ -63,12 +76,22 @@ export function PublicLayout(props: { title: string; user: User | null; children
               </a>
             ) : (
               <>
-                <a class="lnk" href="/sign-in">Sign in</a>
+                <a class="lnk hide-sm" href="/sign-in">Sign in</a>
                 <a class="btn btn-primary" href="/sign-up">
                   Create account
                 </a>
               </>
             )}
+            {/* Phones: the other links live in a menu, as in the V12 design. */}
+            <details class="pub-menu">
+              <summary aria-label="Menu"><Icon name="menu" /></summary>
+              <div class="pub-menu-list">
+                <a href="/programs">Programs</a>
+                <a href="/webinars">Webinars</a>
+                {props.user ? <a href="/free-lectures">Free lectures</a> : <a href="/sign-in">Sign in</a>}
+                {props.user ? <a href="/account">My account</a> : <a href="/sign-up">Create account</a>}
+              </div>
+            </details>
           </nav>
         </div>
       </header>
@@ -76,7 +99,7 @@ export function PublicLayout(props: { title: string; user: User | null; children
       {props.children}
       {!props.bare && !props.plain && (
         <footer class="footer">
-          <a href="/" class="logo" aria-label="USMLE100 home" style="justify-content:center;margin-bottom:14px"><LogoMark /><span class="logo-word">USMLE<span>100</span></span></a>
+          <a href="/" class="logo" aria-label="USMLE100 home" style="justify-content:center;margin-bottom:14px"><LogoMark /><LogoWord /></a>
           <nav aria-label="Footer">
             <a href="/programs">Programs</a>
             <a href="/sign-in">Sign in</a>
@@ -178,7 +201,17 @@ const BOTTOM_ALIAS: Record<string, string> = { create: 'qbank', test: 'qbank', r
 /** Inactivity (30 min, warning at 25) and 24-hour sign-in limit (warning 5 min before), R088–R091. */
 const SESSION_JS = "(function(){\nvar WARN_IDLE=25*60e3,IDLE=30*60e3,WARN_ABS=5*60e3,last=Date.now(),lastPing=Date.now(),absEnd=0,mode='',m=document.getElementById('sess-modal'),msg=document.getElementById('sess-msg'),btn=document.getElementById('sess-stay');\nif(!m)return;\nfunction out(why){fetch('/session/end',{method:'POST',credentials:'same-origin'}).finally(function(){location.href='/sign-in?ended='+why+'&next='+encodeURIComponent(location.pathname)})}\nfunction show(k,t){mode=k;msg.textContent=t;btn.textContent=k==='idle'?'Stay logged in':'OK';m.hidden=false;btn.focus()}\nfunction ping(){lastPing=Date.now();fetch('/session/ping',{method:'POST',credentials:'same-origin'}).then(function(r){if(r.status===401)out('idle');return r.json()}).then(function(j){if(j&&j.absoluteLeft!=null)absEnd=Date.now()+j.absoluteLeft*1e3}).catch(function(){})}\nfunction act(){if(mode==='idle')return;last=Date.now();if(Date.now()-lastPing>60e3)ping()}\n['click','keydown','scroll','touchstart','pointermove'].forEach(function(e){addEventListener(e,act,{passive:true})});\nbtn.addEventListener('click',function(){var k=mode;m.hidden=true;mode=k==='abs'?'abs-seen':'';if(k==='idle'){last=Date.now();ping()}});\nfetch('/session/status',{credentials:'same-origin'}).then(function(r){if(r.status===401){out('idle');return null}return r.json()}).then(function(j){if(j)absEnd=Date.now()+j.absoluteLeft*1e3}).catch(function(){});\nfunction mmss(ms){var s=Math.max(0,Math.ceil(ms/1e3));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}\nsetInterval(function(){var now=Date.now();\n if(document.visibilityState==='visible'&&document.querySelector('iframe[data-lecture],.pp-live'))act();\n if(absEnd&&now>=absEnd)return out('expired');\n if(now-last>=IDLE)return out('idle');\n if(now-last>=WARN_IDLE){if(mode!=='idle')show('idle','');msg.textContent='You have been inactive. For your security you will be signed out in '+mmss(IDLE-(now-last))+'.';return}\n if(absEnd&&absEnd-now<=WARN_ABS&&mode===''){show('abs','For your security, sign-ins last at most 24 hours. You will be signed out in '+mmss(absEnd-now)+'. Please save your work.')}\n},1000);\ndocument.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')fetch('/session/status',{credentials:'same-origin'}).then(function(r){if(r.status===401)out('idle')}).catch(function(){})});\n})();";
 
-export function PortalLayout(props: { title: string; active: string; user: User; shell?: Shell; children: Child; wide?: boolean }) {
+export function PortalLayout(props: { title: string; active: string; user: User; shell?: Shell; children: Child; wide?: boolean; focus?: boolean }) {
+  // Onboarding steps are shown on their own, centred, without the portal chrome (as in the V12 design).
+  if (props.focus) {
+    return (
+      <Doc title={props.title}>
+        <main class="focus-main">
+          <div class="focus-inner">{props.children}</div>
+        </main>
+      </Doc>
+    );
+  }
   const s = props.shell;
   const pct = s && s.lecturesTotal ? Math.min(100, Math.round((s.lecturesDone / s.lecturesTotal) * 100)) : 0;
   const bottomActive = BOTTOM_ALIAS[props.active] ?? props.active;

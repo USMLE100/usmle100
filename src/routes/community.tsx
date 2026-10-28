@@ -647,7 +647,7 @@ community.get('/welcome', async (c) => {
     );
   }
   return c.html(
-    <PortalLayout shell={c.get('shell')} title="Welcome" active="home" user={user}>
+    <PortalLayout shell={c.get('shell')} title="Welcome" active="home" user={user} focus>
       <section class="card onboard">{body}</section>
     </PortalLayout>,
   );

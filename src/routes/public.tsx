@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../lib/types';
-import { PublicLayout, PortalLayout, Flash, LogoMark } from '../views/layout';
+import { PublicLayout, PortalLayout, Flash, LogoMark, LogoWord, LogoTagline } from '../views/layout';
 import { Icon } from '../views/icons';
 import { createSession, destroySession, hashPassword, verifyPassword, requireUser, sha256Hex, toB64 } from '../lib/auth';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
@@ -342,8 +342,11 @@ publicRoutes.get('/refunds', legalPage('Refund Policy', 'refund_text'));
 
 const AuthBrand = () => (
   <aside class="auth-brand">
-    <a href="/" class="lw" style="color:#fff;text-decoration:none" aria-label="USMLE100 home"><LogoMark size={44} light /><b>USMLE<span>100</span></b></a>
-    <div class="auth-tag">Get In. Get Out. Get Licensed.</div>
+    <a href="/" class="lw" style="color:#fff;text-decoration:none" aria-label="USMLE100 home">
+      <LogoMark size={54} light />
+      <span class="lw-rule" aria-hidden="true" />
+      <span class="lw-stack"><LogoWord height={34} light /><LogoTagline height={13} light /></span>
+    </a>
     <h2>Everything you need for your boards, in one place.</h2>
     <ul>
       <li><Icon name="play_circle" /><span><strong>Live video lectures</strong><span>A class every weekday, recorded so you can rewatch.</span></span></li>
