@@ -9,7 +9,7 @@ import { zoom } from './routes/zoom';
 import { loadUser, pruneSessions, sameOrigin } from './lib/auth';
 import { loadShell } from './lib/shell';
 import { ensureMigrated } from './lib/migrate';
-import { checkDatabase, isProduction, markDatabase, safeEnv } from './lib/environment';
+import { checkDatabase, ensureStagingOwner, isProduction, markDatabase, maskEmail, safeEnv } from './lib/environment';
 import { publicRoutes } from './routes/public';
 import { portal } from './routes/portal';
 import { admin } from './routes/admin';
@@ -56,14 +56,17 @@ app.use('*', async (c, next) => {
   if (refuse) return c.text(refuse, 503);
   await ensureMigrated(c.env.DB);
   await markDatabase(c.env);
+  await ensureStagingOwner(c.env);
   await next();
   if (!isProduction(c.env)) c.header('X-Robots-Tag', 'noindex, nofollow');
 });
 // Staging only: what this Preview is connected to, so it can be checked from a phone. Never shows a key.
-app.get('/__staging', (c) => {
+app.get('/__staging', async (c) => {
   if (isProduction(c.env)) return c.notFound();
   const e = c.env;
+  const owner = await e.DB.prepare('SELECT email FROM users WHERE is_owner = 1').first<{ email: string }>();
   return c.json({
+    staging_owner: owner ? maskEmail(owner.email) : 'none yet (the first account to sign up becomes the staging owner)',
     environment: e.ENVIRONMENT ?? null,
     database: 'development (checked before this page loaded)',
     stripe: e.STRIPE_SECRET_KEY ? (e.STRIPE_SECRET_KEY.startsWith('rk_test_') ? 'test mode (restricted key)' : 'test mode') : 'not set',

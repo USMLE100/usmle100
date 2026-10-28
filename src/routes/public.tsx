@@ -762,7 +762,8 @@ publicRoutes.get('/enroll', requireUser, async (c) => {
   const contact = (await getSettings(c.env.DB)).contact_email || undefined;
   const enrolling = await enrollingCohort(c.env.DB);
   return c.html(
-    <PublicLayout title="Choose your program" user={c.get('user')}>
+    // Not enrolled yet, so "Open portal" would only lead back here: offer the parts of the portal open before enrolling.
+    <PublicLayout title="Choose your program" user={c.get('user')} portalLink={{ href: '/free-lectures', label: 'Free lectures' }}>
       <main class="wrap page stack" style="gap:18px;max-width:1000px">
         <div class="page-head">
           <div class="eyebrow">Enrollment</div>
@@ -786,7 +787,7 @@ publicRoutes.get('/enroll', requireUser, async (c) => {
           ))}
         </div>
         <p class="small muted">
-          Not sure which fits? <a href="/programs">Compare what each includes</a>.
+          Not sure which fits? <a href="/programs">Compare what each includes</a>. Not ready yet? <a href="/free-lectures">Watch free lectures</a> or open <a href="/account">My account</a>.
         </p>
         <ViewingTerms />
         {contact && <RefundContact email={contact} />}

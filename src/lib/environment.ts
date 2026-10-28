@@ -77,8 +77,36 @@ export async function markDatabase(env: Env) {
   marked = true;
 }
 
+let ownerReady = false;
+/**
+ * Staging only (never production): a fresh development database has no owner, and public sign-up only ever
+ * creates students, so nobody could open the admin area. The first account created on a staging database
+ * becomes its owner (admin + owner), once, and only while no owner exists. /__staging shows whose account
+ * that is (masked) so it can be checked. Production owners are never created or changed here.
+ */
+export async function ensureStagingOwner(env: Env) {
+  if (ownerReady || isProduction(env)) return;
+  const db = env.DB;
+  if (await db.prepare('SELECT 1 FROM users WHERE is_owner = 1').first()) {
+    ownerReady = true;
+    return;
+  }
+  const first = await db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').first<{ id: number }>();
+  if (!first) return; // nobody has signed up yet
+  await db.prepare("UPDATE users SET role = 'admin', is_owner = 1 WHERE id = ? AND NOT EXISTS (SELECT 1 FROM users WHERE is_owner = 1)").bind(first.id).run();
+  console.log('Staging: the first account was made the staging owner.');
+  ownerReady = true;
+}
+
+/** "s•••@gmail.com": enough for the owner to recognise their own account on the staging status page. */
+export const maskEmail = (e: string) => {
+  const [name, domain] = e.split('@');
+  return `${name.slice(0, 1)}•••@${domain ?? ''}`;
+};
+
 /** For tests only. */
 export const _resetDatabaseCheck = () => {
   checked = undefined;
   marked = false;
+  ownerReady = false;
 };

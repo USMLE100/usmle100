@@ -111,3 +111,26 @@ describe('staging status page', () => {
     expect((await res.json() as any).stripe).toBe('not set');
   });
 });
+
+describe('staging owner', () => {
+  it('the first staging account becomes the owner; production never promotes anyone', async () => {
+    const { ensureStagingOwner } = await import('../src/lib/environment');
+    const owner = await db.prepare('SELECT id FROM users WHERE is_owner = 1').first<{ id: number }>();
+    // With an owner already present nothing changes, on staging or production.
+    _resetDatabaseCheck();
+    await ensureStagingOwner(preview());
+    expect((await db.prepare('SELECT COUNT(*) AS n FROM users WHERE is_owner = 1').first<{ n: number }>())!.n).toBe(owner ? 1 : 0);
+    // Simulate a fresh staging database: no owner.
+    await db.prepare('UPDATE users SET is_owner = 0').run();
+    _resetDatabaseCheck();
+    await ensureStagingOwner(base); // production: never
+    expect(await db.prepare('SELECT 1 FROM users WHERE is_owner = 1').first()).toBeNull();
+    await ensureStagingOwner(preview());
+    const first = await db.prepare('SELECT id, role, is_owner FROM users ORDER BY id LIMIT 1').first<{ id: number; role: string; is_owner: number }>();
+    expect(first).toMatchObject({ role: 'admin', is_owner: 1 });
+    expect((await db.prepare('SELECT COUNT(*) AS n FROM users WHERE is_owner = 1').first<{ n: number }>())!.n).toBe(1);
+    // restore
+    await db.prepare('UPDATE users SET is_owner = 0').run();
+    if (owner) await db.prepare('UPDATE users SET is_owner = 1 WHERE id = ?').bind(owner.id).run();
+  });
+});

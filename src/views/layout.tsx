@@ -47,7 +47,7 @@ function Doc(props: { title: string; children: Child; bodyClass?: string }) {
   );
 }
 
-export function PublicLayout(props: { title: string; user: User | null; children: Child; bare?: boolean; plain?: boolean; legal?: { terms: boolean; privacy: boolean; refunds?: boolean } }) {
+export function PublicLayout(props: { title: string; user: User | null; children: Child; bare?: boolean; plain?: boolean; legal?: { terms: boolean; privacy: boolean; refunds?: boolean }; portalLink?: { href: string; label: string } }) {
   return (
     <Doc title={props.title}>
       {!props.plain && (
@@ -58,8 +58,8 @@ export function PublicLayout(props: { title: string; user: User | null; children
             <a class="lnk hide-sm" href="/programs">Programs</a>
             <a class="lnk hide-sm" href="/webinars">Webinars</a>
             {props.user ? (
-              <a class="btn btn-primary" href="/dashboard">
-                Open portal
+              <a class="btn btn-primary" href={props.portalLink?.href ?? '/dashboard'}>
+                {props.portalLink?.label ?? 'Open portal'}
               </a>
             ) : (
               <>
