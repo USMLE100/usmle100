@@ -15,7 +15,7 @@ Branch `v12-frontend`. Last updated 28 Oct 2026. Nothing here is merged or deplo
 - **Not built**: deliberately not built; the reason is given.
 
 **Test files** live in `test/`:
-- 14 automated files, 141 tests (`npm test`).
+- 14 automated files, 145 tests, plus the staging-isolation config check (`npm test`).
 - Browser checks in the local preview: a 109-page review, 26 end-to-end workflows, and 17 player checks with a stand-in Bunny player.
 - Every external service (Stripe, Bunny, Zoom, Resend, Twilio, Sender) is **simulated** in tests. None has yet been tested against the real service: that needs staging credentials (LAUNCH.md §0 and §8).
 

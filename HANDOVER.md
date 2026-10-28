@@ -159,6 +159,9 @@ npx wrangler dev       # local site; add .dev.vars with DEV_FAKE_PAYMENTS=1 to t
 
 ## Staging (Worker Previews)
 
+- **Staging owner:** public sign-up only creates students, so a fresh staging database has no owner. On staging only, the first account created becomes the staging owner, once (`ensureStagingOwner` in `src/lib/environment.ts`); it never runs in production. `/__staging` shows that account's email, masked.
+- **Branding:** the official logo is traced to SVG from the owner's artwork in `public/brand/` (mark, wordmark and tagline, each in dark and light) plus `public/favicon.svg`.
+
 - **What runs there:** branch builds run `npx wrangler preview`, which creates the Preview `v12-frontend`.
   - Its settings come only from `[previews.vars]` and `[[previews.d1_databases]]` in `wrangler.toml`, plus Preview secrets.
   - Its database is `usmle100-dev`.

@@ -11,10 +11,7 @@ Prepared 28 Oct 2026 for the owner's independent reviewer. Nothing has been merg
 
 ## 2. Staging preview URL
 
-**None exists yet.** Creating one needs Cloudflare access, which this build session does not have:
-- `wrangler whoami`: not authenticated;
-- no API token;
-- no browser connected.
+**Update (28 Oct):** preview builds are on, and the Preview `v12-frontend` builds successfully. Its address is in the Cloudflare build log, probably `https://v12-frontend-usmle100.info-usmle100.workers.dev`. Every check on it was done by the owner on an iPhone, because this build session cannot reach `workers.dev` addresses.
 
 The owner runs `npx wrangler login` and then `bash scripts/setup-staging.sh` (LAUNCH.md §0). The script prints the URL and checks it.
 

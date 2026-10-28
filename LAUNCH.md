@@ -15,7 +15,9 @@ All real-service testing happens on an isolated staging **Preview**, never on th
 - **Bunny:** the Bunny API key is ignored if it points at the live library (785730). Staging uses its own library.
 - Previews have no crons and send `X-Robots-Tag: noindex`.
 
-**Status (28 Oct):**
+**Status (28 Oct, morning):** preview builds are **on**. Staging builds from `v12-frontend` and runs on `usmle100-dev`. The first account on staging is its owner, and passkey setup is required.
+
+**Earlier status (28 Oct):**
 - Preview builds are **off**.
 - The staging database `usmle100-dev` exists and is bound for Previews, verified by `npm run check:staging`.
 - Remaining before turning previews on: the staging secrets (at least the Stripe **test** key) in Settings → Variables and secrets → **Previews Base**. You can add them from a phone.
