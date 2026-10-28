@@ -733,9 +733,9 @@ a.pr-t:hover { text-decoration: underline; }
 .hit:hover { border-color: #b9d8c2; }
 .apps { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 @media (min-width: 800px) { .apps { grid-template-columns: repeat(4, 1fr); } }
-.app-tile { border: 1px solid var(--line); border-radius: 18px; padding: 18px; display: flex; flex-direction: column; gap: 6px; text-decoration: none; background: var(--surface); }
-.app-tile strong { font: 700 17px var(--display); color: #1b6ad1; margin-top: 18px; }
-.app-tile span { font-size: 14px; color: var(--body); }
+.app-tile { border: 1px solid var(--line); border-radius: 16px; padding: 14px 14px 16px; display: flex; flex-direction: column; gap: 6px; text-decoration: none; background: var(--surface); }
+.app-tile strong { font: 700 14.5px var(--display); color: #1b6ad1; margin-top: 12px; }
+.app-tile span { font-size: 12.5px; color: var(--body); }
 .seg { display: grid; gap: 10px; }
 @media (min-width: 700px) { .seg { grid-template-columns: 1fr 1fr; } }
 .seg a { display: grid; place-items: center; min-height: 52px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); text-decoration: none; font: 700 15.5px var(--text); }
