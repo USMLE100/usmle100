@@ -77,7 +77,7 @@ export function PublicLayout(props: { title: string; user: User | null; children
             ) : (
               <>
                 <a class="lnk hide-sm" href="/sign-in">Sign in</a>
-                <a class="btn btn-primary" href="/sign-up">
+                <a class="btn btn-primary hide-sm" href="/sign-up">
                   Create account
                 </a>
               </>

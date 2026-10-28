@@ -424,7 +424,7 @@ p { margin: 0; }
 .pub-nav a.lnk { padding: 10px 12px; font: 600 15px var(--text); color: var(--ink); text-decoration: none; white-space: nowrap; }
 .pub-nav .btn { white-space: nowrap; }
 .pub-nav .btn { min-height: 42px; padding: 0 18px; }
-@media (max-width: 520px) { .pub-nav a.hide-sm { display: none; } .pub-nav .btn { padding: 0 14px; } .pub-top .logo-word { height: 16px; } .pub-top .logo-tag { height: 7.5px; } .pub-menu { display: block; } .pub-top .logo-u { height: 30px; width: auto; } }
+@media (max-width: 520px) { .pub-nav a.hide-sm { display: none; } .pub-nav .btn { padding: 0 12px; min-height: 40px; font-size: 12.5px; } .pub-top .logo-word { height: 16px; } .pub-top .logo-tag { height: 7.5px; } .pub-menu { display: block; } .pub-top .logo-u { height: 30px; width: auto; } }
 .footer { border-top: 1px solid var(--line); padding: 28px 16px 40px; font-size: 13px; color: var(--muted); text-align: center; background: var(--surface); }
 .footer nav { display: flex; gap: 16px; justify-content: center; margin-bottom: 10px; flex-wrap: wrap; }
 .footer a { color: var(--ink); text-decoration: none; font-weight: 600; }
@@ -832,3 +832,4 @@ fieldset.bare legend { padding: 0; margin-bottom: 12px; }
 /* Onboarding: centred card without the portal chrome */
 .focus-main { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
 .focus-inner { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 16px; }
+@media (max-width: 380px) { .pub-top .wrap { gap: 6px; } .logo-lockup { gap: 7px; } .pub-nav { gap: 4px; } .pub-nav .btn { padding: 0 10px; } }
