@@ -781,7 +781,7 @@ security.get('/requests/privacy/:id{[0-9]+}/export', async (c) => {
     devices: await q('SELECT label, status, first_seen, last_seen, last_country FROM devices WHERE user_id = ?'),
     lecture_progress: await q('SELECT lecture_id, completed_at FROM lecture_progress WHERE user_id = ?'),
     lecture_views: await q('SELECT item, kind, started_at, counted, counted_reason FROM view_sessions WHERE user_id = ?'),
-    test_answers: await q('SELECT t.id AS test, ti.question_id, ti.chosen, ti.correct FROM tests t JOIN test_items ti ON ti.test_id = t.id WHERE t.user_id = ?').catch(() => []),
+    test_answers: await q('SELECT t.id AS test, ti.question_id, ti.chosen_index, ti.is_correct FROM tests t JOIN test_items ti ON ti.test_id = t.id WHERE t.user_id = ?').catch(() => []),
     notes: await q('SELECT id, title, created_at FROM notes WHERE user_id = ?').catch(() => []),
     security_log: await q('SELECT at, action, ip FROM audit_log WHERE target_user_id = ? ORDER BY id'),
   };

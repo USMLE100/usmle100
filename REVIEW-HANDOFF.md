@@ -111,3 +111,25 @@ The runtime guards cover both.
 - **The Preview feature is "open beta"** in Wrangler 4.151.3, so its behaviour may change. Keep the runtime guards.
 - **Nightly exports** (if approved) must save schema and data separately; a plain export won't restore.
 - **Unverified integrations:** the items in §5 stay unverified until staging credentials exist.
+
+## 10. Independent security review (2 Nov 2026)
+
+A separate reviewer audited the code and proved four exploitable issues with working attacks. All are fixed on `v12-frontend`, and each attack is now a regression test in `test/review-fixes.test.ts`. These tests fail on the old code and pass on the new.
+
+| # | Severity | Issue | Fix |
+|---|---|---|---|
+| 1 | Critical | A staff password alone could mint recovery codes or add a passkey while the sign-in waited for its passkey step, giving full admin or owner access | Sessions waiting for a second step are no longer "freshly confirmed". Only `/account/passkey/{sign-in,options,verify,recovery}` open while waiting, and passkey management refuses sessions that are still waiting. |
+| 2 | Critical | Paths ending in `.csv` and similar skipped the account gate (student export without a passkey, or while suspended) | Only real static files count as public. |
+| 3 | High | Any admin could make a password-reset link for the owner or other staff | Only the owner makes links for staff. No link can be made for the owner. |
+| 4 | Medium | Owner-only actions were reachable with ids like `0x1f` or `5.0` | Every route id must be digits only. |
+| 5 | Low | Open redirect after sign-in (`/\evil.example`) | `next` refuses backslashes and control characters. |
+| 6 | Low | Spreadsheet formulas in CSV exports | Formula-like cells are prefixed with `'`. |
+| 7 | Low | Anyone could hold the owner in an admin-only lock | The owner gets the timed 15-minute lock only. |
+| — | Bug | The privacy data export silently left out test answers (wrong column names) | Column names fixed. |
+| — | Hardening | The question import had no size limit | Limited to 5 MB. |
+| — | Launch | Passkeys break on `www.` and `workers.dev` once `SITE_URL` is set | Production now redirects page views to `SITE_URL` (webhooks are not redirected). |
+
+**Still open (recommendations):**
+- The CSP allows inline scripts. JSX escaping is the XSS protection; there is no CSP backstop.
+- Faculty can set a lecture live with any Bunny video id directly. This may be intended, and needs an owner decision.
+- Migration `0014` makes the lowest-id admin the owner: confirm that this is the intended person.

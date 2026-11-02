@@ -12,7 +12,11 @@ import { isOwner, isStaff } from './types';
  * Staff are exempt from lockdown and the agreement; the owner can never be suspended.
  */
 const PUBLIC_EXACT = new Set(['/', '/programs', '/terms', '/privacy', '/refunds', '/sign-in', '/sign-up', '/sign-out', '/reset-password', '/stripe/webhook', '/styles.css', '/favicon.ico', '/webinars', '/forgot']);
-const isPublic = (p: string) => PUBLIC_EXACT.has(p) || /\.[a-z0-9]{2,5}$/i.test(p);
+// Only real static files count as public. App routes that end in an extension (e.g. /admin/students/export.csv)
+// must still pass every check below.
+const isPublic = (p: string) => PUBLIC_EXACT.has(p) || p === '/favicon.svg' || p.startsWith('/brand/') || p.startsWith('/vendor/');
+/** While a staff sign-in waits for its passkey, only these open (plus sign-out and the session heartbeat). */
+const PASSKEY_STEP = new Set(['/account/passkey/sign-in', '/account/passkey/options', '/account/passkey/verify', '/account/passkey/recovery']);
 const isCheckout = (p: string) => p === '/enroll' || p.startsWith('/enroll/') || p.startsWith('/buy/');
 const isSession = (p: string) => p.startsWith('/session/');
 /** Requests made by page scripts get a JSON answer the script understands, not a redirect to an HTML page. */
@@ -42,7 +46,7 @@ export async function accountGate(c: Context<AppEnv>, next: Next) {
   const sess = c.get('session');
   const pkPath = p.startsWith('/account/passkey') || p === '/sign-out' || isSession(p);
   if (sess?.verifyPending && sess.verifyReason === 'passkey') {
-    return pkPath ? next() : apiOrRedirect(c, p, '/account/passkey/sign-in?next=' + encodeURIComponent(c.req.method === 'GET' ? c.req.path : '/dashboard'));
+    return PASSKEY_STEP.has(p) || p === '/sign-out' || isSession(p) ? next() : apiOrRedirect(c, p, '/account/passkey/sign-in?next=' + encodeURIComponent(c.req.method === 'GET' ? c.req.path : '/dashboard'));
   }
   // Staff without a passkey must set one up before using anything else (owner, admins and faculty).
   if (isStaff(user) && !pkPath && (await passkeysRequired(c.env.DB, user)) && !(await hasPasskey(c.env.DB, user.id))) {

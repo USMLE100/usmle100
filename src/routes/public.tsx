@@ -469,7 +469,8 @@ const AuthPage = (p: { mode: 'in' | 'up'; selfReset?: boolean; error?: string; n
   </PublicLayout>
 );
 
-const safeNext = (n: unknown) => (typeof n === 'string' && n.startsWith('/') && !n.startsWith('//') ? n : '/dashboard');
+// Same-site paths only: browsers read "/\\evil.example" as another site, so backslashes and control characters are refused.
+const safeNext = (n: unknown) => (typeof n === 'string' && n.startsWith('/') && !n.startsWith('//') && !/[\\\u0000-\u001f\u007f]/.test(n) ? n : '/dashboard');
 
 publicRoutes.get('/sign-up', (c) => c.html(<AuthPage mode="up" user={c.get('user')} next={c.req.query('next')} form={{ turnstile: c.env.TURNSTILE_SITE_KEY }} />));
 

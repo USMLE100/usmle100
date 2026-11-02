@@ -51,7 +51,9 @@ export function parseCsv(text: string): string[][] {
 export function toCsv(rows: (string | number | null)[][]): string {
   return rows
     .map((r) => r.map((v) => {
-      const s = v == null ? '' : String(v);
+      let s = v == null ? '' : String(v);
+      // A cell starting with = + - @ (or a tab/CR) runs as a formula in Excel or Sheets; plain numbers are left alone.
+      if (/^[=+\-@\t\r]/.test(s) && !/^[-+]?\d+(\.\d+)?$/.test(s)) s = "'" + s;
       return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     }).join(','))
     .join('\r\n');

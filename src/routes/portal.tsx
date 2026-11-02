@@ -474,7 +474,7 @@ portal.get('/evening', async (c) => {
   );
 });
 
-portal.get('/evening/:id', async (c) => {
+portal.get('/evening/:id{[0-9]+}', async (c) => {
   const user = c.get('user')!;
   const acc = await eveningAccess(c.env.DB, user);
   if (!acc) return c.redirect('/evening');
@@ -679,7 +679,7 @@ const modeName = (m: string) => (m === 'timed' ? 'Timed' : m === 'untimed' ? 'Un
 /** Tutor and Daily Warmup show the answer straight after each question and lock the first answer. */
 const instant = (m: string) => m === 'tutor' || m === 'warmup';
 
-portal.get('/tests/:id/:pos{[0-9]+}', throttle(RULES.qbank), async (c) => {
+portal.get('/tests/:id{[0-9]+}/:pos{[0-9]+}', throttle(RULES.qbank), async (c) => {
   const user = c.get('user')!;
   const id = Number(c.req.param('id'));
   const pos = Number(c.req.param('pos'));
@@ -783,7 +783,7 @@ portal.get('/tests/:id/:pos{[0-9]+}', throttle(RULES.qbank), async (c) => {
   );
 });
 
-portal.post('/tests/:id/:pos{[0-9]+}', async (c) => {
+portal.post('/tests/:id{[0-9]+}/:pos{[0-9]+}', async (c) => {
   const id = Number(c.req.param('id'));
   const pos = Number(c.req.param('pos'));
   const loaded = await loadTest(c, id);
@@ -805,7 +805,7 @@ portal.post('/tests/:id/:pos{[0-9]+}', async (c) => {
   return c.redirect(`/tests/${id}/${next}`);
 });
 
-portal.post('/tests/:id/:pos{[0-9]+}/flag', async (c) => {
+portal.post('/tests/:id{[0-9]+}/:pos{[0-9]+}/flag', async (c) => {
   const id = Number(c.req.param('id'));
   const pos = Number(c.req.param('pos'));
   if (!(await loadTest(c, id))) return c.notFound();
@@ -813,14 +813,14 @@ portal.post('/tests/:id/:pos{[0-9]+}/flag', async (c) => {
   return c.redirect(`/tests/${id}/${pos}`);
 });
 
-portal.post('/tests/:id/finish', async (c) => {
+portal.post('/tests/:id{[0-9]+}/finish', async (c) => {
   const id = Number(c.req.param('id'));
   if (!(await loadTest(c, id))) return c.notFound();
   await c.env.DB.prepare(`UPDATE tests SET finished_at = COALESCE(finished_at, datetime('now')) WHERE id = ?`).bind(id).run();
   return c.redirect(`/tests/${id}/results`);
 });
 
-portal.get('/tests/:id/results', async (c) => {
+portal.get('/tests/:id{[0-9]+}/results', async (c) => {
   const user = c.get('user')!;
   const id = Number(c.req.param('id'));
   const loaded = await loadTest(c, id);

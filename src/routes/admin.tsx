@@ -271,7 +271,7 @@ admin.post('/lectures', async (c) => {
   return c.redirect('/admin/lectures?ok=1');
 });
 
-admin.post('/lectures/:id', async (c) => {
+admin.post('/lectures/:id{[0-9]+}', async (c) => {
   const f = await c.req.parseBody();
   const vid = String(f.bunny_video_id ?? '').trim() || null;
   const title = String(f.title ?? '').trim().slice(0, 160);
@@ -289,7 +289,7 @@ admin.post('/zoom-settings', async (c) => {
 });
 
 /** Attach an imported recording that had no day (e.g. recorded on a weekend) to a lecture day. */
-admin.post('/zoom-imports/:id/assign', async (c) => {
+admin.post('/zoom-imports/:id{[0-9]+}/assign', async (c) => {
   const db = c.env.DB;
   const cohort = await currentCohort(db);
   const f = await c.req.parseBody();
@@ -310,7 +310,7 @@ admin.post('/zoom-imports/:id/assign', async (c) => {
 });
 
 /** Attach an imported recording to the Evening Questions session of the day it was recorded. */
-admin.post('/zoom-imports/:id/assign-evening', async (c) => {
+admin.post('/zoom-imports/:id{[0-9]+}/assign-evening', async (c) => {
   const db = c.env.DB;
   const imp = await db.prepare('SELECT * FROM zoom_imports WHERE id = ?').bind(Number(c.req.param('id'))).first<any>();
   if (!imp) return c.redirect('/admin/lectures');
@@ -332,7 +332,7 @@ admin.post('/zoom-imports/:id/assign-evening', async (c) => {
  * Owner only (OWNER_ONLY): the one approval that publishes an imported recording where it was placed
  * ("Lecture Day 14 · Wed Nov 12 — approve?"). If Bunny is still preparing it, it goes live as soon as it's ready.
  */
-admin.post('/zoom-imports/:id/approve', async (c) => {
+admin.post('/zoom-imports/:id{[0-9]+}/approve', async (c) => {
   const db = c.env.DB;
   const me = c.get('user')!;
   const imp = await db.prepare('SELECT * FROM zoom_imports WHERE id = ?').bind(Number(c.req.param('id'))).first<any>();
@@ -467,6 +467,7 @@ admin.get('/students', async (c) => {
       <h1>Students</h1>
       <p><a class="btn btn-outline btn-sm" href="/admin/students/directory">All students: search, filters, CSV</a></p>
       {c.req.query('ok') && <Flash>Saved.</Flash>}
+      {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
       <p class="muted">Lecture recordings stay open until {LECTURE_DAYS_AFTER_END} days after a cohort’s last day (Day 100). To give one student more time, change their date and tap Save.</p>
       <form method="post" action="/admin/reset-link" class="card row" style="align-items:flex-end">
         <div class="stack" style="flex:1 1 100%;gap:4px">
@@ -538,8 +539,14 @@ admin.post('/reset-link', async (c) => {
   const me = c.get('user')!;
   const f = await c.req.parseBody();
   const email = String(f.email ?? '').trim().toLowerCase();
-  const u = await c.env.DB.prepare('SELECT id, name, email FROM users WHERE email = ?').bind(email).first<{ id: number; name: string; email: string }>();
+  const u = await c.env.DB.prepare('SELECT id, name, email, role, is_owner FROM users WHERE email = ?').bind(email).first<{ id: number; name: string; email: string; role: string; is_owner: number }>();
   c.header('Cache-Control', 'no-store');
+  // A reset link signs its user in, so it must never let one admin take over another staff account or the owner:
+  // only the owner makes links for faculty and admins, and nobody makes one for the owner (who uses Forgot password).
+  const staffTarget = !!u && (u.role !== 'student' || u.is_owner === 1);
+  if (u && staffTarget && (u.is_owner === 1 || !isOwner(me))) {
+    return c.redirect('/admin/students?error=' + encodeURIComponent(u.is_owner === 1 ? 'Reset links can’t be made for the owner account.' : 'Only the owner can make reset links for staff accounts.'));
+  }
   if (!u) {
     return c.html(
       <PortalLayout shell={c.get('shell')} title="Password reset link" active="admin-students" user={me}>
@@ -567,7 +574,7 @@ admin.post('/reset-link', async (c) => {
   );
 });
 
-admin.post('/students/:id/lectures', async (c) => {
+admin.post('/students/:id{[0-9]+}/lectures', async (c) => {
   const f = await c.req.parseBody();
   const until = String(f.until ?? '');
   let value = f.reset ? null : /^\d{4}-\d{2}-\d{2}$/.test(until) ? until : undefined;
@@ -743,7 +750,7 @@ admin.post('/evening/sessions', async (c) => {
   return c.redirect('/admin/evening?ok=1');
 });
 
-admin.post('/evening/sessions/:id', async (c) => {
+admin.post('/evening/sessions/:id{[0-9]+}', async (c) => {
   const f = await c.req.parseBody();
   const vid = String(f.bunny_video_id ?? '').trim() || null;
   const title = String(f.title ?? '').trim().slice(0, 160);
@@ -959,6 +966,7 @@ admin.post('/questions/import', async (c) => {
   const body = await c.req.parseBody();
   const file = body.file;
   if (!(file instanceof File)) return c.redirect('/admin/questions/import?error=' + encodeURIComponent('Choose a CSV file.'));
+  if (file.size > 5 * 1024 * 1024) return c.redirect('/admin/questions/import?error=' + encodeURIComponent('The file is larger than 5 MB. Split it into smaller files.'));
   const rows = parseCsv(await file.text());
   if (rows.length < 2) return c.redirect('/admin/questions/import?error=' + encodeURIComponent('The file has no question rows.'));
   const head = rows[0].map((h) => h.trim().toLowerCase());

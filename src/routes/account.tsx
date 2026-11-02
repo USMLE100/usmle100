@@ -124,7 +124,8 @@ export function ageOn(birth: string, today = new Date()) {
   return age;
 }
 
-const safeNext = (n: unknown) => (typeof n === 'string' && n.startsWith('/') && !n.startsWith('//') ? n : '/dashboard');
+// Same-site paths only: browsers read "/\\evil.example" as another site, so backslashes and control characters are refused.
+const safeNext = (n: unknown) => (typeof n === 'string' && n.startsWith('/') && !n.startsWith('//') && !/[\\\u0000-\u001f\u007f]/.test(n) ? n : '/dashboard');
 
 const AgreementPage = (p: { a: { id: number; title: string; body: string; published_at: string }; next: string; error?: string; name?: string; birth?: string; signed?: boolean }) => (
   <PublicLayout title="Student agreement" user={null} plain>

@@ -26,9 +26,15 @@ import {
  * confirm owner-only changes with one, and recover with a one-time code if the device is lost.
  */
 export const passkeyRoutes = new Hono<AppEnv>();
+// Managing passkeys and recovery codes needs a finished sign-in: never from a session still waiting for its second step.
+passkeyRoutes.use('/account/passkeys/*', async (c, next) => {
+  if (c.req.method === 'POST' && c.get('session')?.verifyPending) return c.json({ ok: false, error: 'Finish signing in first.' }, 403);
+  await next();
+});
 
 const ip = (c: Context<AppEnv>) => c.req.header('cf-connecting-ip') ?? null;
-const safeNext = (n: unknown) => (typeof n === 'string' && n.startsWith('/') && !n.startsWith('//') ? n : '/dashboard');
+// Same-site paths only: browsers read "/\\evil.example" as another site, so backslashes and control characters are refused.
+const safeNext = (n: unknown) => (typeof n === 'string' && n.startsWith('/') && !n.startsWith('//') && !/[\\\u0000-\u001f\u007f]/.test(n) ? n : '/dashboard');
 async function json(c: Context<AppEnv>): Promise<any> {
   try {
     return await c.req.json();

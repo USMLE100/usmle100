@@ -44,6 +44,9 @@ export async function recordFailure(db: D1Database, email: string, ip: string | 
   await db.batch([failure(db, emailKey(email), EMAIL_MAX_FAILURES), ...(ip ? [failure(db, ipKey(ip), IP_MAX_FAILURES)] : [])]);
   const row = await db.prepare('SELECT failures, locked_until FROM login_attempts WHERE key = ?').bind(emailKey(email)).first<{ failures: number; locked_until: number | null }>();
   if (row && row.failures >= EMAIL_MAX_FAILURES) {
+    // The owner is never held until an administrator unlocks them (anyone who knows the owner's email could
+    // otherwise lock the business out): the owner gets the timed 15-minute lock only.
+    if (await db.prepare('SELECT 1 FROM users WHERE email = ? AND is_owner = 1').bind(email).first()) return false;
     const r = await db
       .prepare('INSERT INTO account_locks (email) VALUES (?) ON CONFLICT (email) DO UPDATE SET locked_at = datetime(\'now\'), unlocked_at = NULL, unlocked_by = NULL WHERE unlocked_at IS NOT NULL')
       .bind(email)

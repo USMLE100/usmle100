@@ -71,7 +71,9 @@ export async function createSession(c: Context<AppEnv>, userId: number, deviceId
       new Date((t + MAX_SESSION_SECONDS) * 1000).toISOString(),
       t,
       t,
-      t,
+      // A sign-in still waiting for its second step (passkey or sign-in check) is not a fresh confirmation:
+      // owner-only actions and passkey/recovery-code changes need that step first.
+      verifyReason ? null : t,
       c.req.header('cf-connecting-ip') ?? null,
       (c.req.header('user-agent') ?? '').slice(0, 300) || null,
       c.req.header('cf-ipcountry') ?? null,
