@@ -113,3 +113,13 @@ describe('pre-launch review fixes', () => {
     expect(toCsv([['=HYPERLINK("x")', '+1+1', '@SUM(A1)', '-5', '12.5', 'Maya']])).toBe(`"'=HYPERLINK(""x"")",'+1+1,'@SUM(A1),-5,12.5,Maya`);
   });
 });
+
+describe('Bunny player link', () => {
+  it('turns off casting and the native iPhone player, and stays signed', async () => {
+    const { bunnyEmbedUrl } = await import('../src/lib/content');
+    const u = new URL((await bunnyEmbedUrl({ BUNNY_LIBRARY_ID: '785730', BUNNY_TOKEN_KEY: 'k' } as any, 'vid-1'))!);
+    expect(u.origin + u.pathname).toBe('https://iframe.mediadelivery.net/embed/785730/vid-1');
+    for (const [k, v] of [['disableAirPlay', 'true'], ['chromecast', 'false'], ['disableIosPlayer', 'true'], ['rememberPosition', 'false']]) expect(u.searchParams.get(k), k).toBe(v);
+    expect(u.searchParams.get('token')).toMatch(/^[0-9a-f]{64}$/);
+  });
+});

@@ -93,7 +93,10 @@ export async function bunnyEmbedUrl(env: Env, videoId: string, ttlSeconds = 3600
   const base = `https://iframe.mediadelivery.net/embed/${env.BUNNY_LIBRARY_ID}/${encodeURIComponent(videoId)}`;
   const expires = Math.floor(Date.now() / 1000) + ttlSeconds;
   const token = await sha256Hex(env.BUNNY_TOKEN_KEY + videoId + expires);
-  return `${base}?token=${token}&expires=${expires}`;
+  // Bunny player options (bunny.net/docs/stream/embedding): no casting to TVs (our watermark would not be shown there),
+  // no native iPhone fullscreen player (it would hide the watermark), and resume is handled by our own player.
+  // The token covers only the key, video and expiry, so these options don't change the signature.
+  return `${base}?token=${token}&expires=${expires}&disableAirPlay=true&chromecast=false&playsinline=true&disableIosPlayer=true&rememberPosition=false`;
 }
 
 /** Days lecture recordings stay available after the cohort's last day (Day 100). */
