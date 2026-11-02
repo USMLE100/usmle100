@@ -93,7 +93,7 @@ app.use('*', sameOrigin);
 // Top-bar and menu data (study streak, lecture progress) for signed-in page views.
 app.use('*', async (c, next) => {
   const user = c.get('user');
-  if (user && c.req.method === 'GET') c.set('shell', await loadShell(c.env.DB, user.id, c.get('enrollment')?.cohort_id ?? null));
+  if (user && c.req.method === 'GET') c.set('shell', { ...(await loadShell(c.env.DB, user.id, c.get('enrollment')?.cohort_id ?? null)), enrolled: !!c.get('enrollment') });
   await next();
 });
 

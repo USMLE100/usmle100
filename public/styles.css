@@ -184,6 +184,9 @@ p { margin: 0; }
 .progress-card .num { font: 400 14px var(--text); color: var(--body); }
 .progress-card .num b { font: 600 22px var(--display); color: var(--ink); margin-right: 4px; }
 .progress-card .hint { font-size: 13.5px; color: var(--body); }
+.progress-card-locked { text-decoration: none; gap: 4px; }
+.progress-card-locked .num { font: 600 16px var(--display); color: var(--ink); }
+.progress-card-locked .hint { color: var(--green-ink); text-decoration: underline; }
 .bar { height: 6px; border-radius: 999px; background: var(--sage); overflow: hidden; }
 .bar > i { display: block; height: 100%; background: var(--green); border-radius: 999px; }
 .bar-amber > i { background: #c9a14a; }

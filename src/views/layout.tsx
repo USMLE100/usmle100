@@ -232,7 +232,13 @@ export function PortalLayout(props: { title: string; active: string; user: User;
             </label>
           </div>
           <div class="drawer-body">
-            {s && s.lecturesTotal > 0 && !isStaff(props.user) && (
+            {s && s.enrolled === false && !isStaff(props.user) && (
+              <a href="/enroll" class="progress-card progress-card-locked">
+                <span class="num">No active program</span>
+                <span class="hint">Choose a program to unlock lectures and practice</span>
+              </a>
+            )}
+            {s && s.enrolled !== false && s.lecturesTotal > 0 && !isStaff(props.user) && (
               <div class="progress-card">
                 <span class="num">
                   <b>{s.lecturesDone}</b> of {s.lecturesTotal} lectures

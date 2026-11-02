@@ -73,7 +73,7 @@ export type Enrollment = {
 };
 
 /** Data every portal page shows in its top bar and menu. */
-export type Shell = { streak: number; lecturesDone: number; lecturesTotal: number; contact: string; terms: boolean; privacy: boolean; refunds: boolean };
+export type Shell = { enrolled?: boolean; streak: number; lecturesDone: number; lecturesTotal: number; contact: string; terms: boolean; privacy: boolean; refunds: boolean };
 
 export type Vars = {
   user: User | null;
