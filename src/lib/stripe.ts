@@ -116,13 +116,19 @@ export async function fulfil(db: D1Database, s: PaidSession): Promise<string> {
       const p = await db.prepare('SELECT user_id FROM book_purchases WHERE id = ?').bind(Number(book[1])).first<{ user_id: number }>();
       await audit(db, { action: 'payment.book', targetUserId: p?.user_id ?? null, detail: { purchase: Number(book[1]), cents: s.amount_total, session: s.id } });
       outcome = 'Course Book unlocked';
-    } else outcome = 'Course Book already unlocked (or amount did not match)';
+    } else {
+      const p = await db.prepare('SELECT status, amount_cents FROM book_purchases WHERE id = ?').bind(Number(book[1])).first<{ status: string; amount_cents: number }>();
+      outcome = !p ? 'no matching purchase' : p.status === 'pending' && p.amount_cents !== s.amount_total ? `NOT unlocked: paid ${s.amount_total} cents, expected ${p.amount_cents}` : `already handled (purchase is ${p.status})`;
+    }
   } else if (/^\d+$/.test(ref)) {
     if (await activateEnrollment(db, s.id, Number(ref), s.amount_total)) {
       const e = await db.prepare('SELECT user_id, package_id FROM enrollments WHERE id = ?').bind(Number(ref)).first<{ user_id: number; package_id: string }>();
       await audit(db, { action: 'payment.enrollment', targetUserId: e?.user_id ?? null, detail: { enrollment: Number(ref), pkg: e?.package_id, cents: s.amount_total, session: s.id } });
       outcome = `enrollment activated (${e?.package_id ?? '?'}, $${(s.amount_total / 100).toFixed(2)})`;
-    } else outcome = 'enrollment already active (or amount did not match)';
+    } else {
+      const e = await db.prepare('SELECT status, amount_cents FROM enrollments WHERE id = ?').bind(Number(ref)).first<{ status: string; amount_cents: number }>();
+      outcome = !e ? 'no matching enrollment' : e.status === 'pending' && e.amount_cents !== s.amount_total ? `NOT activated: paid ${s.amount_total} cents, expected ${e.amount_cents}` : `already handled (enrollment is ${e.status})`;
+    }
   }
   // Remember the payment, so a refund issued later in Stripe can be matched to this purchase.
   if (s.payment_intent) {
