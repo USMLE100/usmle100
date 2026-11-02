@@ -65,7 +65,7 @@ app.get('/__staging', async (c) => {
   if (isProduction(c.env)) return c.notFound();
   const e = c.env;
   const owner = await e.DB.prepare('SELECT email FROM users WHERE is_owner = 1').first<{ email: string }>();
-  return c.json({
+  const status = {
     staging_owner: owner ? maskEmail(owner.email) : 'none yet (the first account to sign up becomes the staging owner)',
     environment: e.ENVIRONMENT ?? null,
     database: 'development (checked before this page loaded)',
@@ -76,7 +76,17 @@ app.get('/__staging', async (c) => {
     email: e.RESEND_API_KEY && e.EMAIL_FROM ? 'on' : 'off',
     sms: e.TWILIO_AUTH_TOKEN ? 'on' : 'off',
     marketing_sync: 'off',
-  });
+    // Counts only (no names): lets a sandbox test be checked without the Stripe dashboard.
+    purchases: {
+      enrollments: Object.fromEntries((await e.DB.prepare('SELECT status, COUNT(*) AS n FROM enrollments GROUP BY status').all<{ status: string; n: number }>()).results.map((r) => [r.status, r.n])),
+      course_book: Object.fromEntries((await e.DB.prepare('SELECT status, COUNT(*) AS n FROM book_purchases GROUP BY status').all<{ status: string; n: number }>()).results.map((r) => [r.status, r.n])),
+      refunds_handled: (await e.DB.prepare('SELECT COUNT(*) AS n FROM stripe_refunds').first<{ n: number }>())?.n ?? 0,
+      disputes: (await e.DB.prepare('SELECT COUNT(*) AS n FROM stripe_disputes').first<{ n: number }>())?.n ?? 0,
+    },
+    cohorts: (await e.DB.prepare('SELECT name, start_date FROM cohorts ORDER BY id').all<{ name: string; start_date: string }>()).results.map((r) => `${r.name} (Day 1 ${r.start_date})`),
+    recent_stripe_events: JSON.parse((await e.DB.prepare("SELECT value FROM settings WHERE key = 'staging_stripe_log'").first<{ value: string }>())?.value ?? '[]'),
+  };
+  return c.body(JSON.stringify(status, null, 2), 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
 });
 app.use('*', loadUser);
 app.use('*', sameOrigin);

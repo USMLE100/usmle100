@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../lib/types';
 import { PublicLayout, PortalLayout, Flash, LogoMark, LogoWord, LogoTagline } from '../views/layout';
+import { stagingLog } from '../lib/environment';
 import { Icon } from '../views/icons';
 import { createSession, destroySession, hashPassword, verifyPassword, requireUser, sha256Hex, toB64 } from '../lib/auth';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
@@ -930,7 +931,7 @@ publicRoutes.get('/buy/course-book/success', requireUser, async (c) => {
   if (sid && c.env.STRIPE_SECRET_KEY) {
     const own = await c.env.DB.prepare('SELECT id FROM book_purchases WHERE stripe_session_id = ? AND user_id = ?').bind(sid, user.id).first<{ id: number }>();
     const s = own ? await retrieveCheckoutSession(c.env, sid) : null;
-    if (s && own && s.client_reference_id === `book-${own.id}`) await fulfil(c.env.DB, s);
+    if (s && own && s.client_reference_id === `book-${own.id}`) await stagingLog(c.env, { source: 'return page', type: 'Course Book checkout', outcome: await fulfil(c.env.DB, s) });
   }
   return c.redirect((await hasBook(c.env.DB, user, c.get('enrollment'))) ? '/course-book' : '/buy/course-book?pending=1');
 });
@@ -941,7 +942,7 @@ publicRoutes.get('/enroll/success', requireUser, async (c) => {
   if (sid && c.env.STRIPE_SECRET_KEY) {
     const s = await retrieveCheckoutSession(c.env, sid);
     const enr = await c.env.DB.prepare('SELECT id, user_id FROM enrollments WHERE stripe_session_id = ?').bind(sid).first<{ id: number; user_id: number }>();
-    if (s && enr && enr.user_id === c.get('user')!.id && String(enr.id) === s.client_reference_id) await fulfil(c.env.DB, s);
+    if (s && enr && enr.user_id === c.get('user')!.id && String(enr.id) === s.client_reference_id) await stagingLog(c.env, { source: 'return page', type: 'program checkout', outcome: await fulfil(c.env.DB, s) });
   }
   return c.redirect('/welcome');
 });
@@ -950,20 +951,27 @@ publicRoutes.post('/stripe/webhook', async (c) => {
   if (!c.env.STRIPE_WEBHOOK_SECRET) return c.text('Webhook not configured', 503);
   const payload = await c.req.text();
   const ok = await verifyWebhook(payload, c.req.header('stripe-signature'), c.env.STRIPE_WEBHOOK_SECRET);
-  if (!ok) return c.text('Bad signature', 400);
+  if (!ok) {
+    await stagingLog(c.env, { source: 'webhook', type: 'unknown', outcome: 'rejected: bad or old signature (check STRIPE_WEBHOOK_SECRET)' });
+    return c.text('Bad signature', 400);
+  }
   const event = JSON.parse(payload);
+  let outcome = 'ignored (not an event the site uses)';
   // Access is given only for a fully paid session. Card payments arrive as checkout.session.completed;
   // delayed methods (bank debits) arrive later as async_payment_succeeded. Each purchase is fulfilled once.
   if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
-    await fulfil(c.env.DB, event.data.object);
+    outcome = await fulfil(c.env.DB, event.data.object);
   }
   // Refunds are issued by the owner in the Stripe Dashboard only. A full refund removes that purchase's access.
   if (event.type === 'charge.refunded') {
-    console.log('stripe refund', event.data.object?.id, await handleRefund(c.env, event.data.object));
+    outcome = await handleRefund(c.env, event.data.object);
+    console.log('stripe refund', event.data.object?.id, outcome);
   }
   // Chargebacks suspend the disputed purchase at once; the owner decides on restoring it.
   if (event.type === 'charge.dispute.created' || event.type === 'charge.dispute.closed' || event.type === 'charge.dispute.funds_reinstated') {
-    console.log('stripe dispute', event.data.object?.id, await handleDispute(c.env, event.data.object, event.type));
+    outcome = String(await handleDispute(c.env, event.data.object, event.type));
+    console.log('stripe dispute', event.data.object?.id, outcome);
   }
+  await stagingLog(c.env, { source: 'webhook', type: String(event.type), outcome });
   return c.json({ received: true });
 });

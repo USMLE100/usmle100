@@ -104,6 +104,23 @@ export const maskEmail = (e: string) => {
   return `${name.slice(0, 1)}***@${domain ?? ''}`;
 };
 
+/**
+ * Staging only: a short, anonymous record of Stripe events (time, type, where it came from, what happened),
+ * so a sandbox test can be checked from /__staging without the Stripe dashboard. No names, emails or card data.
+ * Never written in production.
+ */
+export async function stagingLog(env: Env, entry: { source: 'webhook' | 'return page'; type: string; outcome: string }) {
+  if (isProduction(env)) return;
+  const db = env.DB;
+  const row = await db.prepare("SELECT value FROM settings WHERE key = 'staging_stripe_log'").first<{ value: string }>();
+  let list: unknown[] = [];
+  try {
+    list = row ? JSON.parse(row.value) : [];
+  } catch {}
+  list.unshift({ at: new Date().toISOString().slice(0, 19) + 'Z', ...entry, outcome: entry.outcome.slice(0, 120) });
+  await db.prepare("INSERT INTO settings (key, value) VALUES ('staging_stripe_log', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(JSON.stringify(list.slice(0, 20))).run();
+}
+
 /** For tests only. */
 export const _resetDatabaseCheck = () => {
   checked = undefined;

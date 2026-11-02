@@ -134,3 +134,34 @@ describe('staging owner', () => {
     if (owner) await db.prepare('UPDATE users SET is_owner = 1 WHERE id = ?').bind(owner.id).run();
   });
 });
+
+describe('staging Stripe log', () => {
+  const secret = 'whsec_staging_test';
+  async function sign(payload: string) {
+    const t = Math.floor(Date.now() / 1000);
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sig = [...new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${t}.${payload}`)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+    return `t=${t},v1=${sig}`;
+  }
+  it('records webhook deliveries on staging (and bad signatures), shown on /__staging; never in production', async () => {
+    await setMark('development');
+    await db.prepare("DELETE FROM settings WHERE key = 'staging_stripe_log'").run();
+    const env = preview({ STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_WEBHOOK_SECRET: secret });
+    const payload = JSON.stringify({ type: 'charge.refunded', data: { object: { id: 'ch_test_1', payment_intent: null, amount: 100, amount_refunded: 50, refunded: false } } });
+    const ok = await worker.fetch(new Request('https://preview.example/stripe/webhook', { method: 'POST', body: payload, headers: { 'stripe-signature': await sign(payload) } }), env, ctx);
+    expect(ok.status).toBe(200);
+    const bad = await worker.fetch(new Request('https://preview.example/stripe/webhook', { method: 'POST', body: payload, headers: { 'stripe-signature': 't=1,v1=00' } }), env, ctx);
+    expect(bad.status).toBe(400);
+    const res = await worker.fetch(new Request('https://preview.example/__staging'), env, ctx);
+    expect(res.headers.get('content-type')).toContain('charset=utf-8');
+    const st = (await res.json()) as any;
+    expect(st.recent_stripe_events[0]).toMatchObject({ source: 'webhook', outcome: expect.stringContaining('bad or old signature') });
+    expect(st.recent_stripe_events[1]).toMatchObject({ source: 'webhook', type: 'charge.refunded', outcome: expect.stringContaining('partial') });
+    expect(st.purchases).toBeDefined();
+    // Production never writes the log.
+    await db.prepare("DELETE FROM settings WHERE key = 'staging_stripe_log'").run();
+    _resetDatabaseCheck();
+    await worker.fetch(new Request('https://x.example/stripe/webhook', { method: 'POST', body: payload, headers: { 'stripe-signature': await sign(payload) } }), { ...base, STRIPE_WEBHOOK_SECRET: secret }, ctx);
+    expect(await db.prepare("SELECT 1 FROM settings WHERE key = 'staging_stripe_log'").first()).toBeNull();
+  });
+});

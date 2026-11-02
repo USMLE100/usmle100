@@ -106,20 +106,23 @@ export async function fulfilBookPurchase(db: D1Database, sessionId: string, purc
 }
 
 /** Apply a paid Checkout Session to whatever it bought. Ignores anything not fully paid in US dollars. */
-export async function fulfil(db: D1Database, s: PaidSession) {
-  if (s.payment_status !== 'paid' || (s.currency ?? 'usd').toLowerCase() !== 'usd' || !s.client_reference_id) return;
+export async function fulfil(db: D1Database, s: PaidSession): Promise<string> {
+  if (s.payment_status !== 'paid' || (s.currency ?? 'usd').toLowerCase() !== 'usd' || !s.client_reference_id) return `not fulfilled (payment_status ${s.payment_status}, currency ${s.currency})`;
   const ref = s.client_reference_id;
   const book = /^book-(\d+)$/.exec(ref);
+  let outcome = 'unknown purchase reference';
   if (book) {
     if (await fulfilBookPurchase(db, s.id, Number(book[1]), s.amount_total)) {
       const p = await db.prepare('SELECT user_id FROM book_purchases WHERE id = ?').bind(Number(book[1])).first<{ user_id: number }>();
       await audit(db, { action: 'payment.book', targetUserId: p?.user_id ?? null, detail: { purchase: Number(book[1]), cents: s.amount_total, session: s.id } });
-    }
+      outcome = 'Course Book unlocked';
+    } else outcome = 'Course Book already unlocked (or amount did not match)';
   } else if (/^\d+$/.test(ref)) {
     if (await activateEnrollment(db, s.id, Number(ref), s.amount_total)) {
       const e = await db.prepare('SELECT user_id, package_id FROM enrollments WHERE id = ?').bind(Number(ref)).first<{ user_id: number; package_id: string }>();
       await audit(db, { action: 'payment.enrollment', targetUserId: e?.user_id ?? null, detail: { enrollment: Number(ref), pkg: e?.package_id, cents: s.amount_total, session: s.id } });
-    }
+      outcome = `enrollment activated (${e?.package_id ?? '?'}, $${(s.amount_total / 100).toFixed(2)})`;
+    } else outcome = 'enrollment already active (or amount did not match)';
   }
   // Remember the payment, so a refund issued later in Stripe can be matched to this purchase.
   if (s.payment_intent) {
@@ -128,6 +131,7 @@ export async function fulfil(db: D1Database, s: PaidSession) {
       db.prepare('UPDATE enrollments SET payment_intent = ? WHERE stripe_session_id = ? AND payment_intent IS NULL').bind(s.payment_intent, s.id),
     ]);
   }
+  return outcome;
 }
 
 /** The fields of a Stripe Charge used for refunds. */
