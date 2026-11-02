@@ -102,6 +102,20 @@ app.get('/__staging', async (c) => {
       disputes: (await e.DB.prepare('SELECT COUNT(*) AS n FROM stripe_disputes').first<{ n: number }>())?.n ?? 0,
     },
     cohorts: (await e.DB.prepare('SELECT name, start_date FROM cohorts ORDER BY id').all<{ name: string; start_date: string }>()).results.map((r) => `${r.name} (Day 1 ${r.start_date})`),
+    // Video test (anonymous): which lectures have a video, and what the player reported for recent viewings.
+    lectures_with_video: (await e.DB.prepare("SELECT l.day_number, l.status, c.name AS cohort FROM lectures l JOIN cohorts c ON c.id = l.cohort_id WHERE COALESCE(l.bunny_video_id, '') <> '' ORDER BY l.id DESC LIMIT 5").all<{ day_number: number; status: string; cohort: string }>()).results.map((r) => `${r.cohort} Day ${r.day_number} (${r.status})`),
+    recent_viewings: (
+      await e.DB.prepare('SELECT item, kind, started_at, last_beat_at, duration, watched_seconds, counted, counted_reason FROM view_sessions ORDER BY created_at DESC LIMIT 5').all<{
+        item: string; kind: string; started_at: number | null; last_beat_at: number | null; duration: number | null; watched_seconds: number; counted: number; counted_reason: string | null;
+      }>()
+    ).results.map((v) => ({
+      video: v.item,
+      kind: v.kind,
+      playback_started: !!v.started_at,
+      watched: `${Math.round(v.watched_seconds)}s` + (v.duration ? ` of ${Math.round(v.duration)}s (${Math.round((100 * v.watched_seconds) / v.duration)}%)` : ', length not reported'),
+      counted_as_view: v.counted ? `yes (${v.counted_reason ?? ''})` : 'not yet (counts at 65% or after 24 h)',
+      last_progress_report: v.last_beat_at ? new Date(v.last_beat_at * 1000).toISOString().slice(0, 19) + 'Z' : 'none',
+    })),
     recent_stripe_events: JSON.parse((await e.DB.prepare("SELECT value FROM settings WHERE key = 'staging_stripe_log'").first<{ value: string }>())?.value ?? '[]'),
   };
   return c.body(JSON.stringify(status, null, 2), 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });

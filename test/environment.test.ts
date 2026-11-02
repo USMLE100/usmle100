@@ -112,6 +112,8 @@ describe('staging status page', () => {
     expect(safeEnv(env).BUNNY_TOKEN_KEY).toBe('tok');
     const text = await (await worker.fetch(new Request('https://preview.example/__staging'), env, ctx)).text();
     expect(JSON.parse(text).bunny).toMatch(/playback only.*token key set/);
+    expect(Array.isArray(JSON.parse(text).recent_viewings)).toBe(true);
+    expect(Array.isArray(JSON.parse(text).lectures_with_video)).toBe(true);
     expect(text).not.toContain('bunny_api_secret');
   });
   it('a live key on a preview shows as not set', async () => {
