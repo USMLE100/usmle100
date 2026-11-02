@@ -159,7 +159,7 @@ Until these keys exist, the following stay off:
    - the Bunny checks on the staging library (step 3.5);
    - one Zoom recording through approval, only if you opted staging into Zoom (step 4);
    - email codes and password reset through Resend (step 6).
-2. Write down the current time for a possible database rollback (see `HANDOVER.md` → Backups).
+2. Write down the current time for a possible database rollback (see `HANDOVER.md` → Backups). Before launch day, run `bash scripts/prelaunch-checks.sh` once: it shows who becomes owner, confirms production is at migration 0010 and has restore points (all read-only), and runs a real restore drill on `usmle100-dev`.
 3. Make sure `DEV_FAKE_PAYMENTS` is **not** set in Cloudflare (Production).
 4. With your approval only: merge `v12-frontend` into `main`. This deploys, and database changes apply automatically. The live Worker then marks its database "production", so no Preview can ever start on it.
 5. Add the live Stripe key and the live webhook (step 1). Then do one small real purchase and refund it.
