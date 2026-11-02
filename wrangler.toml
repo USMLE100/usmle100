@@ -57,9 +57,11 @@ BUNNY_LIBRARY_ID = "785730"
 # ---------------------------------------------------------------------------------------------------------
 [previews.vars]
 ENVIRONMENT = "preview"
-# A separate Bunny Stream library for staging (its own token key and allowed domains). Empty = videos off on previews.
-# Fill in with scripts/setup-staging.sh or by hand; never the live library 785730 (its API key would be ignored anyway).
-BUNNY_LIBRARY_ID = ""
+# Bunny playback on staging. The owner approved (2 Nov 2026) playing videos from the live library 785730 on staging,
+# view-only, to test the real player before launch. Staging can never change anything in Bunny: lib/environment.safeEnv
+# drops BUNNY_API_KEY for this library outside production. Needs the library's token key as the Preview secret
+# BUNNY_TOKEN_KEY. Set back to "" to switch staging videos off.
+BUNNY_LIBRARY_ID = "785730"
 # "1" only after the owner approves testing recording approval with a staging Zoom app.
 PREVIEW_ALLOW_ZOOM = "0"
 

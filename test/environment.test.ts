@@ -105,6 +105,15 @@ describe('staging status page', () => {
     expect(JSON.parse(text)).toMatchObject({ environment: 'preview', stripe: 'test mode (restricted key)', bunny: 'off', zoom: 'off' });
     expect(text).not.toContain('secretvalue');
   });
+  it('the live video library on a preview is playback only: the Bunny API key is dropped', async () => {
+    await setMark('development');
+    const env = preview({ BUNNY_LIBRARY_ID: LIVE_BUNNY_LIBRARY_ID, BUNNY_API_KEY: 'bunny_api_secret', BUNNY_TOKEN_KEY: 'tok' });
+    expect(safeEnv(env).BUNNY_API_KEY).toBeUndefined();
+    expect(safeEnv(env).BUNNY_TOKEN_KEY).toBe('tok');
+    const text = await (await worker.fetch(new Request('https://preview.example/__staging'), env, ctx)).text();
+    expect(JSON.parse(text).bunny).toMatch(/playback only.*token key set/);
+    expect(text).not.toContain('bunny_api_secret');
+  });
   it('a live key on a preview shows as not set', async () => {
     await setMark('development');
     const res = await worker.fetch(new Request('https://preview.example/__staging'), preview({ STRIPE_SECRET_KEY: 'sk_live_abc' }), ctx);

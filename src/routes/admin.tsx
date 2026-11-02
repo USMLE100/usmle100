@@ -99,7 +99,7 @@ admin.get('/lectures', async (c) => {
             <p class="muted small">When a class recording finishes in your Zoom cloud, it is copied to Bunny privately and placed on that day’s lecture. Students see it only after the owner approves it below (one approval per recording).</p>
             {adminUser && <>
             <ul class="small" style="margin:0;padding-left:18px">
-              <li>Bunny connection: {c.env.BUNNY_API_KEY ? <strong>connected</strong> : <span class="chip chip-rust">{isProduction(c.env) ? 'add BUNNY_API_KEY in Cloudflare' : 'off on staging (needs a staging Bunny library)'}</span>}</li>
+              <li>Bunny connection: {c.env.BUNNY_API_KEY ? <strong>connected</strong> : <span class="chip chip-rust">{isProduction(c.env) ? 'add BUNNY_API_KEY in Cloudflare' : 'off on staging: videos play, but nothing in Bunny can be changed'}</span>}</li>
               <li>Zoom connection: {c.env.ZOOM_WEBHOOK_SECRET ? <strong>connected</strong> : <span class="chip chip-rust">{isProduction(c.env) ? 'add ZOOM_WEBHOOK_SECRET in Cloudflare' : 'off on staging (owner approval needed)'}</span>}</li>
               <li>Address for the Zoom app: <code style="word-break:break-all">{webhookUrl}</code></li>
             </ul>

@@ -9,7 +9,7 @@ import { zoom } from './routes/zoom';
 import { loadUser, pruneSessions, sameOrigin } from './lib/auth';
 import { loadShell } from './lib/shell';
 import { ensureMigrated } from './lib/migrate';
-import { checkDatabase, ensureStagingOwner, isProduction, markDatabase, maskEmail, safeEnv } from './lib/environment';
+import { checkDatabase, ensureStagingOwner, isProduction, LIVE_BUNNY_LIBRARY_ID, markDatabase, maskEmail, safeEnv } from './lib/environment';
 import { publicRoutes } from './routes/public';
 import { portal } from './routes/portal';
 import { admin } from './routes/admin';
@@ -85,7 +85,11 @@ app.get('/__staging', async (c) => {
     database: 'development (checked before this page loaded)',
     stripe: e.STRIPE_SECRET_KEY ? (e.STRIPE_SECRET_KEY.startsWith('rk_test_') ? 'test mode (restricted key)' : 'test mode') : 'not set',
     stripe_webhook: e.STRIPE_WEBHOOK_SECRET ? 'set' : 'not set',
-    bunny: e.BUNNY_LIBRARY_ID ? `staging library ${e.BUNNY_LIBRARY_ID}` + (e.BUNNY_API_KEY ? ' (API key set)' : '') : 'off',
+    bunny: !e.BUNNY_LIBRARY_ID
+      ? 'off'
+      : e.BUNNY_LIBRARY_ID === LIVE_BUNNY_LIBRARY_ID
+        ? `live library ${e.BUNNY_LIBRARY_ID}, playback only (changes blocked)` + (e.BUNNY_TOKEN_KEY ? ', token key set' : ', token key MISSING: videos will not play')
+        : `staging library ${e.BUNNY_LIBRARY_ID}` + (e.BUNNY_API_KEY ? ' (API key set)' : '') + (e.BUNNY_TOKEN_KEY ? ', token key set' : ', token key missing'),
     zoom: e.ZOOM_CLIENT_SECRET || e.ZOOM_WEBHOOK_SECRET ? 'on (owner opted in)' : 'off',
     email: e.RESEND_API_KEY && e.EMAIL_FROM ? 'on' : 'off',
     sms: e.TWILIO_AUTH_TOKEN ? 'on' : 'off',

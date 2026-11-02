@@ -27,7 +27,13 @@ ok(pd.length === 1 && pd[0].binding === 'DB', 'exactly one Preview database bind
 ok(pd.every((d) => d.database_id !== PROD_DB_ID && d.database_name !== 'usmle100'), 'Preview database is not the production database');
 ok(pd[0]?.database_id === DEV_DB_ID && pd[0]?.database_name === 'usmle100-dev', `Preview DB → usmle100-dev (${DEV_DB_ID})`);
 ok(p?.vars?.ENVIRONMENT === 'preview', 'Preview ENVIRONMENT = "preview"');
-ok((p?.vars?.BUNNY_LIBRARY_ID ?? '') !== '785730', 'Preview does not use the live Bunny library');
+// The owner approved (2 Nov 2026) view-only playback from the live library on staging. Allowed only while the
+// runtime guard that drops the Bunny API key for that library is in place.
+{
+  const envSrc = (await import('node:fs')).readFileSync(new URL('../src/lib/environment.ts', import.meta.url), 'utf8');
+  const live = (p?.vars?.BUNNY_LIBRARY_ID ?? '') === '785730';
+  ok(!live || (/LIVE_BUNNY_LIBRARY_ID = '785730'/.test(envSrc) && /delete out\.BUNNY_API_KEY/.test(envSrc)), live ? 'Preview plays the live Bunny library view-only (API key blocked by safeEnv)' : 'Preview does not use the live Bunny library');
+}
 ok(p?.vars?.PREVIEW_ALLOW_ZOOM !== '1', 'Zoom off on Previews (owner has not opted in)');
 ok(!p?.vars?.DEV_FAKE_PAYMENTS, 'DEV_FAKE_PAYMENTS not set on Previews');
 
