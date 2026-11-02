@@ -62,6 +62,9 @@ ENVIRONMENT = "preview"
 # drops BUNNY_API_KEY for this library outside production. Needs the library's token key as the Preview secret
 # BUNNY_TOKEN_KEY. Set back to "" to switch staging videos off.
 BUNNY_LIBRARY_ID = "785730"
+# Signed video links last 15 minutes in production. Staging uses 2 minutes so a short test shows how Bunny's player
+# behaves when its link expires during playback and after a pause (the player fetches a fresh link after a long pause).
+VIDEO_LINK_MINUTES = "2"
 # "1" only after the owner approves testing recording approval with a staging Zoom app.
 PREVIEW_ALLOW_ZOOM = "0"
 

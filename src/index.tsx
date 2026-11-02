@@ -1,3 +1,4 @@
+import { videoLinkSeconds } from './lib/content';
 import { Hono } from 'hono';
 import { secureHeaders } from 'hono/secure-headers';
 import type { AppEnv, Env } from './lib/types';
@@ -90,6 +91,7 @@ app.get('/__staging', async (c) => {
       : e.BUNNY_LIBRARY_ID === LIVE_BUNNY_LIBRARY_ID
         ? `live library ${e.BUNNY_LIBRARY_ID}, playback only (changes blocked)` + (e.BUNNY_TOKEN_KEY ? ', token key set' : ', token key MISSING: videos will not play')
         : `staging library ${e.BUNNY_LIBRARY_ID}` + (e.BUNNY_API_KEY ? ' (API key set)' : '') + (e.BUNNY_TOKEN_KEY ? ', token key set' : ', token key missing'),
+    video_link_minutes: videoLinkSeconds(e) / 60,
     zoom: e.ZOOM_CLIENT_SECRET || e.ZOOM_WEBHOOK_SECRET ? 'on (owner opted in)' : 'off',
     email: e.RESEND_API_KEY && e.EMAIL_FROM ? 'on' : 'off',
     sms: e.TWILIO_AUTH_TOKEN ? 'on' : 'off',

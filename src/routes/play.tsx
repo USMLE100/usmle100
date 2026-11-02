@@ -3,7 +3,7 @@ import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../lib/types';
 import { isStaff } from '../lib/types';
 import { requireUser } from '../lib/auth';
-import { bunnyEmbedUrl } from '../lib/content';
+import { bunnyEmbedUrl, videoLinkSeconds } from '../lib/content';
 import { audit } from '../lib/audit';
 import { PortalLayout, PageHead, Flash } from '../views/layout';
 import { Icon } from '../views/icons';
@@ -65,13 +65,13 @@ play.post('/play/claim', async (c) => {
 
   if (r.access.kind === 'staff') {
     const src = await link();
-    return src ? c.json({ state: 'ok', sid: 'staff', nonce: 'staff', src, pos: 0, first: false, wm: wm('STAFF') }) : c.json(unplayable);
+    return src ? c.json({ state: 'ok', sid: 'staff', nonce: 'staff', src, ttl: videoLinkSeconds(c.env), pos: 0, first: false, wm: wm('STAFF') }) : c.json(unplayable);
   }
   if (r.access.kind === 'open') {
     const t = await claimTab(db, user.id, tab, item, null, where(c));
     if (!t.ok) return busy(c, user.id, t, item);
     const src = await link();
-    return src ? c.json({ state: 'ok', sid: 'open', nonce: t.nonce, src, pos: await lastPosition(db, user.id, item), first: false, wm: wm(t.nonce.slice(0, 9)) }) : c.json(unplayable);
+    return src ? c.json({ state: 'ok', sid: 'open', nonce: t.nonce, src, ttl: videoLinkSeconds(c.env), pos: await lastPosition(db, user.id, item), first: false, wm: wm(t.nonce.slice(0, 9)) }) : c.json(unplayable);
   }
 
   const v = await openOrCreate(db, user.id, item, r.access);
@@ -88,6 +88,7 @@ play.post('/play/claim', async (c) => {
     sid: v.session.id,
     nonce: t.nonce,
     src,
+    ttl: videoLinkSeconds(c.env),
     pos: await lastPosition(db, user.id, item),
     // The rules are shown before the first playback of each video (R054).
     first: v.history === 0 && !v.session.started_at,
@@ -123,6 +124,7 @@ play.post('/play/beat', async (c) => {
       direct_ready: d.rawReady === true,
       player_messages: Number(d.msgs) || 0,
       events: ev,
+      fresh_links_after_pause: Number(d.refreshed) || 0,
       message_origins: Array.isArray(d.origins) ? d.origins.slice(0, 4).map((o) => String(o).slice(0, 60)) : [],
       server_says: result.state,
     };

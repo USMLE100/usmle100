@@ -3,6 +3,8 @@ export type Env = {
   ASSETS: Fetcher;
   /** Public address, e.g. https://usmle100.com. If unset, taken from each request. */
   SITE_URL?: string;
+  /** Minutes a signed video link stays valid (default 15). Staging uses a short value to test expiry. */
+  VIDEO_LINK_MINUTES?: string;
   /** "production" on the live Worker, "preview" on Worker Previews (wrangler.toml). Anything else is treated as a test environment. */
   ENVIRONMENT?: string;
   /** Previews only: "1" lets a preview use Zoom credentials (for testing recording approval with a staging Zoom app). */
