@@ -98,10 +98,10 @@ export async function ensureStagingOwner(env: Env) {
   ownerReady = true;
 }
 
-/** "s•••@gmail.com": enough for the owner to recognise their own account on the staging status page. */
+/** "s***@gmail.com": enough for the owner to recognise their own account on the staging status page. */
 export const maskEmail = (e: string) => {
   const [name, domain] = e.split('@');
-  return `${name.slice(0, 1)}•••@${domain ?? ''}`;
+  return `${name.slice(0, 1)}***@${domain ?? ''}`;
 };
 
 /** For tests only. */
