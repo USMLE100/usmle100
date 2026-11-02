@@ -376,7 +376,7 @@ content.get('/book', async (c) => {
       {!rows.results.length && <p class="muted">No chapters yet.</p>}
       <section class="card">
         <h2>Give the Course Book to a student</h2>
-        <p class="muted small">For students who bought the Course Book on its own. Students on {BOOK_PACKAGES.join(', ')} already have it.</p>
+        <p class="muted small">For students who bought the Course Book on its own. Students on Companion, Complete and MAX already have it.</p>
         <form method="post" action="/admin/book-access" class="row" style="align-items:flex-end">
           <label class="field" style="flex:2 1 220px">Student email (they must have an account)<input type="email" name="email" required /></label>
           <label class="field" style="flex:1 1 160px">Note (optional)<input type="text" name="note" maxlength={120} placeholder="Paid by Zelle" /></label>

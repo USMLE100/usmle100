@@ -980,7 +980,7 @@ portal.get('/review', async (c) => {
             <RetryForm pool="incorrect" n={wrong} label="Retry" />
           </div>
         ) : (
-          <div class="catch-item"><span class="txt"><strong>Zero unresolved questions</strong><span>All attempted questions are currently answered correctly.</span></span><span class="okic"><Icon name="check_circle" /></span></div>
+          <div class="catch-item"><span class="txt">{rows.some((r) => r.status !== 'unused') ? <><strong>Zero unresolved questions</strong><span>All attempted questions are currently answered correctly.</span></> : <><strong>Nothing to retry yet</strong><span>Questions you miss will appear here.</span></>}</span><span class="okic"><Icon name="check_circle" /></span></div>
         )}
         {flagged > 0 && (
           <div class="catch-item">

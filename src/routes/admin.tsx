@@ -10,6 +10,7 @@ import { currentCohort, dayDate, defaultLecturesUntil, fmtDate, LECTURE_DAYS_AFT
 import { parseCsv, toCsv, TEMPLATE_HEADERS } from '../lib/csv';
 import { getSettings, isHttpUrl, SETTING_FIELDS } from '../lib/settings';
 import { meetingIdList, syncImports } from '../lib/zoom';
+import { isProduction } from '../lib/environment';
 import { allSessions, CLASSES_PER_MONTH, giveEveningMonths, GRACE_DAYS, subStatus, todayYmd } from '../lib/evening';
 
 export const admin = new Hono<AppEnv>();
@@ -60,6 +61,7 @@ admin.get('/lectures', async (c) => {
       <Eyebrow>Admin</Eyebrow>
       <h1>Lectures</h1>
       {c.req.query('ok') && <Flash>Saved.</Flash>}
+      {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
       {!cohort && !adminUser ? (
         <p class="muted">No cohort yet. An admin needs to create one.</p>
       ) : !cohort ? (
@@ -97,8 +99,8 @@ admin.get('/lectures', async (c) => {
             <p class="muted small">When a class recording finishes in your Zoom cloud, it is copied to Bunny privately and placed on that day’s lecture. Students see it only after the owner approves it below (one approval per recording).</p>
             {adminUser && <>
             <ul class="small" style="margin:0;padding-left:18px">
-              <li>Bunny connection: {c.env.BUNNY_API_KEY ? <strong>connected</strong> : <span class="chip chip-rust">add BUNNY_API_KEY in Cloudflare</span>}</li>
-              <li>Zoom connection: {c.env.ZOOM_WEBHOOK_SECRET ? <strong>connected</strong> : <span class="chip chip-rust">add ZOOM_WEBHOOK_SECRET in Cloudflare</span>}</li>
+              <li>Bunny connection: {c.env.BUNNY_API_KEY ? <strong>connected</strong> : <span class="chip chip-rust">{isProduction(c.env) ? 'add BUNNY_API_KEY in Cloudflare' : 'off on staging (needs a staging Bunny library)'}</span>}</li>
+              <li>Zoom connection: {c.env.ZOOM_WEBHOOK_SECRET ? <strong>connected</strong> : <span class="chip chip-rust">{isProduction(c.env) ? 'add ZOOM_WEBHOOK_SECRET in Cloudflare' : 'off on staging (owner approval needed)'}</span>}</li>
               <li>Address for the Zoom app: <code style="word-break:break-all">{webhookUrl}</code></li>
             </ul>
             <form method="post" action="/admin/zoom-settings" class="row" style="align-items:flex-end">
@@ -247,7 +249,13 @@ admin.post('/cohorts', async (c) => {
   const f = await c.req.parseBody();
   const name = String(f.name ?? '').trim();
   const start = String(f.start_date ?? '');
-  if (!name || !/^\d{4}-\d{2}-\d{2}$/.test(start)) return c.redirect('/admin/lectures');
+  const bad = (msg: string) => c.redirect('/admin/lectures?error=' + encodeURIComponent(msg));
+  if (!name) return bad('Please give the cohort a name.');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return bad('Please choose the Day 1 date.');
+  // A double tap or a resent form must not create the same cohort twice.
+  if (await c.env.DB.prepare('SELECT 1 FROM cohorts WHERE lower(name) = lower(?) OR start_date = ?').bind(name, start).first()) {
+    return bad('A cohort with this name or this Day 1 date already exists.');
+  }
   await c.env.DB.prepare('INSERT INTO cohorts (name, start_date) VALUES (?, ?)').bind(name, start).run();
   return c.redirect('/admin/lectures?ok=1');
 });

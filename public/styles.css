@@ -89,6 +89,8 @@ p { margin: 0; }
 
 /* ---------- Cards ---------- */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+/* A card that lays its content out in a row (forms with fields side by side). Without this, .card's column direction wins. */
+.card.row { flex-direction: row; flex-wrap: wrap; }
 .card-soft { background: var(--soft); }
 .card-sage { background: var(--sage-2); border-color: transparent; }
 .card-sand, .card-cream { background: var(--cream); border-color: transparent; }
@@ -111,6 +113,10 @@ p { margin: 0; }
 .field input, .field select, .field textarea, input.input {
   font: 400 16px var(--text); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 13px 14px; width: 100%; }
 .field textarea { min-height: 120px; }
+/* Inputs placed straight in a form row or table (not inside a .field label) get the same look, a bit more compact. */
+.app-main :is(form, td) > input:is([type=text], [type=email], [type=url], [type=number], [type=date], [type=search]):not([class]) {
+  font: 400 15px var(--text); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; min-width: 0; }
+.app-main :is(form, td) > input:not([class]):focus { border-color: var(--green); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent); }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--green); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent); }
 .check { display: flex; align-items: center; gap: 10px; font-size: 15px; cursor: pointer; }
 .check input { width: 18px; height: 18px; accent-color: var(--green); }
