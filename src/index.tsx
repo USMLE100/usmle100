@@ -55,7 +55,7 @@ app.use(
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ['https://fonts.gstatic.com'],
-      scriptSrc: ["'self'", "'unsafe-inline'", 'https://challenges.cloudflare.com'],
+      scriptSrc: ["'self'", "'unsafe-inline'", 'https://challenges.cloudflare.com', 'https://assets.mediadelivery.net'],
       frameSrc: ['https://iframe.mediadelivery.net', 'https://challenges.cloudflare.com'],
       connectSrc: ["'self'", 'https://challenges.cloudflare.com'],
       workerSrc: ["'self'", 'blob:'],
@@ -116,6 +116,8 @@ app.get('/__staging', async (c) => {
       counted_as_view: v.counted ? `yes (${v.counted_reason ?? ''})` : 'not yet (counts at 65% or after 24 h)',
       last_progress_report: v.last_beat_at ? new Date(v.last_beat_at * 1000).toISOString().slice(0, 19) + 'Z' : 'none',
     })),
+    // What the lecture player last heard from Bunny's player (staging only): shows which step fails if progress isn't counted.
+    player_diagnostics: JSON.parse((await e.DB.prepare("SELECT value FROM settings WHERE key = 'staging_player_diag'").first<{ value: string }>())?.value ?? 'null'),
     recent_stripe_events: JSON.parse((await e.DB.prepare("SELECT value FROM settings WHERE key = 'staging_stripe_log'").first<{ value: string }>())?.value ?? '[]'),
   };
   return c.body(JSON.stringify(status, null, 2), 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });

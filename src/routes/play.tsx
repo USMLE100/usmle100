@@ -1,3 +1,4 @@
+import { isProduction } from '../lib/environment';
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../lib/types';
 import { isStaff } from '../lib/types';
@@ -109,7 +110,25 @@ play.post('/play/beat', async (c) => {
     dur: Number(b.dur),
     add: Array.isArray(b.add) ? b.add : [],
   };
-  return c.json(await recordBeat(c.env.DB, user, c.get('enrollment'), beat));
+  const result = await recordBeat(c.env.DB, user, c.get('enrollment'), beat);
+  // Staging only: keep what the page heard from Bunny's player (counts and flags only, no personal data).
+  if (!isProduction(c.env) && b.diag && typeof b.diag === 'object') {
+    const d = b.diag as Record<string, unknown>;
+    const ev = d.ev && typeof d.ev === 'object' ? Object.fromEntries(Object.entries(d.ev as Record<string, unknown>).slice(0, 12).map(([k, v]) => [String(k).slice(0, 20), Number(v) || 0])) : {};
+    const diag = {
+      at: new Date().toISOString().slice(0, 19) + 'Z',
+      video: beat.sid === 'staff' ? 'staff preview' : 'student viewing',
+      bunny_library_loaded: d.lib === true,
+      library_ready: d.libReady === true,
+      direct_ready: d.rawReady === true,
+      player_messages: Number(d.msgs) || 0,
+      events: ev,
+      message_origins: Array.isArray(d.origins) ? d.origins.slice(0, 4).map((o) => String(o).slice(0, 60)) : [],
+      server_says: result.state,
+    };
+    await c.env.DB.prepare("INSERT INTO settings (key, value) VALUES ('staging_player_diag', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(JSON.stringify(diag)).run();
+  }
+  return c.json(result);
 });
 
 /** End Lecture, or the tab closing: frees the one-tab slot at once. The viewing session stays open. */

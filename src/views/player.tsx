@@ -23,6 +23,8 @@ export const ProtectedPlayer = (p: { item: string; title: string }) => (
       <button type="button" class="btn btn-outline btn-sm" data-pp-end hidden><Icon name="close" size={18} />End Lecture</button>
       <button type="button" class="btn btn-ghost btn-sm" data-pp-fs hidden><Icon name="open" size={18} />Full screen</button>
     </div>
+    {/* Bunny's own player.js client (bunny.net/docs/stream/playback-api). Optional: the player also speaks the protocol directly. */}
+    <script async src="https://assets.mediadelivery.net/playerjs/playerjs-latest.min.js" onload="window.dispatchEvent(new Event('u100-pj'))"></script>
     <script dangerouslySetInnerHTML={{ __html: PLAYER_JS }} />
   </div>
 );
@@ -32,6 +34,7 @@ var root=document.getElementById('pp');if(!root||root.dataset.init)return;root.d
 var ITEM=root.dataset.item,box=root.querySelector('.pp-frame'),wm=root.querySelector('.pp-wm'),ov=root.querySelector('.pp-overlay'),msg=root.querySelector('.pp-msg'),acts=root.querySelector('.pp-actions'),endB=root.querySelector('[data-pp-end]'),fsB=root.querySelector('[data-pp-fs]'),stage=root.querySelector('.pp-stage');
 function rand(){var a=new Uint8Array(12);crypto.getRandomValues(a);return Array.prototype.map.call(a,function(b){return('0'+b.toString(16)).slice(-2)}).join('')}
 var TAB;try{TAB=sessionStorage.getItem('u100tab');if(!TAB){TAB=rand();sessionStorage.setItem('u100tab',TAB)}}catch(e){TAB=rand()}
+var D={lib:false,libReady:false,rawReady:false,msgs:0,ev:{},origins:[]};
 var S={sid:null,nonce:null,frame:null,origin:'',ready:false,playing:false,last:null,ranges:[],pos:0,dur:0,okAt:Date.now(),block:null,resume:0,wasPlaying:false,timer:null,lid:0};
 function post(u,b){return fetch(u,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(b)})}
 function show(t,buttons){msg.textContent=t;acts.innerHTML='';(buttons||[]).forEach(function(b){var x=document.createElement(b.href?'a':'button');x.className='btn '+(b.primary?'btn-primary':'btn-outline');x.textContent=b.label;if(b.href)x.href=b.href;else{x.type='button';x.onclick=b.fn}acts.appendChild(x)});ov.hidden=false}
@@ -39,8 +42,8 @@ function hide(){ov.hidden=true}
 function block(kind,t,buttons){S.block=kind;cmd('pause');setPlaying(false);show(t,buttons)}
 function unblock(){S.block=null;hide()}
 function setPlaying(v){S.playing=v;root.classList.toggle('pp-live',v)}
-function cmd(m,v,l){if(!S.frame||!S.frame.contentWindow)return;var o={context:'player.js',version:'0.0.11',method:m};if(v!==undefined)o.value=v;if(l)o.listener=l;S.frame.contentWindow.postMessage(JSON.stringify(o),S.origin)}
-function teardown(){if(S.frame){S.frame.remove();S.frame=null}S.ready=false;setPlaying(false);S.last=null;clearTimeout(S.timer);endB.hidden=true;fsB.hidden=true}
+function cmd(m,v,l){if(!S.frame||!S.frame.contentWindow)return;if(S.pj&&D.libReady&&!l){try{if(m==='pause')S.pj.pause();else if(m==='play')S.pj.play();else if(m==='setCurrentTime')S.pj.setCurrentTime(v)}catch(x){}}var o={context:'player.js',version:'0.0.11',method:m};if(v!==undefined)o.value=v;if(l)o.listener=l;S.frame.contentWindow.postMessage(JSON.stringify(o),S.origin)}
+function teardown(){S.pj=null;if(S.frame){S.frame.remove();S.frame=null}S.ready=false;setPlaying(false);S.last=null;clearTimeout(S.timer);endB.hidden=true;fsB.hidden=true}
 function claim(){teardown();show('Loading the lecture…');post('/play/claim',{item:ITEM,tab:TAB}).then(function(r){if(r.status===401){location.href='/sign-in?ended=idle&next='+encodeURIComponent(location.pathname);return null}return r.json()}).then(function(j){if(!j)return;handle(j)}).catch(function(){show('We couldn’t load the lecture. Check your connection.',[{label:'Try again',primary:true,fn:claim}])})}
 function handle(j){
  if(j.state==='account'){location.href=j.url;return}
@@ -54,17 +57,27 @@ function handle(j){
  S.sid=j.sid;S.nonce=j.nonce;S.resume=j.pos||0;S.okAt=Date.now();
  wm.innerHTML='';var a=document.createElement('span');a.className='pp-wm-main';a.textContent=j.wm.name+' · ID '+j.wm.id;var b2=document.createElement('span');b2.className='pp-wm-code';b2.textContent='Session '+j.wm.code;wm.appendChild(a);wm.appendChild(b2);moveWm();
  if(j.first){show(j.notice,[{label:'Start lecture',primary:true,fn:function(){load(j.src)}}])}else load(j.src)}
-function load(src){unblock();S.origin=new URL(src).origin;var f=document.createElement('iframe');f.src=src;f.title=root.dataset.title||'Lecture';f.setAttribute('allow',"autoplay; encrypted-media; accelerometer; gyroscope; picture-in-picture 'none'");f.setAttribute('referrerpolicy','strict-origin');box.appendChild(f);S.frame=f;endB.hidden=false;var fs=stage.requestFullscreen||stage.webkitRequestFullscreen;fsB.hidden=!fs;schedule(1000)}
-addEventListener('message',function(e){if(!S.frame||e.source!==S.frame.contentWindow)return;var d=e.data;if(typeof d==='string'){try{d=JSON.parse(d)}catch(x){return}}if(!d||d.context!=='player.js')return;
- if(d.event==='ready'){S.ready=true;['play','pause','timeupdate','ended'].forEach(function(ev,i){cmd('addEventListener',ev,'u'+i)});if(S.resume>5)cmd('setCurrentTime',S.resume);return}
- if(d.event==='play'){if(S.block||document.visibilityState==='hidden'){cmd('pause');return}setPlaying(true);schedule(500);return}
- if(d.event==='pause'||d.event==='ended'){setPlaying(false);schedule(300);return}
- if(d.event==='timeupdate'&&d.value){var s=+d.value.seconds,du=+d.value.duration;if(du>0)S.dur=du;if(S.playing&&S.last!=null&&s>S.last&&s-S.last<=3)add(S.last,s);S.last=s;S.pos=s}});
+function load(src){unblock();S.origin=new URL(src).origin;var f=document.createElement('iframe');f.src=src;f.title=root.dataset.title||'Lecture';f.setAttribute('allow',"autoplay; encrypted-media; accelerometer; gyroscope; picture-in-picture 'none'");f.setAttribute('referrerpolicy','strict-origin');box.appendChild(f);S.frame=f;libAttach(f);endB.hidden=false;var fs=stage.requestFullscreen||stage.webkitRequestFullscreen;fsB.hidden=!fs;schedule(1000)}
+addEventListener('message',function(e){if(!S.frame)return;var d=e.data;if(typeof d==='string'){try{d=JSON.parse(d)}catch(x){return}}if(!d||d.context!=='player.js')return;D.msgs++;if(D.origins.indexOf(e.origin)<0&&D.origins.length<4)D.origins.push(e.origin);if(e.source!==S.frame.contentWindow&&e.origin!==S.origin)return;
+ if(d.event==='ready'){D.rawReady=true;S.ready=true;['play','pause','timeupdate','ended'].forEach(function(ev,i){cmd('addEventListener',ev,'u'+i)});if(S.resume>5)cmd('setCurrentTime',S.resume);return}
+ onEv(d.event,d.value)});
+function onEv(ev,v){D.ev[ev]=(D.ev[ev]||0)+1;
+ if(ev==='play'){if(S.block||document.visibilityState==='hidden'){cmd('pause');return}if(!S.playing){setPlaying(true);schedule(500)}return}
+ if(ev==='pause'||ev==='ended'){if(S.playing){setPlaying(false);schedule(300)}return}
+ if(ev==='timeupdate'&&v){var s=+v.seconds,du=+v.duration;if(du>0)S.dur=du;
+  // Time moving forward in small steps means the video is playing, even if the play message was missed.
+  if(!S.playing&&!S.block&&S.last!=null&&s>S.last&&s-S.last<=3&&document.visibilityState!=='hidden'){setPlaying(true);schedule(500)}
+  if(S.playing&&S.last!=null&&s>S.last&&s-S.last<=3)add(S.last,s);S.last=s;S.pos=s}}
+addEventListener('u100-pj',function(){if(S.frame&&!S.pj)libAttach(S.frame)});
+function libAttach(f){if(!window.playerjs||!playerjs.Player)return;D.lib=true;try{var pj=new playerjs.Player(f);S.pj=pj;pj.on('ready',function(){if(S.pj!==pj)return;D.libReady=true;
+  ['play','pause','ended'].forEach(function(ev){pj.on(ev,function(){if(S.pj===pj)onEv(ev)})});
+  pj.on('timeupdate',function(v){if(S.pj===pj)onEv('timeupdate',v)});
+  if(S.resume>5&&!D.rawReady)try{pj.setCurrentTime(S.resume)}catch(x){}})}catch(x){}}
 function add(a,b){var r=S.ranges[S.ranges.length-1];if(r&&Math.abs(r[1]-a)<0.01)r[1]=b;else S.ranges.push([a,b])}
 function schedule(ms){clearTimeout(S.timer);S.timer=setTimeout(beat,ms)}
 var inflight=false;
 function beat(){if(!S.sid||!S.frame){return}if(inflight){schedule(2000);return}inflight=true;var sent=S.ranges.slice();var n=sent.length;
- post('/play/beat',{sid:S.sid,tab:TAB,nonce:S.nonce,playing:S.playing,pos:S.pos,dur:S.dur,add:sent}).then(function(r){if(r.status===401){location.href='/sign-in?ended=idle&next='+encodeURIComponent(location.pathname);return null}if(!r.ok&&r.status!==403&&r.status!==503)throw 0;return r.json()}).then(function(j){inflight=false;if(!j)return;S.ranges.splice(0,n);S.okAt=Date.now();
+ post('/play/beat',{sid:S.sid,tab:TAB,nonce:S.nonce,playing:S.playing,pos:S.pos,dur:S.dur,add:sent,diag:D}).then(function(r){if(r.status===401){location.href='/sign-in?ended=idle&next='+encodeURIComponent(location.pathname);return null}if(!r.ok&&r.status!==403&&r.status!==503)throw 0;return r.json()}).then(function(j){inflight=false;if(!j)return;S.ranges.splice(0,n);S.okAt=Date.now();
   if(j.state==='ok'){if(S.block==='offline'){unblock()}schedule(S.playing?10000:30000);return}
   if(j.state==='account'){location.href=j.url;return}
   if(j.state==='tab'){teardown();block('tab','This lecture was opened in another tab or window, so it stopped here.',[{label:'Watch here instead',primary:true,fn:claim}]);return}
