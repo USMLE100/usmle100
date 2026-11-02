@@ -165,3 +165,18 @@ describe('staging Stripe log', () => {
     expect(await db.prepare("SELECT 1 FROM settings WHERE key = 'staging_stripe_log'").first()).toBeNull();
   });
 });
+
+describe('one main address in production', () => {
+  it('with SITE_URL set, pages on other addresses move to it; webhooks and previews are untouched', async () => {
+    const prod = { ...base, SITE_URL: 'https://usmle100.com' } as Env;
+    const r = await worker.fetch(new Request('https://www.usmle100.com/programs?x=1'), prod, ctx);
+    expect(r.status).toBe(301);
+    expect(r.headers.get('location')).toBe('https://usmle100.com/programs?x=1');
+    expect((await worker.fetch(new Request('https://usmle100.com/programs'), prod, ctx)).status).toBe(200);
+    const hook = await worker.fetch(new Request('https://usmle100.info-usmle100.workers.dev/stripe/webhook', { method: 'POST', body: '{}' }), prod, ctx);
+    expect(hook.status).not.toBe(301);
+    expect((await worker.fetch(new Request('https://www.usmle100.com/programs'), base, ctx)).status).toBe(200); // SITE_URL not set yet
+    await setMark('development');
+    expect((await worker.fetch(new Request('https://preview.example/programs'), preview({ SITE_URL: 'https://usmle100.com' }), ctx)).status).toBe(200);
+  });
+});

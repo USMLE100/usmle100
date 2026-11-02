@@ -74,7 +74,7 @@ All real-service testing happens on an isolated staging **Preview**, never on th
 ## 2. Domain (usmle100.com)
 
 1. The domain must be on this Cloudflare account.
-2. In `wrangler.toml`, uncomment `SITE_URL = "https://usmle100.com"` and the `routes` block, then deploy. Alternatively, add the custom domain in the dashboard under Settings → Domains & Routes and only set `SITE_URL`.
+2. In `wrangler.toml`, uncomment `SITE_URL = "https://usmle100.com"` and the `routes` block, then deploy. Alternatively, add the custom domain in the dashboard under Settings → Domains & Routes and only set `SITE_URL`. Once `SITE_URL` is set, pages opened on any other address (`www.`, the `workers.dev` address) automatically move to `usmle100.com`, so staff passkeys and sign-ins keep working; webhooks are not redirected.
 3. After the move, update everything that points at the old address:
    - the Stripe webhook URL (step 1.3);
    - the Zoom app's event notification URL, shown in Admin → Lectures;

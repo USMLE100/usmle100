@@ -33,6 +33,20 @@ import { PublicLayout } from './views/layout';
 
 const app = new Hono<AppEnv>();
 
+// Production with SITE_URL set: pages viewed on any other address (www., the workers.dev address) move to the main
+// one, because passkeys and sign-in cookies only work on the address they were made on. Webhooks and other
+// non-GET requests are left alone so Stripe and Zoom keep working whatever address they were given.
+app.use('*', async (c, next) => {
+  if (isProduction(c.env) && c.env.SITE_URL && (c.req.method === 'GET' || c.req.method === 'HEAD')) {
+    const want = new URL(c.env.SITE_URL);
+    const url = new URL(c.req.url);
+    if (url.host !== want.host && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
+      return c.redirect(want.origin + url.pathname + url.search, 301);
+    }
+  }
+  await next();
+});
+
 app.use(
   '*',
   secureHeaders({
