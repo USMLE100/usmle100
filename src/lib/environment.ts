@@ -72,7 +72,11 @@ let marked = false;
 export async function markDatabase(env: Env) {
   if (marked) return;
   const db = env.DB;
-  if (isProduction(env)) await db.prepare("INSERT INTO settings (key, value) VALUES ('db_environment', 'production') ON CONFLICT (key) DO UPDATE SET value = 'production'").run();
+  if (isProduction(env)) {
+    // Read first: a write on every Worker start would eat into the free plan's daily write limit.
+    const cur = await db.prepare("SELECT value FROM settings WHERE key = 'db_environment'").first<{ value: string }>();
+    if (cur?.value !== 'production') await db.prepare("INSERT INTO settings (key, value) VALUES ('db_environment', 'production') ON CONFLICT (key) DO UPDATE SET value = 'production'").run();
+  }
   else await db.prepare("INSERT INTO settings (key, value) VALUES ('db_environment', 'development') ON CONFLICT (key) DO NOTHING").run();
   marked = true;
 }

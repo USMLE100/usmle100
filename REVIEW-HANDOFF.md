@@ -139,3 +139,25 @@ A separate reviewer audited the code and proved four exploitable issues with wor
 - **Admins:** one, account #1 `info.usmle100@gmail.com`. Migration 0014 makes this account the owner at launch.
 - **Migration level:** `0010_login_limits_and_resets`. This matches the launch rehearsal (0010 → 0023: 20/20 checks passed, original data unchanged).
 - **Cloudflare plan:** Workers **Free** (D1 limit of 100k rows written per day). Lecture check-ins every 10 s will exceed this with real traffic. Workers Paid ($5/month) needs owner approval before launch.
+
+## 12. Cloudflare free plan (owner decision, 2 Nov 2026: no paid plan)
+
+Daily limits (reset 00:00 UTC): D1 **100,000 rows written** and **5,000,000 rows read**; Workers **100,000 requests**. Staging shares the same account limits.
+
+Measured locally (`test/db-usage.test.ts`, which also guards these numbers):
+
+| Request | Before | After |
+|---|---|---|
+| Lecture check-in while playing | every 10 s, 4 rows written | every **30 s**, **2** rows written (resume point about once a minute, plus on pause and End Lecture) |
+| Check-in while paused | every 30 s | every 60 s |
+| "Last active" on the session | once a minute | once every 2 minutes |
+| Staging diagnostics | every check-in | about every 5 minutes |
+| Production database mark | a write on every Worker start | read first; written only if missing |
+
+**Estimated capacity:** about 300–550 rows written per hour of watching (the upper figure allows for D1 counting index updates), so roughly **180–300 hours of lecture watching per day** across all students, before other activity. Requests (about 150 per watching hour) and reads are well within their limits.
+
+**Trade-offs:**
+- A refund or suspension stops a playing video within about 30 seconds (it was about 10).
+- After a crash, the resume point can be up to a minute earlier.
+
+**Watch after launch:** Cloudflare dashboard → D1 → usage (daily rows written). If it regularly passes about 70,000, either raise the check-in interval again or reconsider the $5 plan.

@@ -115,7 +115,8 @@ play.post('/play/beat', async (c) => {
   };
   const result = await recordBeat(c.env.DB, user, c.get('enrollment'), beat);
   // Staging only: keep what the page heard from Bunny's player (counts and flags only, no personal data).
-  if (!isProduction(c.env) && b.diag && typeof b.diag === 'object') {
+  // Written about once every 5 minutes, or when something isn't OK: staging shares the account's free daily limits.
+  if (!isProduction(c.env) && b.diag && typeof b.diag === 'object' && (result.state !== 'ok' || Math.floor(Date.now() / 1000) % 300 < 30)) {
     const d = b.diag as Record<string, unknown>;
     const ev = d.ev && typeof d.ev === 'object' ? Object.fromEntries(Object.entries(d.ev as Record<string, unknown>).slice(0, 12).map(([k, v]) => [String(k).slice(0, 20), Number(v) || 0])) : {};
     const diag = {
@@ -140,7 +141,15 @@ play.post('/play/release', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ ok: false }, 401);
   const b = await body(c);
-  if (typeof b.tab === 'string') await releaseTab(c.env.DB, user.id, b.tab);
+  // End Lecture / closing the tab: keep the exact resume point (check-ins only save it about once a minute).
+  if (typeof b.tab === 'string') {
+    const pos = Number(b.pos);
+    if (Number.isFinite(pos) && pos >= 0) {
+      const tab = await c.env.DB.prepare('SELECT item FROM play_tabs WHERE user_id = ? AND tab = ?').bind(user.id, b.tab).first<{ item: string }>();
+      if (tab) await c.env.DB.prepare('INSERT INTO video_positions (user_id, item, seconds, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, item) DO UPDATE SET seconds = excluded.seconds, updated_at = excluded.updated_at').bind(user.id, tab.item, Math.min(pos, 6 * 3600), Math.floor(Date.now() / 1000)).run();
+    }
+    await releaseTab(c.env.DB, user.id, b.tab);
+  }
   return c.json({ ok: true });
 });
 

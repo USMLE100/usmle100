@@ -129,8 +129,9 @@ export async function loadUser(c: Context<AppEnv>, next: Next) {
       const { s_created, s_seen, s_reauth, s_device, s_verify, s_vreason, ...user } = row;
       c.set('user', user as User);
       c.set('session', { tokenHash: th, createdAt: created, lastSeenAt: seen, reauthAt: s_reauth ?? null, deviceHash: s_device ?? null, verifyPending: !!s_verify, verifyReason: s_vreason ?? null });
-      // Activity extends the session (written at most once a minute). The status check does not count.
-      if (c.req.path !== '/session/status' && t - seen >= 60) {
+      // Activity extends the session. The status check does not count.
+      // Written at most every 2 minutes (free-plan budget); the 30-minute idle limit is unaffected in practice.
+      if (c.req.path !== '/session/status' && t - seen >= 120) {
         await c.env.DB.prepare('UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?').bind(t, th).run();
       }
       const enr = await c.env.DB.prepare(

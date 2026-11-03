@@ -97,7 +97,7 @@ All real-service testing happens on an isolated staging **Preview**, never on th
    - a paid lecture plays;
    - an unpaid account is refused;
    - after a 1-hour wait, an already-playing long lecture keeps playing;
-   - suspending the student mid-video stops it within about 10 seconds;
+   - suspending the student mid-video stops it within about 30 seconds;
    - no download option appears.
 
 ## 4. Zoom (automatic lecture import, with your approval)

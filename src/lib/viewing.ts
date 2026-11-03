@@ -211,7 +211,7 @@ export async function claimTab(db: D1Database, userId: number, tab: string, item
   if ((r.meta.changes ?? 0) > 0) return { ok: true as const, nonce };
   const holder = await db.prepare('SELECT item, device_hash, ip, seen_at FROM play_tabs WHERE user_id = ?').bind(userId).first<{ item: string; device_hash: string | null; ip: string | null; seen_at: number }>();
   // Another registered device, on another network, actively playing within the last 30 seconds: suspected sharing.
-  const sharing = !!holder && !!where.device && !!holder.device_hash && holder.device_hash !== where.device && !!where.ip && !!holder.ip && holder.ip !== where.ip && t - holder.seen_at <= 30;
+  const sharing = !!holder && !!where.device && !!holder.device_hash && holder.device_hash !== where.device && !!where.ip && !!holder.ip && holder.ip !== where.ip && t - holder.seen_at <= 45; // check-ins come every 30 s while playing
   return { ok: false as const, item: holder?.item ?? null, title: holder ? await titleOf(db, holder.item) : null, sharing };
 }
 
@@ -246,15 +246,18 @@ export async function recordBeat(db: D1Database, user: User, enr: Enrollment | n
   if (b.sid === 'staff') return isStaff(user) ? { state: 'ok', watchedPct: 0, expiresAt: null } : { state: 'gone' };
   const tab = await db.prepare('SELECT * FROM play_tabs WHERE user_id = ?').bind(user.id).first<Tab>();
   if (!tab || tab.tab !== b.tab || tab.nonce !== b.nonce) return { state: 'tab' };
-  await db.prepare('UPDATE play_tabs SET seen_at = ? WHERE user_id = ?').bind(t, user.id).run();
   const pos = Number.isFinite(b.pos) ? Math.max(0, Math.min(MAX_SECONDS, b.pos)) : 0;
+  // Free-plan budget (owner, 2 Nov 2026): the resume point is saved about once a minute and whenever playback pauses,
+  // not on every check-in (End Lecture saves it exactly). "This tab is still open" is one write per check-in.
+  const lastAt = Math.max(tab.seen_at ?? 0, 0);
+  const savePosNow = !b.playing || Math.floor(t / 60) !== Math.floor(lastAt / 60);
 
   // Access can end mid-viewing (free entry unpublished, refund, suspension, lecture access closed).
   const r = await resolve(db, user, enr, tab.item);
   if (!r || r.access.kind === 'staff') return { state: 'gone' };
   if (r.access.kind === 'open') {
     if (b.sid !== 'open') return { state: 'gone' };
-    await savePos(db, user.id, tab.item, pos, t).run();
+    await db.batch([db.prepare('UPDATE play_tabs SET seen_at = ? WHERE user_id = ?').bind(t, user.id), ...(savePosNow ? [savePos(db, user.id, tab.item, pos, t)] : [])]);
     return { state: 'ok', watchedPct: 0, expiresAt: null };
   }
   const a = r.access;
@@ -265,8 +268,9 @@ export async function recordBeat(db: D1Database, user: User, enr: Enrollment | n
   // on the server's own evidence of real watching, so the owner can see it if the student later asks for another view.
   if (b.failed && !s.failed_at && s.started_at && s.watched_seconds >= MIN_WATCHED_FOR_INTERRUPTION && s.last_beat_at) {
     const gap = t - s.last_beat_at;
-    // 'offline' must match a gap the server saw itself (no reports for 30 s+ while watching); others need a live report.
-    const evidence = b.failed === 'offline' ? gap >= 30 && gap <= WINDOW_SECONDS : gap <= 120;
+    // 'offline' must match a gap the server saw itself (check-ins come every 30 s while playing, so 90 s+ means at least two
+    // were missed); others need a live report.
+    const evidence = b.failed === 'offline' ? gap >= 90 && gap <= WINDOW_SECONDS : gap <= 120;
     if (evidence) {
       await db.batch([
         db.prepare('UPDATE view_sessions SET failed_at = ?, failed_reason = ? WHERE id = ? AND counted = 0 AND failed_at IS NULL').bind(t, b.failed.slice(0, 30), s.id),
@@ -305,8 +309,8 @@ export async function recordBeat(db: D1Database, user: User, enr: Enrollment | n
            seen = ?, watched_seconds = ?, counted = ?, counted_at = ?, counted_reason = ? WHERE id = ? AND counted = 0`,
       )
       .bind(startedAt, startedAt ? startedAt + WINDOW_SECONDS : null, t, reported, seen, watched, reached ? 1 : 0, reached ? t : null, reached ? '65%' : null, s.id),
-    savePos(db, user.id, s.item, pos, t),
-    db.prepare('UPDATE play_tabs SET session_id = ? WHERE user_id = ?').bind(s.id, user.id),
+    ...(savePosNow || reached ? [savePos(db, user.id, s.item, pos, t)] : []),
+    db.prepare('UPDATE play_tabs SET session_id = ?, seen_at = ? WHERE user_id = ?').bind(s.id, t, user.id),
     // Reaching the threshold on a course lecture also marks it watched.
     ...(reached && lectureId
       ? [
