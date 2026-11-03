@@ -1073,7 +1073,8 @@ portal.get('/exam-window', async (c) => {
     ['Book your test date and center', 'On the Prometric website. Pick a date inside or right after your window.'],
     ['Plan travel if needed', 'If the nearest open center is far away, book transport and a place to stay.'],
     ['Book your final one-on-one sessions', 'Use them on your weakest areas below.'],
-    ['Take the group practice test', 'Timed, full length, with your class.'],
+    // Shown only once the owner has set a practice-test date (owner, 3 Nov 2026: none yet, so hidden).
+    ...(settings.practice_test_when ? [['Take the group practice test', 'Timed, full length, with your class.'] as [string, string]] : []),
     ['Review your last weak areas', 'Short targeted tests from your lowest-scoring topics.'],
   ];
   const windowStart = cohort ? fmtDate(dayDate(cohort, cohort.lecture_days + 1), { month: 'long', day: 'numeric' }) : '';
@@ -1081,14 +1082,16 @@ portal.get('/exam-window', async (c) => {
   return c.html(
     <PortalLayout shell={c.get('shell')} title="Exam window" active="exam" user={user}>
       <PageHead eyebrow={`Days ${cohort ? cohort.lecture_days + 1 : 91} to ${cohort?.total_days ?? 100}`} title="Your exam window" sub={cohort ? `${windowStart} to ${windowEnd}. Test centers fill up, so book your date first.` : undefined} />
-      <section class="card card-cream">
-        <Eyebrow>Group practice test</Eyebrow>
-        <h2>Full practice exam with your class</h2>
-        {settings.practice_test_when ? <p><strong>{settings.practice_test_when}</strong></p> : <p>Your instructor will post the date and Zoom link here.</p>}
-        {isHttpUrl(settings.practice_test_link) && (
-          <a class="btn btn-primary" href={settings.practice_test_link} rel="noopener" style="align-self:flex-start"><Icon name="videocam" size={18} />Join on Zoom</a>
-        )}
-      </section>
+      {settings.practice_test_when && (
+        <section class="card card-cream">
+          <Eyebrow>Group practice test</Eyebrow>
+          <h2>Full practice exam with your class</h2>
+          <p><strong>{settings.practice_test_when}</strong></p>
+          {isHttpUrl(settings.practice_test_link) && (
+            <a class="btn btn-primary" href={settings.practice_test_link} rel="noopener" style="align-self:flex-start"><Icon name="videocam" size={18} />Join on Zoom</a>
+          )}
+        </section>
+      )}
       <section class="card">
         <h2>Your exam checklist</h2>
         <div class="opt-list">
