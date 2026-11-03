@@ -196,7 +196,7 @@ const FAQ = (p: { start: string | null }) => {
     ['How long can I watch the lecture recordings?', 'Until 60 days after the last day of your program (Day 100).'],
     [
       'How many times can I watch each recording?',
-      'Recordings stream in your portal only; they can’t be downloaded. Each lecture can be watched up to 5 times per enrollment. A viewing counts once you’ve watched 65% of it, or 24 hours after you press play, and you can pause and come back within those 24 hours. Your name and account number appear on the video, and your account works on up to 2 registered devices.',
+      'Recordings stream in your portal only; they can’t be downloaded. Each lecture can be watched twice per enrollment. A viewing counts once you’ve watched 90% of it, or 24 hours after you press play, and you can pause and come back within those 24 hours. Your name and account number appear on the video, and your account works on up to 2 registered devices.',
     ],
     ['How do Evening Questions work?', 'Live question sessions on Monday, Wednesday and Friday evenings. Each month covers the next 12 classes from your start date, and you can rewatch them until 2 days after the 12th class goes up. Companion, Complete and MAX include 4 months.'],
     ['How many tutoring sessions are included?', 'Complete includes 10 private one-on-one sessions and MAX includes 40, each 60 minutes. Extra sessions are $50 each.'],
@@ -892,7 +892,7 @@ const BookCheckout = (p: { user: any; owned: boolean; cancelled?: boolean; pendi
 /** Disclosed before checkout (R053 hides remaining counts in the portal until a lecture locks, so they're explained here). */
 const ViewingTerms = () => (
   <p class="small muted">
-    Lecture recordings stream in the portal only, with no downloads. Each lecture can be watched up to 5 times per enrollment; a viewing counts once you’ve watched 65% of it or 24
+    Lecture recordings stream in the portal only, with no downloads. Each lecture can be watched twice per enrollment; a viewing counts once you’ve watched 90% of it or 24
     hours after you press play. Your account is for you alone and works on up to 2 registered devices.
   </p>
 );

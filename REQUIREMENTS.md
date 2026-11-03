@@ -104,7 +104,7 @@ Branch `v12-frontend`. Last updated 28 Oct 2026. Nothing here is merged or deplo
 |---|---|---|---|---|
 | Owner's hand-picked list: course lecture, Evening class or any Bunny video; ordered; starts unpublished; only the owner publishes | Conv p77, p86, p102, R041 | `routes/freeAdmin`, `free_videos` | viewing, workflows | Done |
 | Registered, signed-in students with complete details who signed the agreement | R035, Conv p113 | `resolve`, `profileComplete`, gate | viewing, workflows | Done (email/phone verification once messaging is on) |
-| 2 views each; 24-hour window from actual playback; 65% unique content; an expired started window uses a view | R036–R040 | `lib/viewing` | viewing | Done |
+| 2 views each; 24-hour window from actual playback; 90% unique content (owner, 2 Nov 2026; was 65%); an expired started window uses a view | R036–R040 | `lib/viewing` | viewing | Done |
 | Unpublishing removes access at once; re-adding keeps counts | R042/R043 | entries are never deleted | viewing | Done |
 | Extra free views: owner-only, logged | R044 | Admin → Lecture views | viewing | Done |
 | Buying the program switches to the 5 paid views (free history kept) | R046 | `paidKey` redirect | viewing | Done |
@@ -114,10 +114,10 @@ Branch `v12-frontend`. Last updated 28 Oct 2026. Nothing here is merged or deplo
 
 | Requirement | Source | Where | Tests | Status |
 |---|---|---|---|---|
-| 5 views per lecture per paid enrollment; fresh views for a new enrollment; history kept | R048, R052 | `viewState` | viewing | Done |
-| 24-hour window from playback; one view at 65% or at expiry; never twice per session | R050 | `recordBeat`, `settleExpired` | viewing | Done |
+| 2 views per lecture per paid enrollment, so each lecture can be watched fully twice (owner, 2 Nov 2026; was 5 views at 65%); fresh views for a new enrollment; history kept | R048, R052 | `viewState` | viewing | Done |
+| 24-hour window from playback; one view at 90% or at expiry; never twice per session | R050 | `recordBeat`, `settleExpired` | viewing | Done |
 | Only unique content counts; seeking is free; faster than 2× is rejected | R055/R056/R066 | `markSeconds`, speed cap | viewing | Done |
-| Resume at the exact point; the session ends at 65% and another view is needed | R064/R065 | `video_positions` | viewing | Done |
+| Resume at the exact point; the session ends at 90% and another view is needed | R064/R065 | `video_positions` | viewing | Done |
 | First-play warning; counts hidden until locked; limits disclosed before checkout | R053/R054, Dir G | player notice; Programs/checkout text | viewing, accounts | Done |
 | End Lecture; 2-minute release; resuming keeps the same viewing | R061–R063 | `claimTab` / `releaseTab` | viewing, browser | Done |
 | Owner-only extra views with reasons; requests reviewed by admins | R051 | Admin → Lecture views | viewing | Done |

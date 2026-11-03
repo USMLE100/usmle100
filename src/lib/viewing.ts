@@ -7,7 +7,7 @@
  *   'E:<id>'  an Evening Questions class — its subscribers, with no view limit (no owner decision sets one).
  *
  * - A viewing session's 24-hour window starts when playback actually begins. A session uses one view, once:
- *   when 65% of the video's unique content has been watched in it (the session then ends), or when its
+ *   when 90% (THRESHOLD) of the video's unique content has been watched in it (the session then ends), or when its
  *   24 hours run out after playback began, however little was watched. Unstarted sessions never count.
  * - Only content actually played counts; replaying the same part in one session counts once. Seeking is free.
  * - One protected tab per account (all devices). Released by End Lecture, closing the tab, or 2 minutes of silence.
@@ -19,8 +19,9 @@ import { currentCohort, defaultLecturesUntil, todayUtc } from './content';
 import { eveningAccess } from './evening';
 
 export const FREE_VIEWS = 2;
-export const PAID_VIEWS = 5;
-export const THRESHOLD = 0.65;
+export const PAID_VIEWS = 2;
+/** A viewing is used once this share of the video's unique content has been watched in it (owner, 2 Nov 2026: watch each lecture fully twice). */
+export const THRESHOLD = 0.9;
 export const WINDOW_SECONDS = 24 * 3600;
 export const TAB_RELEASE_SECONDS = 120;
 /** Fastest allowed playback speed (R055), used to reject impossible progress reports. */
@@ -227,7 +228,7 @@ const savePos = (db: D1Database, userId: number, item: string, pos: number, t: n
 
 /**
  * Record a progress report from the player. Starts the 24-hour window on first playback, adds newly watched
- * seconds (no faster than 2× real time), saves the position, and uses the view at 65%.
+ * seconds (no faster than 2× real time), saves the position, and uses the view at 90% (THRESHOLD).
  * Uncounted videos (Evening classes) only keep the tab and position.
  */
 export async function recordBeat(db: D1Database, user: User, enr: Enrollment | null, b: Beat): Promise<BeatResult> {
@@ -282,7 +283,7 @@ export async function recordBeat(db: D1Database, user: User, enr: Enrollment | n
       .bind(startedAt, startedAt ? startedAt + WINDOW_SECONDS : null, t, reported, seen, watched, reached ? 1 : 0, reached ? t : null, reached ? '65%' : null, s.id),
     savePos(db, user.id, s.item, pos, t),
     db.prepare('UPDATE play_tabs SET session_id = ? WHERE user_id = ?').bind(s.id, user.id),
-    // Reaching 65% of a course lecture also marks it watched.
+    // Reaching the threshold on a course lecture also marks it watched.
     ...(reached && lectureId
       ? [
           db

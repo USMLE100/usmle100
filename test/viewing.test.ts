@@ -67,13 +67,13 @@ const beat = (cookie: string, c: any, tab: string, body: Record<string, unknown>
 /** Pretend the last progress report was long ago, so the 2×-speed limit allows a big jump. */
 const rewindBeat = (sid: string) => db.prepare('UPDATE view_sessions SET last_beat_at = last_beat_at - 1000 WHERE id = ?').bind(sid).run();
 const session = (sid: string) => db.prepare('SELECT * FROM view_sessions WHERE id = ?').bind(sid).first<any>();
-/** Watch 65 of 100 seconds in one session. */
-async function watch65(cookie: string, lectureId: number | string, tab: string) {
+/** Watch 91 of 100 seconds in one session (a viewing is used at 90%). */
+async function watchFull(cookie: string, lectureId: number | string, tab: string) {
   const c = await claim(cookie, lectureId, tab);
   expect(c.state, JSON.stringify(c)).toBe('ok');
   await beat(cookie, c, tab, { add: [] });
   await rewindBeat(c.sid);
-  const r = await beat(cookie, c, tab, { add: [[0, 65]], pos: 65 });
+  const r = await beat(cookie, c, tab, { add: [[0, 91]], pos: 91 });
   expect(r.state).toBe('done');
   return c;
 }
@@ -88,8 +88,8 @@ describe('unique seconds', () => {
   });
 });
 
-describe('paid lectures: 5 views, 65% or 24 hours', () => {
-  it('a viewing starts at playback, ends at 65% unique content, and the 6th viewing is locked', async () => {
+describe('paid lectures: 2 views (watch it fully twice), 90% or 24 hours', () => {
+  it('a viewing starts at playback, ends at 90% unique content, and the 3rd viewing is locked', async () => {
     const s = await account();
     await enroll(s.id, cohortA);
     const lec = await lecture(cohortA);
@@ -108,19 +108,21 @@ describe('paid lectures: 5 views, 65% or 24 hours', () => {
     const fast = await beat(s.cookie, c, tab, { add: [[0, 90]] });
     expect(fast.state).toBe('ok');
     expect((await session(c.sid)).watched_seconds).toBeLessThan(40);
-    // Rewatching the same part counts once; reaching 65% ends the viewing and marks the lecture watched.
+    // Rewatching the same part counts once; reaching 90% ends the viewing and marks the lecture watched.
     await rewindBeat(c.sid);
     expect((await beat(s.cookie, c, tab, { add: [[0, 30], [0, 30]] })).state).toBe('ok');
     await rewindBeat(c.sid);
-    expect(await beat(s.cookie, c, tab, { add: [[30, 66]], pos: 66 })).toEqual({ state: 'done', reason: '65%', viewsLeft: 4 });
+    expect((await beat(s.cookie, c, tab, { add: [[30, 66]], pos: 66 })).state).toBe('ok');
+    await rewindBeat(c.sid);
+    expect(await beat(s.cookie, c, tab, { add: [[66, 91]], pos: 91 })).toEqual({ state: 'done', reason: '65%', viewsLeft: 1 });
     expect(await db.prepare('SELECT completed_at FROM lecture_progress WHERE user_id = ? AND lecture_id = ?').bind(s.id, lec).first()).not.toBeNull();
     // The next viewing resumes where they stopped and no longer shows the first-time notice.
     const again = await claim(s.cookie, lec, tab);
-    expect(again).toMatchObject({ state: 'ok', first: false, pos: 66 });
+    expect(again).toMatchObject({ state: 'ok', first: false, pos: 91 });
     expect(again.sid).not.toBe(c.sid);
-    for (let i = 0; i < 4; i++) await watch65(s.cookie, lec, tab);
+    await watchFull(s.cookie, lec, tab);
     const locked = await claim(s.cookie, lec, tab);
-    expect(locked).toMatchObject({ state: 'locked', allowed: 5, used: 5 });
+    expect(locked).toMatchObject({ state: 'locked', allowed: 2, used: 2 });
     expect(locked.src).toBeUndefined();
   });
 
@@ -165,12 +167,12 @@ describe('paid lectures: 5 views, 65% or 24 hours', () => {
     expect((await session(c.sid)).counted).toBe(0);
   });
 
-  it('a new paid enrollment brings 5 fresh views; owner-only extra views', async () => {
+  it('a new paid enrollment brings 2 fresh views; owner-only extra views', async () => {
     const s = await account();
     const e1 = await enroll(s.id, cohortA);
     const lec = await lecture(cohortA);
     const tab = newTab();
-    for (let i = 0; i < 5; i++) await watch65(s.cookie, lec, tab);
+    for (let i = 0; i < 2; i++) await watchFull(s.cookie, lec, tab);
     expect((await claim(s.cookie, lec, tab)).state).toBe('locked');
     // The student asks; an admin who is not the owner cannot decide; the owner can.
     expect(await json(await req('/play/request', { cookie: s.cookie, json: { item: key(lec) } }))).toEqual({ ok: true });
@@ -185,12 +187,12 @@ describe('paid lectures: 5 views, 65% or 24 hours', () => {
     expect((await req('/admin/views/grant', { cookie: owner.cookie, form: grant })).status).toBe(302);
     expect((await claim(s.cookie, lec, tab)).state).toBe('ok');
     expect(await db.prepare("SELECT 1 FROM audit_log WHERE action = 'views.granted' AND target_user_id = ?").bind(s.id).first()).not.toBeNull();
-    // A renewal: the old enrollment ends, a new one starts with 5 fresh views (history kept).
+    // A renewal: the old enrollment ends, a new one starts with 2 fresh views (history kept).
     await db.prepare("UPDATE enrollments SET status = 'cancelled' WHERE id = ?").bind(e1).run();
     await enroll(s.id, cohortA);
     const fresh = await claim(s.cookie, lec, tab);
     expect(fresh.state).toBe('ok');
-    expect((await db.prepare('SELECT COUNT(*) AS n FROM view_sessions WHERE user_id = ? AND counted = 1').bind(s.id).first<any>()).n).toBe(5);
+    expect((await db.prepare('SELECT COUNT(*) AS n FROM view_sessions WHERE user_id = ? AND counted = 1').bind(s.id).first<any>()).n).toBe(2);
   });
 
   it('another cohort’s lecture, or no program at all, gets no video link', async () => {
@@ -271,7 +273,7 @@ describe('Free Lectures list (R035–R046)', () => {
     expect((await req(`/free-lectures/${f.id}`, { cookie: s.cookie })).status).toBe(200);
     // The free entry never opens the paid lecture itself.
     expect((await req('/play/claim', { cookie: s.cookie, json: { item: key(lec), tab } })).status).toBe(403);
-    await watch65(s.cookie, item, tab);
+    await watchFull(s.cookie, item, tab);
     const c = await claim(s.cookie, item, tab);
     expect(c.state).toBe('ok');
     await beat(s.cookie, c, tab, {});
@@ -285,9 +287,9 @@ describe('Free Lectures list (R035–R046)', () => {
     const resumed = await claim(s.cookie, item, tab);
     expect(resumed.sid).toBe(c.sid);
     await rewindBeat(c.sid);
-    expect((await beat(s.cookie, resumed, tab, { add: [[0, 70]] })).state).toBe('done');
+    expect((await beat(s.cookie, resumed, tab, { add: [[0, 91]] })).state).toBe('done');
     expect(await claim(s.cookie, item, tab)).toMatchObject({ state: 'locked', allowed: 2 });
-    // Buying the program that includes it gives the 5 paid views instead (R046).
+    // Buying the program that includes it gives the paid views instead (R046).
     await enroll(s.id, cohortB);
     expect(await claim(s.cookie, item, tab)).toMatchObject({ state: 'redirect', url: `/lectures/${lec}` });
     expect((await claim(s.cookie, lec, tab)).state).toBe('ok');

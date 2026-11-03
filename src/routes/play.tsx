@@ -29,9 +29,9 @@ const noStore = (c: Context<AppEnv>) => c.header('Cache-Control', 'no-store');
 const ip = (c: Context<AppEnv>) => c.req.header('cf-connecting-ip') ?? null;
 
 const NOTICE_PAID =
-  'Before you start: each lecture can be watched a limited number of times. A viewing lasts 24 hours from when you press play. It counts as one view when you have watched 65% of the lecture, or when its 24 hours end. You can pause, press End Lecture and come back within those 24 hours without using another view. Lectures are for you alone: your name and account number appear on the video, and recording or sharing them is not allowed.';
+  'Before you start: each lecture can be watched twice. A viewing lasts 24 hours from when you press play. It counts as one view when you have watched 90% of the lecture, or when its 24 hours end. You can pause, press End Lecture and come back within those 24 hours without using another view. Lectures are for you alone: your name and account number appear on the video, and recording or sharing them is not allowed.';
 const NOTICE_FREE =
-  'Before you start: each free lecture can be watched 2 times. A viewing lasts 24 hours from when you press play. It counts as one view when you have watched 65% of the video, or when its 24 hours end. You can pause, press End Lecture and come back within those 24 hours without using another view. Your name and account number appear on the video, and recording or sharing it is not allowed.';
+  'Before you start: each free lecture can be watched 2 times. A viewing lasts 24 hours from when you press play. It counts as one view when you have watched 90% of the video, or when its 24 hours end. You can pause, press End Lecture and come back within those 24 hours without using another view. Your name and account number appear on the video, and recording or sharing it is not allowed.';
 
 const where = (c: Context<AppEnv>) => ({ device: c.get('session')?.deviceHash ?? null, ip: ip(c) });
 
