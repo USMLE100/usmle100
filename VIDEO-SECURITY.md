@@ -44,6 +44,15 @@ These apply to the whole library, so they also affect the live site. Approve eac
   - What still holds: links expire in 15 minutes, the server refuses new links after any revocation, and Bunny's allowed-domains setting and DRM still apply.
 - **Forensic (invisible) watermarking**: Bunny's documentation doesn't list it. It would need another provider.
 
+## Real-device results (owner's iPhone, staging, 2 Nov 2026)
+
+- Real Bunny video from library 785730 plays.
+- Name, account ID and session code are shown, plus the tiled pattern.
+- No picture-in-picture or AirPlay buttons in Bunny's controls.
+- Continuous playback carried on past the 2-minute link expiry.
+- Watching reached 65%, and the server ended the viewing ("You've watched 65% of this lecture"). This confirms that real progress reports arrive and are counted.
+- Earlier, with the old player code, no progress arrived. That is what the player fix addressed.
+
 ## Real-device checks still needed
 
 Chromium emulation can't reproduce Safari's picture-in-picture, AirPlay or native fullscreen, or Android's casting. After the Bunny settings above are applied, check these on a real iPhone, iPad and Android phone:
