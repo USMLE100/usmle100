@@ -19,7 +19,7 @@ Single source of truth for what is left before launch. Updated 2 Nov 2026. Every
 | 2 | Stripe sandbox purchase, refund, access removal | **Done** (real sandbox) | — |
 | 3 | Bunny security, encoding and player settings | **Done** (owner applied, iPhone-tested) | — |
 | 4 | Database readiness: owner = `info.usmle100@gmail.com` (#1), live at migration 0010, upgrade rehearsal 0010 → 0023 passed 20/20 | **Done** | — |
-| 5 | Domain: move DNS from IONOS to Cloudflare (free), **keeping the Zoho email records exactly** | **In progress**, waiting for IONOS DNS screenshots | Owner (+ Claude checks records) |
+| 5 | Domain: DNS moved from IONOS to Cloudflare (free). All 17 records were copied and checked (Zoho MX 10/20/50, SPF, DKIM, DMARC, verification; Mailchimp; Google). The old site's A/AAAA records are set to DNS only. IONOS nameservers → kenneth.ns.cloudflare.com / may.ns.cloudflare.com (3 Nov) | **Waiting for Cloudflare to activate** (minutes to 48 h) | Owner |
 | 6 | Legal texts: Terms, Privacy, Refund policy, Student Agreement | **Needed** | Owner (ideally an attorney) |
 | 7 | Confirm prices, FAQ answers, the "1,400+" figure, Calendly link, practice-test date | **Needed** | Owner |
 | 8 | Launch approval: merge `v12-frontend` into `main` | **Needed** | Owner says "approve launch" |
