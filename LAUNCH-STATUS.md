@@ -1,38 +1,45 @@
 # USMLE100 launch tracker
 
-Updated 2 Nov 2026. The single list of what's left. Done items stay done and are not redone.
+Single source of truth for what is left before launch. Updated 2 Nov 2026. Everything marked **Done** was finished and tested on staging, and should not be redone. LAUNCH.md has the full reference; this file is the short list.
 
-## Done (no further work)
+## Owner decisions (fixed)
+- Cloudflare **Free** plan; free-plan optimizations are done (REVIEW-HANDOFF §12).
+- Forest green and gold colours on the V12 design.
+- Bunny: 240/360/480p only, H.264, free encoding, MediaCage Basic, no paid add-ons, original files kept.
+- Videos: 2 views at 90%; 1 extra view on request with one-click owner approval; interruptions keep the viewing; no automatic extension.
+- No new paid services.
+- The new site **replaces** everything at usmle100.com.
+- Email stays on **Zoho** (info@usmle100.com).
 
-- **V12 site and portal** on staging (branch `v12-frontend`), in the original forest green and gold.
-- **Security review fixes:** independent re-check passed.
-- **Payments:** Stripe sandbox purchase and refund tested end to end. A refund removes access.
-- **Video:**
-  - Bunny playback, watermark, 2 views at 90%, additional-view requests and the interruption rules, tested on iPhone.
-  - Bunny library security and player settings applied (`VIDEO-SECURITY.md`).
-  - Encoding at 480p maximum.
-- **Database:**
-  - The live DB is at 0010, and the owner will be `info.usmle100@gmail.com` (the owner can sign in).
-  - Upgrade rehearsal 0010 → 0023 passed: 20/20 checks, data unchanged.
-- **Cloudflare Free plan:** check-ins and writes reduced and measured (`REVIEW-HANDOFF.md` §12).
+## Status
 
-## Remaining (in order)
-
-| # | Item | Who | Status |
+| # | Item | Status | Who |
 |---|---|---|---|
-| 1 | **Domain:** move usmle100.com DNS from IONOS to Cloudflare (free), keeping every **Zoho** email record (MX, SPF, DKIM, verification, DMARC) | Owner, guided | Waiting for IONOS DNS screenshots |
-| 2 | **Legal pages:** Terms, Privacy, Refund policy, Student Agreement (Admin → Site settings) | Owner (attorney) | Not started |
-| 3 | **Content check:** prices, FAQ answers (refund window, $50 extra sessions, 60 days after Day 100), "1,400+" | Owner | Not started |
-| 4 | **Launch day** (about 30 min, guided) | Owner + Claude | After 1–3 |
-|   | a. Note a database restore point (D1 → Time Travel) | Owner | |
-|   | b. Merge `v12-frontend` into `main`; Cloudflare deploys; migrations 0011–0023 run | Owner approves | |
-|   | c. Attach usmle100.com to the Worker; set `SITE_URL`; add usmle100.com + www to Bunny Allowed domains | Owner, guided | |
-|   | d. **Stripe live:** live secret key and live webhook (6 events, `LAUNCH.md`) | Owner, guided | |
-|   | e. Owner signs in, adds a passkey; staff add passkeys | Owner | |
-|   | f. One real $1 live purchase and refund; one lecture plays with the watermark | Owner + Claude | |
-| 5 | **First real lecture upload:** plays; slide text readable at 480p | Owner | After launch is fine |
+| 1 | Code: V12 site and portal, security fixes, payments, refunds, video protection | **Done**, tested on staging | — |
+| 2 | Stripe sandbox purchase, refund, access removal | **Done** (real sandbox) | — |
+| 3 | Bunny security, encoding and player settings | **Done** (owner applied, iPhone-tested) | — |
+| 4 | Database readiness: owner = `info.usmle100@gmail.com` (#1), live at migration 0010, upgrade rehearsal 0010 → 0023 passed 20/20 | **Done** | — |
+| 5 | Domain: move DNS from IONOS to Cloudflare (free), **keeping the Zoho email records exactly** | **In progress**, waiting for IONOS DNS screenshots | Owner (+ Claude checks records) |
+| 6 | Legal texts: Terms, Privacy, Refund policy, Student Agreement | **Needed** | Owner (ideally an attorney) |
+| 7 | Confirm prices, FAQ answers, the "1,400+" figure, Calendly link, practice-test date | **Needed** | Owner |
+| 8 | Launch approval: merge `v12-frontend` into `main` | **Needed** | Owner says "approve launch" |
+| 9 | Launch day: live Stripe key + live webhook | **Launch day** | Owner (Claude guides) |
+| 10 | Launch day: attach usmle100.com to the Worker, set `SITE_URL`, add usmle100.com and www to Bunny's Allowed domains | **Launch day** | Owner (Claude guides) |
+| 11 | Launch day: owner signs in, adds a passkey; faculty and admins add passkeys | **Launch day** | Owner and staff |
+| 12 | First real lecture upload: plays, MediaCage applies, slides readable at 480p | **After launch** | Owner |
 
-## Watch after launch
+## Launch-day order (about 30–45 minutes, Claude guides each step)
+1. Note the time, for a possible database rollback (D1 Time Travel).
+2. Owner approves; merge `v12-frontend` into `main`; Cloudflare deploys; the database upgrades itself (0011–0023).
+3. Owner signs in as `info.usmle100@gmail.com`, adds a passkey and checks /admin.
+4. Add the live Stripe secret key and the live webhook (the six events in LAUNCH.md §1).
+5. Attach usmle100.com and www.usmle100.com to the Worker; set `SITE_URL = "https://usmle100.com"`; redeploy.
+6. Bunny → Allowed domains: add usmle100.com and www.usmle100.com.
+7. Smoke test: home, sign-in, one real $1-style purchase and refund, one lecture plays with the watermark.
+8. Send Zoho a test email to and from info@usmle100.com.
 
-- Cloudflare D1 daily "rows written": tell Claude if it is regularly above about 70,000.
-- Bunny: check that new uploads are MediaCage-protected.
+## Not needed for launch (optional later)
+- Password-reset email: Resend, free tier, needs the domain.
+- Zoom automatic import; SMS.
+- Enterprise DRM (declined).
+- The $5 plan (declined; usage to be watched).
