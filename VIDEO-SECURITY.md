@@ -42,6 +42,21 @@ Our player link already uses `preload=false` (nothing downloads before play) and
 4. **MP4 fallback:** off (MediaCage Basic also turns it off). This avoids storing extra copies.
 5. **Keep original files:** turn off only after the quality settings are final (originals are needed to re-encode).
 
+## Bunny library 785730: applied by the owner, 2 Nov 2026 (checked on iPhone after each change)
+
+| Setting | Value |
+|---|---|
+| Direct play | **Off** |
+| Allowed domains | `usmle100.info-usmle100.workers.dev`, `v12-frontend-usmle100.info-usmle100.workers.dev` (add `usmle100.com` and `www.usmle100.com` when the domain is connected) |
+| Block direct url file access | On |
+| Embed view token authentication | On (our signed 15-minute links) |
+| CDN token authentication | **Off**: Bunny doesn't allow it together with DRM, and MediaCage was chosen instead |
+| MediaCage Basic DRM | **On** (free) |
+| Encoding | Free tier, H.264, 240p/360p/480p; MP4 fallback off; Early-Play off; original files kept |
+| Storage | Frankfurt only, no replication |
+
+**Not yet confirmed:** whether MediaCage also covers videos uploaded before it was switched on. Check on the next real upload.
+
 ## What cannot be fully prevented
 
 - **Screen recording and phone cameras.** No website can stop someone filming the screen.
