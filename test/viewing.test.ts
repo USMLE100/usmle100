@@ -366,32 +366,88 @@ describe('additional view on request, and technical failures (owner, 2 Nov 2026)
     expect((await req('/play/request', { cookie: s.cookie, json: { item: key(lec) } })).status).toBe(403);
   });
 
-  it('a technical failure closes the viewing without using a view, keeps the place; at most twice per lecture', async () => {
+  it('a technical interruption keeps the same viewing and progress, gives no view back, and is shown to the owner', async () => {
     const s = await account();
     await enroll(s.id, cohortA);
     const lec = await lecture(cohortA);
     const tab = newTab();
-    for (let i = 0; i < 2; i++) {
-      const c = await claim(s.cookie, lec, tab);
-      expect(c.state).toBe('ok');
-      await beat(s.cookie, c, tab, { playing: true });
-      await rewindBeat(c.sid);
-      await beat(s.cookie, c, tab, { add: [[0, 40]], pos: 40 });
-      expect((await beat(s.cookie, c, tab, { failed: i === 0 ? 'player-error' : 'stalled', pos: 40 })).state).toBe('failed');
-      const row = await session(c.sid);
-      expect(row.counted).toBe(0);
-      expect(row.failed_at).not.toBeNull();
-      // The same viewing can't be revived, and expiry never counts it.
-      expect((await beat(s.cookie, c, tab, {})).state).toBe('failed');
-    }
-    const next = await claim(s.cookie, lec, tab);
-    expect(next).toMatchObject({ state: 'ok', pos: 40 });
-    expect((await db.prepare('SELECT COUNT(*) AS n FROM view_sessions WHERE user_id = ? AND counted = 1').bind(s.id).first<any>()).n).toBe(0);
-    // A third reported failure is ignored: the viewing carries on normally (no unlimited loophole).
-    await beat(s.cookie, next, tab, { playing: true });
-    expect((await beat(s.cookie, next, tab, { failed: 'stalled' })).state).toBe('ok');
-    expect((await session(next.sid)).failed_at).toBeNull();
-    // Anything else the page sends is not treated as a failure.
-    expect((await beat(s.cookie, next, tab, { failed: 'whatever' })).state).toBe('ok');
+    const c = await claim(s.cookie, lec, tab);
+    await beat(s.cookie, c, tab, { playing: true });
+    await rewindBeat(c.sid);
+    await beat(s.cookie, c, tab, { add: [[0, 70]], pos: 70 });
+    // Real watching (70 s counted by the server) + a live report: recorded, and the player is told to retry.
+    expect((await beat(s.cookie, c, tab, { failed: 'player-error', pos: 70 })).state).toBe('interrupted');
+    expect((await session(c.sid)).failed_at).not.toBeNull();
+    // Try again: the same viewing, same place, nothing used.
+    const again = await claim(s.cookie, lec, tab);
+    expect(again).toMatchObject({ state: 'ok', sid: c.sid, pos: 70 });
+    expect((await session(c.sid)).counted).toBe(0);
+    // No automatic extension: the 24 hours still end the viewing as usual.
+    await db.prepare('UPDATE view_sessions SET expires_at = ? WHERE id = ?').bind(Math.floor(Date.now() / 1000) - 1, c.sid).run();
+    expect((await beat(s.cookie, again, tab, {})).state).toBe('done');
+    expect((await session(c.sid)).counted_reason).toBe('expired');
+    // When views run out, the owner sees the interruption next to the request.
+    await watchFull(s.cookie, lec, tab);
+    await req('/play/request', { cookie: s.cookie, json: { item: key(lec) } });
+    const owner = await account('owner');
+    expect(await (await req('/dashboard', { cookie: owner.cookie })).text()).toContain('Technical interruption recorded');
+  });
+
+  it('an interruption is not recorded without real watching, and unknown reports are ignored', async () => {
+    const s = await account();
+    await enroll(s.id, cohortA);
+    const lec = await lecture(cohortA);
+    const tab = newTab();
+    const c = await claim(s.cookie, lec, tab);
+    await beat(s.cookie, c, tab, { playing: true });
+    // Fewer than 60 s watched: a reported error proves nothing; the viewing just carries on.
+    expect((await beat(s.cookie, c, tab, { failed: 'stalled' })).state).toBe('ok');
+    expect((await session(c.sid)).failed_at).toBeNull();
+    expect((await beat(s.cookie, c, tab, { failed: 'whatever' })).state).toBe('ok');
+    // A claimed lost connection needs a gap the server saw itself.
+    await rewindBeat(c.sid);
+    await beat(s.cookie, c, tab, { add: [[0, 70]], pos: 70 });
+    expect((await beat(s.cookie, c, tab, { failed: 'offline', pos: 70 })).state).toBe('ok');
+    expect((await session(c.sid)).failed_at).toBeNull();
+  });
+
+  it('declining from the dashboard tells the student; approving tells them too (portal messages only)', async () => {
+    const s = await account();
+    await enroll(s.id, cohortA);
+    const lec = await lecture(cohortA);
+    const tab = newTab();
+    await watchFull(s.cookie, lec, tab);
+    await watchFull(s.cookie, lec, tab);
+    await req('/play/request', { cookie: s.cookie, json: { item: key(lec) } });
+    const rq = (await db.prepare('SELECT id FROM view_requests WHERE user_id = ? AND resolved_at IS NULL').bind(s.id).first<{ id: number }>())!;
+    const owner = await account('owner');
+    const dash = await (await req('/dashboard', { cookie: owner.cookie })).text();
+    expect(dash).toContain('name="request_id" value="' + rq.id + '"');
+    const r = await worker.fetch(new Request(BASE + '/admin/views/dismiss', { method: 'POST', redirect: 'manual', body: new URLSearchParams({ request_id: String(rq.id) }), headers: { 'content-type': 'application/x-www-form-urlencoded', 'sec-fetch-site': 'same-origin', origin: BASE, referer: BASE + '/dashboard', cookie: owner.cookie } }));
+    expect(r.headers.get('location')).toMatch(/^\/dashboard\?ok=Declined/);
+    const n = await db.prepare("SELECT title, email_status FROM notices WHERE user_id = ? ORDER BY id DESC LIMIT 1").bind(s.id).first<any>();
+    expect(n.title).toBe('Additional view request declined');
+    // An approval on another student's request sends the matching message.
+    const s2 = await account();
+    await enroll(s2.id, cohortA);
+    await watchFull(s2.cookie, lec, tab);
+    await watchFull(s2.cookie, lec, tab);
+    await req('/play/request', { cookie: s2.cookie, json: { item: key(lec) } });
+    const rq2 = (await db.prepare('SELECT id FROM view_requests WHERE user_id = ? AND resolved_at IS NULL').bind(s2.id).first<{ id: number }>())!;
+    await req(`/admin/views/requests/${rq2.id}/approve`, { cookie: owner.cookie, form: {} });
+    expect((await db.prepare("SELECT title FROM notices WHERE user_id = ? ORDER BY id DESC LIMIT 1").bind(s2.id).first<any>()).title).toBe('Additional view approved');
+  });
+
+  it('the rules screen shows once for paid lectures and once for free lectures', async () => {
+    const s = await account();
+    await enroll(s.id, cohortA);
+    const l1 = await lecture(cohortA);
+    const l2 = await lecture(cohortA);
+    const tab = newTab();
+    const c1 = await claim(s.cookie, l1, tab);
+    expect(c1.first).toBe(true);
+    await beat(s.cookie, c1, tab, { playing: true });
+    await req('/play/release', { cookie: s.cookie, json: { tab } });
+    expect((await claim(s.cookie, l2, tab)).first).toBe(false);
   });
 });

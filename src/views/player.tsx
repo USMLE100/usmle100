@@ -90,13 +90,13 @@ function schedule(ms){clearTimeout(S.timer);S.timer=setTimeout(beat,ms)}
 var inflight=false;
 function beat(){if(!S.sid||!S.frame){return}if(inflight){schedule(2000);return}inflight=true;var sent=S.ranges.slice();var n=sent.length;
  post('/play/beat',{sid:S.sid,tab:TAB,nonce:S.nonce,playing:S.playing,pos:S.pos,dur:S.dur,add:sent,diag:D,failed:S.fail||undefined}).then(function(r){if(r.status===401){location.href='/sign-in?ended=idle&next='+encodeURIComponent(location.pathname);return null}if(!r.ok&&r.status!==403&&r.status!==503)throw 0;return r.json()}).then(function(j){inflight=false;if(!j)return;S.ranges.splice(0,n);S.okAt=Date.now();
-  if(j.state==='ok'){if(S.block==='offline'){unblock()}schedule(S.playing?10000:30000);return}
+  if(j.state==='ok'){if(S.fail==='offline')S.fail=null;if(S.block==='offline'){unblock()}schedule(S.playing?10000:30000);return}
   if(j.state==='account'){location.href=j.url;return}
   if(j.state==='tab'){teardown();block('tab','This lecture was opened in another tab or window, so it stopped here.',[{label:'Watch here instead',primary:true,fn:claim}]);return}
-  if(j.state==='failed'){teardown();S.sid=null;S.fail=null;block('failed','A technical problem interrupted this viewing. It didn’t use one of your views, and the lecture continues where it stopped.',[{label:'Try again',primary:true,fn:claim}]);return}
+  if(j.state==='interrupted'){teardown();S.fail=null;block('failed','A technical problem interrupted playback. Your viewing and your progress are kept, and nothing was used up. Press Try again to continue where it stopped.',[{label:'Try again',primary:true,fn:claim}]);return}
   if(j.state==='done'){var why=j.reason==='expired'?'This viewing’s 24 hours have ended.':'You’ve watched this lecture through, so this viewing is complete.';teardown();S.sid=null;if(j.viewsLeft===0){block('done',why+' You’ve now used all the views of this lecture.',[{label:'Request additional view',primary:true,fn:claim}])}else{block('done',why+' Starting again uses another view'+(j.viewsLeft>0?' ('+j.viewsLeft+' left)':'')+', and the lecture resumes where you stopped.',[{label:'Start another viewing',primary:true,fn:claim}])}return}
   teardown();block('gone','This lecture is no longer available to you.')}).catch(function(){inflight=false;
-  if(Date.now()-S.okAt>30000&&S.block!=='offline'){block('offline','Connection lost. The lecture is paused until we can confirm your progress again.')}schedule(5000)})}
+  if(Date.now()-S.okAt>30000&&S.block!=='offline'){if(!S.fail)S.fail='offline';block('offline','Connection lost. The lecture is paused until we can confirm your progress again.')}schedule(5000)})}
 document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden'){S.wasPlaying=S.playing;cmd('pause');schedule(200)}else{if(S.wasPlaying&&!S.block)cmd('play');S.wasPlaying=false}});
 var spots=[['6%','auto','auto','4%'],['6%','4%','auto','auto'],['auto','auto','18%','4%'],['auto','4%','18%','auto'],['42%','auto','auto','3%'],['42%','3%','auto','auto']],cur=-1;
 function moveWm(){var i;do{i=Math.floor(Math.random()*spots.length)}while(i===cur&&spots.length>1);cur=i;var p=spots[i];wm.style.top=p[0];wm.style.right=p[1];wm.style.bottom=p[2];wm.style.left=p[3]}

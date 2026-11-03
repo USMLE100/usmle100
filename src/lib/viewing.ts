@@ -22,8 +22,13 @@ export const FREE_VIEWS = 2;
 export const PAID_VIEWS = 2;
 /** Extra views a student can ask for per lecture; the owner approves each one (owner, 2 Nov 2026). */
 export const REQUESTABLE_EXTRA = 1;
-/** Viewings per lecture that a technical failure may close without using a view (stops it being used as a loophole). */
-export const MAX_FAILURE_REFUNDS = 2;
+/**
+ * Technical interruptions (owner, 2 Nov 2026): the viewing and its progress are always kept and no view is given back.
+ * There is no automatic extension, because the browser reports player errors and could fake them. An interruption is
+ * recorded (only with the server's own evidence of real watching) so the owner can see it when a student asks for an
+ * additional view.
+ */
+export const MIN_WATCHED_FOR_INTERRUPTION = 60;
 /** A viewing is used once this share of the video's unique content has been watched in it (owner, 2 Nov 2026: watch each lecture fully twice). */
 export const THRESHOLD = 0.9;
 export const WINDOW_SECONDS = 24 * 3600;
@@ -124,7 +129,7 @@ const scope = (a: Access) => (a.kind === 'paid' ? { kind: 'paid' as const, enr: 
 async function settleExpired(db: D1Database, userId: number, item: string) {
   const t = epoch();
   await db
-    .prepare("UPDATE view_sessions SET counted = 1, counted_at = ?, counted_reason = 'expired' WHERE user_id = ? AND item = ? AND counted = 0 AND failed_at IS NULL AND started_at IS NOT NULL AND expires_at <= ?")
+    .prepare("UPDATE view_sessions SET counted = 1, counted_at = ?, counted_reason = 'expired' WHERE user_id = ? AND item = ? AND counted = 0 AND started_at IS NOT NULL AND expires_at <= ?")
     .bind(t, userId, item, t)
     .run();
 }
@@ -139,7 +144,7 @@ export async function viewState(db: D1Database, userId: number, item: string, a:
   const [used, extra, open, history] = await Promise.all([
     db.prepare(`SELECT COUNT(*) AS n FROM view_sessions WHERE user_id = ? AND item = ? AND kind = ? ${enrSql} AND counted = 1`).bind(...binds).first<{ n: number }>(),
     db.prepare(`SELECT COALESCE(SUM(extra), 0) AS n FROM view_grants WHERE user_id = ? AND item = ? AND kind = ? ${enrSql}`).bind(...binds).first<{ n: number }>(),
-    db.prepare(`SELECT * FROM view_sessions WHERE user_id = ? AND item = ? AND kind = ? ${enrSql} AND counted = 0 AND failed_at IS NULL ORDER BY created_at DESC LIMIT 1`).bind(...binds).first<Session>(),
+    db.prepare(`SELECT * FROM view_sessions WHERE user_id = ? AND item = ? AND kind = ? ${enrSql} AND counted = 0 ORDER BY created_at DESC LIMIT 1`).bind(...binds).first<Session>(),
     db.prepare('SELECT COUNT(*) AS n FROM view_sessions WHERE user_id = ? AND item = ? AND started_at IS NOT NULL').bind(userId, item).first<{ n: number }>(),
   ]);
   const base = s.kind === 'paid' ? PAID_VIEWS : FREE_VIEWS;
@@ -224,7 +229,7 @@ export async function releaseTab(db: D1Database, userId: number, tab: string) {
 // ---------- Progress reports ----------
 
 export type Beat = { sid: string; tab: string; nonce: string; playing: boolean; pos: number; dur: number; add: [number, number][]; failed?: string };
-export type BeatResult = { state: 'ok'; watchedPct: number; expiresAt: number | null } | { state: 'done'; reason: '65%' | 'expired'; viewsLeft?: number } | { state: 'tab' } | { state: 'gone' } | { state: 'failed' };
+export type BeatResult = { state: 'ok'; watchedPct: number; expiresAt: number | null } | { state: 'done'; reason: '65%' | 'expired'; viewsLeft?: number } | { state: 'tab' } | { state: 'gone' } | { state: 'interrupted' };
 
 const savePos = (db: D1Database, userId: number, item: string, pos: number, t: number) =>
   db
@@ -256,21 +261,19 @@ export async function recordBeat(db: D1Database, user: User, enr: Enrollment | n
   const s = await db.prepare('SELECT * FROM view_sessions WHERE id = ? AND user_id = ?').bind(b.sid, user.id).first<Session>();
   if (!s || s.item !== tab.item || a.kind !== s.kind || (a.kind === 'paid' && a.enrollmentId !== s.enrollment_id)) return { state: 'gone' };
   if (s.counted) return { state: 'done', reason: s.counted_reason === 'expired' ? 'expired' : '65%' };
-  if (s.failed_at) return { state: 'failed' };
-  // A technical failure (Bunny's player reported an error, or playback froze) closes this viewing without using a view,
-  // keeping the place reached. At most MAX_FAILURE_REFUNDS times per lecture, so it can't become a way round the limit.
-  if (b.failed) {
-    const refunds = await db
-      .prepare('SELECT COUNT(*) AS n FROM view_sessions WHERE user_id = ? AND item = ? AND kind = ? AND enrollment_id IS ? AND failed_at IS NOT NULL')
-      .bind(user.id, s.item, s.kind, s.enrollment_id)
-      .first<{ n: number }>();
-    if ((refunds?.n ?? 0) < MAX_FAILURE_REFUNDS) {
+  // A technical interruption keeps this viewing open (same progress, same place). It is recorded, once per viewing and only
+  // on the server's own evidence of real watching, so the owner can see it if the student later asks for another view.
+  if (b.failed && !s.failed_at && s.started_at && s.watched_seconds >= MIN_WATCHED_FOR_INTERRUPTION && s.last_beat_at) {
+    const gap = t - s.last_beat_at;
+    // 'offline' must match a gap the server saw itself (no reports for 30 s+ while watching); others need a live report.
+    const evidence = b.failed === 'offline' ? gap >= 30 && gap <= WINDOW_SECONDS : gap <= 120;
+    if (evidence) {
       await db.batch([
-        db.prepare('UPDATE view_sessions SET failed_at = ?, failed_reason = ? WHERE id = ? AND counted = 0').bind(t, b.failed.slice(0, 30), s.id),
+        db.prepare('UPDATE view_sessions SET failed_at = ?, failed_reason = ? WHERE id = ? AND counted = 0 AND failed_at IS NULL').bind(t, b.failed.slice(0, 30), s.id),
         savePos(db, user.id, s.item, pos, t),
       ]);
-      return { state: 'failed' };
     }
+    if (b.failed !== 'offline') return { state: 'interrupted' };
   }
   if (s.started_at && s.expires_at! <= t) {
     await settleExpired(db, user.id, s.item);

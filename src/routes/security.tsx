@@ -411,7 +411,7 @@ security.get('/views', async (c) => {
   const owner = isOwner(me);
   const reqRows = (
     await db
-      .prepare(`SELECT r.id, r.kind, r.created_at, r.user_id, r.item, u.name, u.email FROM view_requests r JOIN users u ON u.id = r.user_id WHERE r.resolved_at IS NULL ORDER BY r.id`)
+      .prepare(`SELECT r.id, r.kind, r.created_at, r.user_id, r.item, u.name, u.email, EXISTS (SELECT 1 FROM view_sessions v WHERE v.user_id = r.user_id AND v.item = r.item AND v.failed_at IS NOT NULL) AS interrupted FROM view_requests r JOIN users u ON u.id = r.user_id WHERE r.resolved_at IS NULL ORDER BY r.id`)
       .all<any>()
   ).results;
   const requests = await Promise.all(reqRows.map(async (r: any) => ({ ...r, label: await itemLabel(db, r.item) })));
@@ -450,7 +450,7 @@ security.get('/views', async (c) => {
       <h1>Lecture views</h1>
       {c.req.query('ok') && <Flash>Saved.</Flash>}
       {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
-      <p class="muted">Paid lectures: 2 views per lecture for each enrollment. Free lectures: 2 views. A view is used at 90% watched or when a started viewing’s 24 hours end; a viewing stopped by a technical problem doesn’t count (up to 2 per lecture). Students can request one additional view per lecture, which you approve here or on your dashboard. Only the owner can give extra views; every change is logged.</p>
+      <p class="muted">Paid lectures: 2 views per lecture for each enrollment. Free lectures: 2 views. A view is used at 90% watched or when a started viewing’s 24 hours end; a viewing interrupted by a technical problem keeps its progress and doesn’t give a view back; if it cost the student their views, their request shows “technical interruption recorded”. Students can request one additional view per lecture, which you approve here or on your dashboard. Only the owner can give extra views; every change is logged.</p>
       <section class="card stack">
         <h2 style="margin:0">Requests for an additional view</h2>
         {requests.length === 0 ? (
@@ -462,7 +462,7 @@ security.get('/views', async (c) => {
               {requests.map((r: any) => (
                 <tr>
                   <td>{r.name}<br /><a class="small" href={`/admin/views?email=${encodeURIComponent(r.email)}`}>{r.email}</a></td>
-                  <td>{r.label}</td>
+                  <td>{r.label}{r.interrupted ? <><br /><span class="chip">Technical interruption recorded</span></> : null}</td>
                   <td class="small muted">{String(r.created_at).slice(0, 16)} UTC</td>
                   <td class="stack" style="gap:6px">
                     {owner ? (
@@ -553,16 +553,24 @@ security.post('/views/requests/:id{[0-9]+}/approve', async (c) => {
     db.prepare("UPDATE view_requests SET resolved_at = datetime('now'), resolved_by = ?, outcome = 'granted' WHERE id = ?").bind(me.id, r.id),
   ]);
   await audit(db, { actorId: me.id, action: 'views.granted', targetUserId: r.user_id, detail: { item: r.item, kind: 'paid', extra: 1, reason: 'Additional view requested by the student' }, ip: ip(c) });
+  // Portal message only (free): no email or text is sent for this.
+  await notify(c.env, r.user_id, { kind: 'views', title: 'Additional view approved', body: `Your request for an additional view of ${await itemLabel(db, r.item)} was approved. You can watch it again now; it continues where you stopped.`, email: false });
   return back('Approved: one additional view added.');
 });
 
+/** Owner only (OWNER_ONLY): decline a request with one click, from the dashboard or Lecture views. */
 security.post('/views/dismiss', async (c) => {
   const me = c.get('user')!;
+  const db = c.env.DB;
   const id = Number((await c.req.parseBody()).request_id);
-  const r = await c.env.DB.prepare('SELECT user_id, item FROM view_requests WHERE id = ?').bind(id).first<{ user_id: number; item: string }>();
-  await c.env.DB.prepare("UPDATE view_requests SET resolved_at = datetime('now'), resolved_by = ?, outcome = 'declined' WHERE id = ? AND resolved_at IS NULL").bind(me.id, id).run();
-  if (r) await audit(c.env.DB, { actorId: me.id, action: 'views.declined', targetUserId: r.user_id, detail: { item: r.item }, ip: ip(c) });
-  return c.redirect('/admin/views?ok=1');
+  const fromDashboard = (c.req.header('referer') ?? '').replace(/^https?:\/\/[^/]+/, '').startsWith('/dashboard');
+  const r = await db.prepare('SELECT user_id, item FROM view_requests WHERE id = ? AND resolved_at IS NULL').bind(id).first<{ user_id: number; item: string }>();
+  if (r) {
+    await db.prepare("UPDATE view_requests SET resolved_at = datetime('now'), resolved_by = ?, outcome = 'declined' WHERE id = ? AND resolved_at IS NULL").bind(me.id, id).run();
+    await audit(db, { actorId: me.id, action: 'views.declined', targetUserId: r.user_id, detail: { item: r.item }, ip: ip(c) });
+    await notify(c.env, r.user_id, { kind: 'views', title: 'Additional view request declined', body: `Your request for an additional view of ${await itemLabel(db, r.item)} was declined. If you think this is a mistake, please contact USMLE100.`, email: false });
+  }
+  return c.redirect(`${fromDashboard ? '/dashboard' : '/admin/views'}?ok=` + encodeURIComponent(r ? 'Declined. The student has been told.' : 'That request was already handled.'));
 });
 
 // ---------- Requests: devices, contact changes, privacy, alerts ----------

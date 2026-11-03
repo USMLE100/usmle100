@@ -133,12 +133,16 @@ async function viewRequestsFor(db: D1Database, user: User) {
   if (!isAdmin(user)) return null;
   const rows = (
     await db
-      .prepare("SELECT r.id, r.item, r.created_at, u.name, u.email FROM view_requests r JOIN users u ON u.id = r.user_id WHERE r.resolved_at IS NULL AND r.kind = 'paid' ORDER BY r.id LIMIT 10")
-      .all<{ id: number; item: string; created_at: string; name: string; email: string }>()
+      .prepare(
+        `SELECT r.id, r.item, r.created_at, u.name, u.email,
+                EXISTS (SELECT 1 FROM view_sessions v WHERE v.user_id = r.user_id AND v.item = r.item AND v.failed_at IS NOT NULL) AS interrupted
+         FROM view_requests r JOIN users u ON u.id = r.user_id WHERE r.resolved_at IS NULL AND r.kind = 'paid' ORDER BY r.id LIMIT 10`,
+      )
+      .all<{ id: number; item: string; created_at: string; name: string; email: string; interrupted: number }>()
   ).results;
   return Promise.all(rows.map(async (r) => ({ ...r, label: await itemLabel(db, r.item) })));
 }
-const ViewRequests = (p: { rows: { id: number; label: string; created_at: string; name: string; email: string }[]; owner: boolean; ok?: string; error?: string }) => (
+const ViewRequests = (p: { rows: { id: number; label: string; created_at: string; name: string; email: string; interrupted: number }[]; owner: boolean; ok?: string; error?: string }) => (
   <section class="card stack" style="gap:10px">
     {p.ok && <Flash>{p.ok}</Flash>}
     {p.error && <Flash kind="error">{p.error}</Flash>}
@@ -152,9 +156,13 @@ const ViewRequests = (p: { rows: { id: number; label: string; created_at: string
             <strong>{r.name}</strong> <span class="muted small">{r.email}</span>
             <br />
             <span class="small">{r.label}</span> <span class="muted small">· asked {String(r.created_at).slice(0, 16)} UTC</span>
+            {r.interrupted ? <> <span class="chip">Technical interruption recorded</span></> : null}
           </span>
           {p.owner ? (
-            <form method="post" action={`/admin/views/requests/${r.id}/approve`}><button class="btn btn-primary btn-sm" type="submit">Approve (+1 view)</button></form>
+            <span class="row" style="gap:8px">
+              <form method="post" action={`/admin/views/requests/${r.id}/approve`}><button class="btn btn-primary btn-sm" type="submit">Approve (+1 view)</button></form>
+              <form method="post" action="/admin/views/dismiss"><input type="hidden" name="request_id" value={String(r.id)} /><button class="btn btn-ghost btn-sm" type="submit">Decline</button></form>
+            </span>
           ) : (
             <span class="muted small">Waiting for the owner</span>
           )}

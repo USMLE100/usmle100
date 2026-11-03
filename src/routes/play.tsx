@@ -29,9 +29,9 @@ const noStore = (c: Context<AppEnv>) => c.header('Cache-Control', 'no-store');
 const ip = (c: Context<AppEnv>) => c.req.header('cf-connecting-ip') ?? null;
 
 const NOTICE_PAID =
-  'Before you start: each lecture can be watched twice. A viewing lasts 24 hours from when you press play. It counts as one view when you have watched 90% of the lecture, or when its 24 hours end. You can pause, press End Lecture and come back within those 24 hours without using another view. Lectures are for you alone: your name and account number appear on the video, and recording or sharing them is not allowed.';
+  'Before you start: each lecture can be watched twice. A viewing lasts 24 hours from when you press play. It counts as one view when you have watched 90% of the lecture, or when its 24 hours end. You can pause, press End Lecture and come back within those 24 hours without using another view. If a technical problem interrupts a viewing, your progress is kept and you can continue where it stopped. Lectures are for you alone: your name and account number appear on the video, and recording or sharing them is not allowed.';
 const NOTICE_FREE =
-  'Before you start: each free lecture can be watched 2 times. A viewing lasts 24 hours from when you press play. It counts as one view when you have watched 90% of the video, or when its 24 hours end. You can pause, press End Lecture and come back within those 24 hours without using another view. Your name and account number appear on the video, and recording or sharing it is not allowed.';
+  'Before you start: each free lecture can be watched 2 times. A viewing lasts 24 hours from when you press play. It counts as one view when you have watched 90% of the video, or when its 24 hours end. You can pause, press End Lecture and come back within those 24 hours without using another view. If a technical problem interrupts a viewing, your progress is kept and you can continue where it stopped. Your name and account number appear on the video, and recording or sharing it is not allowed.';
 
 const where = (c: Context<AppEnv>) => ({ device: c.get('session')?.deviceHash ?? null, ip: ip(c) });
 
@@ -90,8 +90,9 @@ play.post('/play/claim', async (c) => {
     src,
     ttl: videoLinkSeconds(c.env),
     pos: await lastPosition(db, user.id, item),
-    // The rules are shown before the first playback of each video (R054).
-    first: v.history === 0 && !v.session.started_at,
+    // The rules are shown once per student for paid lectures and once for free lectures (owner, 2 Nov 2026):
+    // before the first viewing of that kind they ever start.
+    first: !v.session.started_at && !(await db.prepare('SELECT 1 FROM view_sessions WHERE user_id = ? AND kind = ? AND started_at IS NOT NULL LIMIT 1').bind(user.id, r.access.kind).first()),
     notice: r.access.kind === 'free' ? NOTICE_FREE : NOTICE_PAID,
     wm: wm(v.session.id),
   });
@@ -110,7 +111,7 @@ play.post('/play/beat', async (c) => {
     pos: Number(b.pos),
     dur: Number(b.dur),
     add: Array.isArray(b.add) ? b.add : [],
-    failed: b.failed === 'player-error' || b.failed === 'stalled' ? b.failed : undefined,
+    failed: b.failed === 'player-error' || b.failed === 'stalled' || b.failed === 'offline' ? b.failed : undefined,
   };
   const result = await recordBeat(c.env.DB, user, c.get('enrollment'), beat);
   // Staging only: keep what the page heard from Bunny's player (counts and flags only, no personal data).
