@@ -78,6 +78,10 @@ describe('Course Book checkout', () => {
     expect(params.get('line_items[0][price_data][unit_amount]')).toBe('19900');
     expect(params.get('line_items[0][price_data][currency]')).toBe('usd');
     expect(params.get('customer_email')).toBe(s.email);
+    // Continuing to payment is recorded as acceptance of the refund terms in force, with the notice wording.
+    const acc = await db.prepare("SELECT checkbox_text, refund_hash FROM terms_acceptances WHERE user_id = ? AND context LIKE 'checkout:book-%'").bind(s.id).first<any>();
+    expect(acc.checkbox_text).toMatch(/all sales are final/);
+    expect(acc.refund_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(ref).toMatch(/^book-\d+$/);
     expect(await hasAccess(s.id)).toBe(false);
 

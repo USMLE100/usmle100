@@ -406,6 +406,26 @@ const AgreeSignup = () => (
 );
 /** The exact wording of the box above, stored with each acceptance as evidence. Keep the two in step. */
 export const AGREE_TEXT = 'I am 18 or older and agree to the Terms (including individual arbitration), Privacy Policy and Refund Policy (all sales final).';
+/** The notice shown beside every payment button, stored as evidence when the student continues to payment. */
+export const CHECKOUT_TEXT = 'By continuing to payment you agree to the Terms of Service and Refund Policy: all sales are final.';
+
+/**
+ * Evidence of agreement: the exact version of each policy in force (full text kept once per version, by hash), the
+ * wording the student saw, time, IP and browser. Kept outside the 24-month security log so it is never pruned.
+ */
+async function recordAcceptance(c: Context<AppEnv>, uid: number, context: string, wording: string) {
+  const st = await getSettings(c.env.DB);
+  const [th, ph, rh] = await Promise.all([st.terms_text, st.privacy_text, st.refund_text].map((t) => sha256Hex(t ?? '')));
+  const keep = (hash: string, kind: string, body: string) => c.env.DB.prepare('INSERT OR IGNORE INTO policy_versions (hash, kind, body) VALUES (?, ?, ?)').bind(hash, kind, body ?? '');
+  await c.env.DB.batch([
+    keep(th, 'terms', st.terms_text),
+    keep(ph, 'privacy', st.privacy_text),
+    keep(rh, 'refund', st.refund_text),
+    c.env.DB.prepare('INSERT INTO terms_acceptances (user_id, context, checkbox_text, terms_hash, privacy_hash, refund_hash, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(uid, context, wording, th, ph, rh, c.req.header('cf-connecting-ip') ?? null, (c.req.header('user-agent') ?? '').slice(0, 300)),
+  ]);
+  return { terms: th.slice(0, 16), privacy: ph.slice(0, 16), refund: rh.slice(0, 16) };
+}
 
 type SignupForm = { turnstile?: string; first?: string; last?: string; phone?: string; exam?: string; grad?: string; marketing?: boolean };
 const AuthPage = (p: { mode: 'in' | 'up'; selfReset?: boolean; error?: string; notice?: string; email?: string; name?: string; form?: SignupForm; next?: string; user: any; contact?: string }) => (
@@ -534,19 +554,9 @@ publicRoutes.post('/sign-up', async (c) => {
     .run();
   await createSession(c, Number(r.meta.last_row_id), (await deviceGate(c, Number(r.meta.last_row_id), 'student')).hash);
   await audit(c.env.DB, { actorId: Number(r.meta.last_row_id), action: 'account.created', targetUserId: Number(r.meta.last_row_id), ip: c.req.header('cf-connecting-ip') ?? null });
-  // Evidence of agreement: the exact version of each policy in force (by hash), the box wording, time, IP and browser.
   const uid = Number(r.meta.last_row_id);
-  const st = await getSettings(c.env.DB);
-  const [th, ph, rh] = await Promise.all([st.terms_text, st.privacy_text, st.refund_text].map((t) => sha256Hex(t ?? '')));
-  const keep = (hash: string, kind: string, body: string) => c.env.DB.prepare('INSERT OR IGNORE INTO policy_versions (hash, kind, body) VALUES (?, ?, ?)').bind(hash, kind, body ?? '');
-  await c.env.DB.batch([
-    keep(th, 'terms', st.terms_text),
-    keep(ph, 'privacy', st.privacy_text),
-    keep(rh, 'refund', st.refund_text),
-    c.env.DB.prepare('INSERT INTO terms_acceptances (user_id, context, checkbox_text, terms_hash, privacy_hash, refund_hash, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .bind(uid, 'sign-up', AGREE_TEXT, th, ph, rh, c.req.header('cf-connecting-ip') ?? null, (c.req.header('user-agent') ?? '').slice(0, 300)),
-  ]);
-  await audit(c.env.DB, { actorId: uid, action: 'terms.accepted', targetUserId: uid, detail: { context: 'sign-up', age18: true, terms: th.slice(0, 16), privacy: ph.slice(0, 16), refund: rh.slice(0, 16) }, ip: c.req.header('cf-connecting-ip') ?? null });
+  const h = await recordAcceptance(c, uid, 'sign-up', AGREE_TEXT);
+  await audit(c.env.DB, { actorId: uid, action: 'terms.accepted', targetUserId: uid, detail: { context: 'sign-up', age18: true, ...h }, ip: c.req.header('cf-connecting-ip') ?? null });
   // Someone who signed up for something specific (the Course Book, free lectures, a webinar) goes back to it.
   return c.redirect(typeof f.next === 'string' && /^\/(buy|free-lectures|webinars)(\/|$)/.test(f.next) ? safeNext(f.next) : '/enroll');
 });
@@ -829,6 +839,7 @@ publicRoutes.get('/enroll', requireUser, async (c) => {
             </form>
           ))}
         </div>
+        <p class="small muted">By continuing to payment you agree to the <a href="/terms" target="_blank">Terms of Service</a> and <a href="/refunds" target="_blank">Refund Policy</a>: all sales are final.</p>
         <p class="small muted">
           Not sure which fits? <a href="/programs">Compare what each includes</a>. Not ready yet? <a href="/free-lectures">Watch free lectures</a> or open <a href="/account">My account</a>.
         </p>
@@ -853,6 +864,7 @@ publicRoutes.post('/enroll/:pkg', requireUser, async (c) => {
     .bind(user.id, pkg.id, pkg.price_cents, enrolling?.cohort.id ?? null)
     .run();
   const enrollmentId = Number(ins.meta.last_row_id);
+  await recordAcceptance(c, user.id, `checkout:enrollment-${enrollmentId}`, CHECKOUT_TEXT);
 
   const siteUrl = (c.env.SITE_URL || new URL(c.req.url).origin).replace(/\/$/, '');
   if (c.env.DEV_FAKE_PAYMENTS === '1' && new URL(c.req.url).protocol === 'http:') {
@@ -902,7 +914,7 @@ const BookCheckout = (p: { user: any; owned: boolean; cancelled?: boolean; pendi
           <p class="small"><strong>Online payment isn’t switched on yet.</strong> Please contact us to buy the Course Book.</p>
         )}
         {(p.legal.terms || p.legal.refunds) && !p.owned && (
-          <p class="small muted">By paying you agree to the {p.legal.terms && <a href="/terms">Terms of Service</a>}{p.legal.terms && p.legal.refunds && ' and '}{p.legal.refunds && <a href="/refunds">Refund Policy</a>}.</p>
+          <p class="small muted">By continuing to payment you agree to the {p.legal.terms && <a href="/terms" target="_blank">Terms of Service</a>}{p.legal.terms && p.legal.refunds && ' and '}{p.legal.refunds && <a href="/refunds" target="_blank">Refund Policy</a>}: all sales are final.</p>
         )}
         {p.contact && !p.owned && <RefundContact email={p.contact} />}
       </section>
@@ -942,6 +954,7 @@ publicRoutes.post('/buy/course-book', requireUser, async (c) => {
   if (!paymentsReady(c)) return c.redirect('/buy/course-book');
   const ins = await db.prepare("INSERT INTO book_purchases (user_id, amount_cents) VALUES (?, ?)").bind(user.id, BOOK_PRICE_CENTS).run();
   const purchaseId = Number(ins.meta.last_row_id);
+  await recordAcceptance(c, user.id, `checkout:book-${purchaseId}`, CHECKOUT_TEXT);
   if (!c.env.STRIPE_SECRET_KEY) {
     // Local development only (DEV_FAKE_PAYMENTS on plain http): pretend Stripe confirmed the payment.
     const fakeId = 'dev_book_' + purchaseId;

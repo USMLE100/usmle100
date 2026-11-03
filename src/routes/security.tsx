@@ -352,7 +352,7 @@ security.get('/agreement', async (c) => {
       {c.req.query('ok') && <Flash>Published.</Flash>}
       {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
       <p class="muted">
-        Students must sign the latest version before using the portal (typed legal name, date of birth, 18+). A <strong>material</strong> change makes every student sign again; a minor
+        Students must sign the latest version before using the portal (typed legal name, 18+ confirmation). A <strong>material</strong> change makes every student sign again; a minor
         correction does not. Nothing is shown to students until you publish the first version. Have your lawyer review the text first.
       </p>
       {isOwner(me) ? (

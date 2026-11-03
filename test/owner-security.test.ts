@@ -245,15 +245,14 @@ describe('student agreement (R012, R014)', () => {
       const page = await (await req('/agreement', { cookie: s.cookie })).text();
       const version = /name="version" value="(\d+)"/.exec(page)![1];
       const base = { version, legal_name: 'Test Student', accept: '1', next: '/dashboard' };
-      const young = new Date(Date.now() - 17 * 365.25 * 86400e3).toISOString().slice(0, 10);
-      const under = await req('/agreement', { cookie: s.cookie, form: { ...base, birth_date: young } });
-      expect(under.status).toBe(400);
-      expect(await under.text()).toContain('18 or older');
-      expect((await req('/agreement', { cookie: s.cookie, form: { ...base, birth_date: '1995-06-15', accept: '' } })).status).toBe(400);
-      expect(loc(await req('/agreement', { cookie: s.cookie, form: { ...base, birth_date: '1995-06-15' } }))).toBe('/dashboard');
+      // No date of birth is asked for; the box confirms 18+ and agreement.
+      expect(page).not.toContain('name="birth_date"');
+      expect(page).toContain('18 or older');
+      expect((await req('/agreement', { cookie: s.cookie, form: { ...base, accept: '' } })).status).toBe(400);
+      expect(loc(await req('/agreement', { cookie: s.cookie, form: base }))).toBe('/dashboard');
       expect((await req('/dashboard', { cookie: s.cookie })).status).toBe(200);
       const sig = await db.prepare('SELECT legal_name, email, birth_date, body_hash, ip FROM agreement_signatures WHERE user_id = ?').bind(s.id).first<any>();
-      expect(sig).toMatchObject({ legal_name: 'Test Student', email: s.email, birth_date: '1995-06-15', ip: '203.0.113.9' });
+      expect(sig).toMatchObject({ legal_name: 'Test Student', email: s.email, birth_date: '', ip: '203.0.113.9' });
       expect(sig.body_hash).toMatch(/^[0-9a-f]{64}$/);
       // A minor correction does not ask again; a material change does.
       await req('/admin/agreement', { cookie: owner.cookie, form: { title: 'Agreement', body: TEXT + ' Typo fixed.', material: '' } });

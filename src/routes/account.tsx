@@ -127,7 +127,7 @@ export function ageOn(birth: string, today = new Date()) {
 // Same-site paths only: browsers read "/\\evil.example" as another site, so backslashes and control characters are refused.
 const safeNext = (n: unknown) => (typeof n === 'string' && n.startsWith('/') && !n.startsWith('//') && !/[\\\u0000-\u001f\u007f]/.test(n) ? n : '/dashboard');
 
-const AgreementPage = (p: { a: { id: number; title: string; body: string; published_at: string }; next: string; error?: string; name?: string; birth?: string; signed?: boolean }) => (
+const AgreementPage = (p: { a: { id: number; title: string; body: string; published_at: string }; next: string; error?: string; name?: string; signed?: boolean }) => (
   <PublicLayout title="Student agreement" user={null} plain>
     <main class="wrap page" style="max-width:720px;padding-top:40px;padding-bottom:72px">
       <Eyebrow>USMLE100 · Version {p.a.id} · {String(p.a.published_at).slice(0, 10)}</Eyebrow>
@@ -140,7 +140,6 @@ const AgreementPage = (p: { a: { id: number; title: string; body: string; publis
           <input type="hidden" name="next" value={p.next} />
           <input type="hidden" name="version" value={String(p.a.id)} />
           <label class="field">Full legal name (typed signature)<input type="text" name="legal_name" required minlength={3} maxlength={120} autocomplete="name" value={p.name ?? ''} /></label>
-          <label class="field">Date of birth<input type="date" name="birth_date" required value={p.birth ?? ''} /></label>
           <label class="check"><input type="checkbox" name="accept" value="1" required /> I have read this agreement, I am 18 or older, and I agree to it.</label>
           <button class="btn btn-primary btn-block" type="submit">Sign and continue</button>
         </form>
@@ -156,7 +155,7 @@ account.get('/agreement', requireUser, async (c) => {
   if (!a) return c.redirect('/dashboard');
   const u = c.get('user')!;
   const signed = !!(await c.env.DB.prepare('SELECT 1 FROM agreement_signatures WHERE user_id = ? AND agreement_id = ?').bind(u.id, a.id).first());
-  return c.html(<AgreementPage a={a} next={safeNext(c.req.query('next'))} signed={signed} birth={u.birth_date ?? undefined} />);
+  return c.html(<AgreementPage a={a} next={safeNext(c.req.query('next'))} signed={signed} />);
 });
 
 account.post('/agreement', requireUser, async (c) => {
@@ -166,23 +165,20 @@ account.post('/agreement', requireUser, async (c) => {
   if (!a) return c.redirect('/dashboard');
   const next = safeNext(f.next);
   const name = String(f.legal_name ?? '').trim().replace(/\s+/g, ' ');
-  const birth = String(f.birth_date ?? '').trim();
-  const again = (error: string) => c.html(<AgreementPage a={a} next={next} error={error} name={name} birth={birth} />, 400);
+  // Date of birth is not collected (owner, 3 Nov 2026): the 18+ confirmation below is enough.
+  const again = (error: string) => c.html(<AgreementPage a={a} next={next} error={error} name={name} />, 400);
   if (Number(f.version) !== a.id) return again('The agreement was updated while you were reading. Please read this version and sign again.');
   if (name.length < 3 || name.length > 120) return again('Please type your full legal name.');
-  const age = ageOn(birth);
-  if (age < 0 || age > 120) return again('Please enter a valid date of birth.');
-  if (age < 18) return again('USMLE100 is only for people aged 18 or older.');
   if (f.accept !== '1') return again('Please tick the box to confirm you agree.');
   // The stored hash proves exactly which text was signed, even if the version is edited later.
   const bodyHash = a.body_hash || (await sha256Hex(a.body));
   const ip = c.req.header('cf-connecting-ip') ?? null;
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      `INSERT OR IGNORE INTO agreement_signatures (user_id, agreement_id, legal_name, email, birth_date, body_hash, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(u.id, a.id, name, u.email, birth, bodyHash, ip, (c.req.header('user-agent') ?? '').slice(0, 300)),
-    c.env.DB.prepare('UPDATE users SET birth_date = ? WHERE id = ?').bind(birth, u.id),
-  ]);
+  // birth_date stays in the table for older signatures; new ones store '' (column is NOT NULL).
+  await c.env.DB.prepare(
+    `INSERT OR IGNORE INTO agreement_signatures (user_id, agreement_id, legal_name, email, birth_date, body_hash, ip, user_agent) VALUES (?, ?, ?, ?, '', ?, ?, ?)`,
+  )
+    .bind(u.id, a.id, name, u.email, bodyHash, ip, (c.req.header('user-agent') ?? '').slice(0, 300))
+    .run();
   await audit(c.env.DB, { actorId: u.id, action: 'agreement.signed', targetUserId: u.id, detail: { version: a.id, bodyHash }, ip });
   return c.redirect(next);
 });
