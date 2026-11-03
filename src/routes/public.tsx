@@ -534,6 +534,15 @@ const contactEmail = async (db: D1Database) => (await getSettings(db)).contact_e
 publicRoutes.get('/sign-in', async (c) =>
   c.html(<AuthPage mode="in" next={c.req.query('next')} notice={ENDED[c.req.query('ended') ?? '']} user={c.get('user')} contact={await contactEmail(c.env.DB)} selfReset={emailReady(c.env)} />),
 );
+/** True when this browser's device cookie is an approved device of the account with this email. */
+async function trustedDeviceFor(c: Context<AppEnv>, email: string) {
+  const raw = getCookie(c, 'u100_device');
+  if (!raw || !/^[A-Za-z0-9_-]{40,60}$/.test(raw)) return false;
+  return !!(await c.env.DB.prepare("SELECT 1 FROM devices d JOIN users u ON u.id = d.user_id WHERE u.email = ? AND d.device_hash = ? AND d.status = 'active'")
+    .bind(email, await sha256Hex(raw))
+    .first());
+}
+
 publicRoutes.post('/sign-in', async (c) => {
   const f = await c.req.parseBody();
   const email = String(f.email ?? '').trim().toLowerCase();
@@ -545,8 +554,15 @@ publicRoutes.post('/sign-in', async (c) => {
   if (await accountLocked(c.env.DB, email)) {
     return c.html(<AuthPage mode="in" error={lockedMsg} email={email} user={null} contact={contact} />, 429);
   }
-  const wait = await lockedFor(c.env.DB, [emailKey(email), ...(ip ? [ipKey(ip)] : [])]);
+  // Two timed locks: this account (email) and this network address (IP, shared by everyone on the same Wi-Fi,
+  // mobile carrier address or iCloud Private Relay). The address lock must not lock out a student who signs in from
+  // a device already registered to their own account: an attacker never has that device, so guessing stays blocked.
+  const emailWait = await lockedFor(c.env.DB, [emailKey(email)]);
+  let ipWait = ip ? await lockedFor(c.env.DB, [ipKey(ip)]) : 0;
+  if (!emailWait && ipWait > 0 && (await trustedDeviceFor(c, email))) ipWait = 0;
+  const wait = Math.max(emailWait, ipWait);
   if (wait > 0) {
+    await audit(c.env.DB, { action: 'signin.refused', detail: { email, lock: emailWait ? 'account' : 'network address' }, ip });
     // Refused before the password is checked, so guessing gains nothing while locked.
     const minutes = Math.max(1, Math.ceil(wait / 60));
     return c.html(<AuthPage mode="in" error={`Too many sign-in attempts. Please wait ${minutes} minute${minutes === 1 ? '' : 's'} and try again.`} email={email} user={null} contact={contact} />, 429);

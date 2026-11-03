@@ -1,3 +1,4 @@
+import { sha256Hex } from './lib/auth';
 import { videoLinkSeconds } from './lib/content';
 import { Hono } from 'hono';
 import { secureHeaders } from 'hono/secure-headers';
@@ -120,6 +121,29 @@ app.get('/__staging', async (c) => {
     })),
     // What the lecture player last heard from Bunny's player (staging only): shows which step fails if progress isn't counted.
     player_diagnostics: JSON.parse((await e.DB.prepare("SELECT value FROM settings WHERE key = 'staging_player_diag'").first<{ value: string }>())?.value ?? 'null'),
+    // Sign-in history and active locks (staging only, masked): shows exactly why a sign-in was refused.
+    sign_in_log: await (async () => {
+      const tag = async (ip: string | null) => (ip ? 'net-' + (await sha256Hex('staging:' + ip)).slice(0, 6) : 'none');
+      const rows = (await e.DB.prepare("SELECT at, action, detail, ip FROM audit_log WHERE action LIKE 'signin.%' ORDER BY id DESC LIMIT 15").all<{ at: string; action: string; detail: string | null; ip: string | null }>()).results;
+      return Promise.all(rows.map(async (r) => {
+        let d: any = {};
+        try { d = JSON.parse(r.detail ?? '{}'); } catch {}
+        return { at: r.at.slice(0, 19), what: r.action.replace('signin.', ''), account: d.email ? maskEmail(d.email) : null, lock: d.lock ?? undefined, network: await tag(r.ip) };
+      }));
+    })(),
+    active_sign_in_locks: await (async () => {
+      const t = Math.floor(Date.now() / 1000);
+      const rows = (await e.DB.prepare("SELECT key, failures, locked_until FROM login_attempts WHERE (key LIKE 'email:%' OR key LIKE 'ip:%') AND locked_until > ?").bind(t).all<{ key: string; failures: number; locked_until: number }>()).results;
+      const held = (await e.DB.prepare('SELECT email FROM account_locks WHERE unlocked_at IS NULL').all<{ email: string }>()).results.map((r) => ({ account: maskEmail(r.email), lock: 'until an admin unlocks it' }));
+      return [
+        ...(await Promise.all(rows.map(async (r) => ({
+          [r.key.startsWith('ip:') ? 'network' : 'account']: r.key.startsWith('ip:') ? 'net-' + (await sha256Hex('staging:' + r.key.slice(3))).slice(0, 6) : maskEmail(r.key.slice(6)),
+          failures: r.failures,
+          minutes_left: Math.ceil((r.locked_until - t) / 60),
+        })))),
+        ...held,
+      ];
+    })(),
     recent_stripe_events: JSON.parse((await e.DB.prepare("SELECT value FROM settings WHERE key = 'staging_stripe_log'").first<{ value: string }>())?.value ?? '[]'),
   };
   return c.body(JSON.stringify(status, null, 2), 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
