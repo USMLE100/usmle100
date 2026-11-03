@@ -133,3 +133,9 @@ A separate reviewer audited the code and proved four exploitable issues with wor
 - The CSP allows inline scripts. JSX escaping is the XSS protection; there is no CSP backstop.
 - Faculty can set a lecture live with any Bunny video id directly. This may be intended, and needs an owner decision.
 - Migration `0014` makes the lowest-id admin the owner: confirm that this is the intended person.
+
+## 11. Live database checks (owner, read-only, D1 Console, 2 Nov 2026)
+
+- **Admins:** one, account #1 `info.usmle100@gmail.com`. Migration 0014 makes this account the owner at launch.
+- **Migration level:** `0010_login_limits_and_resets`. This matches the launch rehearsal (0010 → 0023: 20/20 checks passed, original data unchanged).
+- **Cloudflare plan:** Workers **Free** (D1 limit of 100k rows written per day). Lecture check-ins every 10 s will exceed this with real traffic. Workers Paid ($5/month) needs owner approval before launch.
