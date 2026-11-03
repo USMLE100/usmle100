@@ -123,3 +123,20 @@ describe('Bunny player link', () => {
     expect(u.searchParams.get('token')).toMatch(/^[0-9a-f]{64}$/);
   });
 });
+
+describe('one agreement box at sign-up', () => {
+  it('sign-up needs the box; acceptance is recorded', async () => {
+    const { agree, ...noBox } = SIGNUP as any;
+    const email = `agree-${Date.now()}@example.com`;
+    const r = await req('/sign-up', { form: { ...noBox, email, password: PASSWORD } });
+    expect(r.status).toBe(400);
+    expect(await r.text()).toMatch(/18 or older/);
+    expect(await db.prepare('SELECT 1 FROM users WHERE email = ?').bind(email).first()).toBeNull();
+    const ok = await req('/sign-up', { form: { ...SIGNUP, email, password: PASSWORD } });
+    expect(ok.status).toBe(302);
+    const id = (await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: number }>())!.id;
+    expect(await db.prepare("SELECT 1 FROM audit_log WHERE action = 'terms.accepted' AND target_user_id = ?").bind(id).first()).not.toBeNull();
+    const page = await (await req('/sign-up')).text();
+    expect((page.match(/name="agree"/g) ?? []).length).toBe(1);
+  });
+});

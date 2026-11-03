@@ -72,14 +72,14 @@ const charge = (pi: string, amount: number, refunded: number, id = 'ch_' + pi) =
 
 /** Buy the Course Book through a (mocked) Stripe Checkout and a verified webhook. */
 async function buyBook(cookie: string, pi: string) {
-  const res = await req('/buy/course-book', { cookie, form: {} });
+  const res = await req('/buy/course-book', { cookie, form: { agree: '1' } });
   const session = res.headers.get('location')!.split('/').pop()!;
   const ref = created.at(-1)!.get('client_reference_id')!;
   await webhook({ id: session, payment_status: 'paid', amount_total: 19900, currency: 'usd', client_reference_id: ref, payment_intent: pi });
   return { session, purchaseId: Number(ref.slice(5)) };
 }
 async function buyPackage(cookie: string, pkg: string, pi: string) {
-  const res = await req(`/enroll/${pkg}`, { cookie, form: {} });
+  const res = await req(`/enroll/${pkg}`, { cookie, form: { agree: '1' } });
   const session = res.headers.get('location')!.split('/').pop()!;
   const ref = created.at(-1)!.get('client_reference_id')!;
   const price = (await db.prepare('SELECT price_cents FROM packages WHERE id = ?').bind(pkg).first<{ price_cents: number }>())!.price_cents;
@@ -94,7 +94,7 @@ describe('the site never starts a refund', () => {
       expect((await req(p, { cookie: s.cookie, form: {} })).status, p).toBe(404);
     }
     // "/enroll/<name>" is the package checkout; an unknown name just sends an enrolled student home.
-    expect((await req('/enroll/refund', { cookie: s.cookie, form: {} })).headers.get('location')).toBe('/dashboard');
+    expect((await req('/enroll/refund', { cookie: s.cookie, form: { agree: '1' } })).headers.get('location')).toBe('/dashboard');
     const { purchaseId } = await buyBook(s.cookie, 'pi_never');
     await webhook(charge('pi_never', 19900, 19900), 'charge.refunded');
     expect(stripeCalls.filter((c) => c.includes('/refunds'))).toEqual([]);

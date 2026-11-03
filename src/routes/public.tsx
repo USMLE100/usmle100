@@ -400,6 +400,11 @@ const ENDED: Record<string, string> = {
   verify: 'That sign-in was blocked because the security codes weren’t confirmed. If it was you, contact USMLE100.',
 };
 
+/** Required tick box: courts generally enforce terms (no refunds, arbitration) only when the person actively agreed. */
+const AgreeSignup = () => (
+  <label class="check"><input type="checkbox" name="agree" value="1" required /> <span>I am 18 or older and agree to the <a href="/terms" target="_blank">Terms</a>, <a href="/privacy" target="_blank">Privacy Policy</a> and <a href="/refunds" target="_blank">Refund Policy</a> (all sales final).</span></label>
+);
+
 type SignupForm = { turnstile?: string; first?: string; last?: string; phone?: string; exam?: string; grad?: string; marketing?: boolean };
 const AuthPage = (p: { mode: 'in' | 'up'; selfReset?: boolean; error?: string; notice?: string; email?: string; name?: string; form?: SignupForm; next?: string; user: any; contact?: string }) => (
   <PublicLayout title={p.mode === 'in' ? 'Sign in' : 'Create account'} user={p.user} plain>
@@ -434,6 +439,7 @@ const AuthPage = (p: { mode: 'in' | 'up'; selfReset?: boolean; error?: string; n
           <PwField label="Password" name="password" autocomplete={p.mode === 'up' ? 'new-password' : 'current-password'} minlength={p.mode === 'up' ? MIN_PASSWORD : undefined} />
           {p.mode === 'up' && <span class="muted small">At least {MIN_PASSWORD} characters. A short phrase of a few words works well.</span>}
           {p.mode === 'up' && <label class="check"><input type="checkbox" name="marketing" value="1" checked={!!p.form?.marketing} /> {MARKETING_TEXT} (optional)</label>}
+          {p.mode === 'up' && <AgreeSignup />}
           {p.mode === 'up' && p.form?.turnstile && (
             <>
               <div class="cf-turnstile" data-sitekey={p.form.turnstile}></div>
@@ -503,6 +509,7 @@ publicRoutes.post('/sign-up', async (c) => {
   const ip = c.req.header('cf-connecting-ip') ?? null;
   if (ip && !(await rateHit(c.env.DB, `signup:${ip}`, 10, 3600))) return again('Too many new accounts from your network in the last hour. Please try again later.', 429);
   if (!(await humanCheck(c, f['cf-turnstile-response']))) return again('Please complete the check that you’re not a robot.');
+  if (f.agree !== '1') return again('Please confirm you are 18 or older and agree to the Terms of Service, Privacy Policy and Refund Policy.');
   if (!validName(first) || !validName(last)) return again('Please enter your first and last name.');
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 254) return again('Please enter a valid email.');
   const phone = normalizePhone(phoneRaw);
@@ -525,6 +532,7 @@ publicRoutes.post('/sign-up', async (c) => {
     .run();
   await createSession(c, Number(r.meta.last_row_id), (await deviceGate(c, Number(r.meta.last_row_id), 'student')).hash);
   await audit(c.env.DB, { actorId: Number(r.meta.last_row_id), action: 'account.created', targetUserId: Number(r.meta.last_row_id), ip: c.req.header('cf-connecting-ip') ?? null });
+  await audit(c.env.DB, { actorId: Number(r.meta.last_row_id), action: 'terms.accepted', targetUserId: Number(r.meta.last_row_id), detail: { context: 'sign-up', age18: true }, ip: c.req.header('cf-connecting-ip') ?? null });
   // Someone who signed up for something specific (the Course Book, free lectures, a webinar) goes back to it.
   return c.redirect(typeof f.next === 'string' && /^\/(buy|free-lectures|webinars)(\/|$)/.test(f.next) ? safeNext(f.next) : '/enroll');
 });

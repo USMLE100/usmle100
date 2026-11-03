@@ -64,7 +64,7 @@ afterEach(() => vi.restoreAllMocks());
 
 const hasAccess = async (userId: number) => !!(await db.prepare('SELECT 1 FROM book_access WHERE user_id = ?').bind(userId).first());
 async function startBookCheckout(cookie: string) {
-  const res = await req('/buy/course-book', { cookie, form: {} });
+  const res = await req('/buy/course-book', { cookie, form: { agree: '1' } });
   const p = created.at(-1)!;
   return { res, session: res.headers.get('location')!.split('/').pop()!, ref: p.get('client_reference_id')!, params: p };
 }
@@ -140,7 +140,7 @@ describe('Course Book checkout', () => {
 
   it('students who already have the book (package or grant) are not charged again', async () => {
     const max = await student('max');
-    const res = await req('/buy/course-book', { cookie: max.cookie, form: {} });
+    const res = await req('/buy/course-book', { cookie: max.cookie, form: { agree: '1' } });
     expect(res.headers.get('location')).toBe('/course-book');
     expect(created.length).toBe(0);
     expect(await db.prepare('SELECT 1 FROM book_purchases WHERE user_id = ?').bind(max.id).first()).toBeNull();
@@ -164,7 +164,7 @@ describe('Course Book checkout', () => {
 describe('package enrollment checkout', () => {
   it('activates the enrollment only for a paid session with the saved price, once', async () => {
     const s = await student(null);
-    const res = await req('/enroll/companion', { cookie: s.cookie, form: {} });
+    const res = await req('/enroll/companion', { cookie: s.cookie, form: { agree: '1' } });
     expect(res.status).toBe(303);
     const p = created.at(-1)!;
     const price = (await db.prepare("SELECT price_cents FROM packages WHERE id = 'companion'").first<{ price_cents: number }>())!.price_cents;
@@ -222,7 +222,7 @@ describe('cohort chosen before payment (owner: no silent wrong-class assignment)
     const page = await (await req('/enroll', { cookie: s.cookie })).text();
     expect(page).toContain('You’ll join Now enrolling, which started on');
     expect(page).toContain('All earlier lecture recordings are included');
-    const r = await req('/enroll/max', { cookie: s.cookie, form: {} });
+    const r = await req('/enroll/max', { cookie: s.cookie, form: { agree: '1' } });
     expect(r.status).toBe(303);
     const e = (await db.prepare("SELECT id, cohort_id FROM enrollments WHERE user_id = ? AND status = 'pending'").bind(s.id).first<any>())!;
     expect(e.cohort_id).toBe(now);
@@ -230,7 +230,7 @@ describe('cohort chosen before payment (owner: no silent wrong-class assignment)
     await db.prepare("INSERT INTO settings (key, value) VALUES ('enroll_close_day', '3') ON CONFLICT (key) DO UPDATE SET value = excluded.value").run();
     const s2 = await student();
     expect(await (await req('/enroll', { cookie: s2.cookie })).text()).toContain('has closed');
-    expect((await req('/enroll/max', { cookie: s2.cookie, form: {} })).headers.get('location')).toBe('/enroll?closed=1');
+    expect((await req('/enroll/max', { cookie: s2.cookie, form: { agree: '1' } })).headers.get('location')).toBe('/enroll?closed=1');
     await db.prepare("DELETE FROM settings WHERE key IN ('enroll_close_day', 'enrolling_cohort_id')").run();
   });
 });

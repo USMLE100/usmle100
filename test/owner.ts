@@ -8,7 +8,7 @@ export async function makeOwner(db: D1Database, email: string) {
 }
 
 /** The registration details every new account now gives (name, phone, exam, graduation year). */
-export const SIGNUP = { first_name: 'Test', last_name: 'Student', phone: '+15555550100', exam: 'USMLE Step 1', grad_year: '2024' };
+export const SIGNUP = { first_name: 'Test', last_name: 'Student', phone: '+15555550100', exam: 'USMLE Step 1', grad_year: '2024', agree: '1' };
 
 /** All cookies a response sets (the sign-in and the device cookie), as a Cookie header for later requests. */
 export const cookies = (res: Response) =>
