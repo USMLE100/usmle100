@@ -91,7 +91,10 @@ describe('sign-in lockout', () => {
     const ip = '203.0.113.200';
     for (let i = 0; i < 20; i++) await signIn(`spray${i}@example.com`, 'Password123!', ip);
     const { email } = await account();
-    expect((await signIn(email, PASSWORD, ip)).status).toBe(429);
+    // A browser that is not one of the student's registered devices (an attacker, or a new browser) stays locked out.
+    expect((await req('/sign-in', { form: { email, password: PASSWORD }, ip })).status).toBe(429);
+    // The student on their own registered device is not locked out by other people's guesses from a shared address.
+    expect((await signIn(email, PASSWORD, ip)).status).toBe(302);
     expect((await signIn(email, PASSWORD, '203.0.113.201')).status).toBe(302);
   });
 });
