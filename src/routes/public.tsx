@@ -402,8 +402,10 @@ const ENDED: Record<string, string> = {
 
 /** Required tick box: courts generally enforce terms (no refunds, arbitration) only when the person actively agreed. */
 const AgreeSignup = () => (
-  <label class="check"><input type="checkbox" name="agree" value="1" required /> <span>I am 18 or older and agree to the <a href="/terms" target="_blank">Terms</a>, <a href="/privacy" target="_blank">Privacy Policy</a> and <a href="/refunds" target="_blank">Refund Policy</a> (all sales final).</span></label>
+  <label class="check"><input type="checkbox" name="agree" value="1" required /> <span>I am 18 or older and agree to the <a href="/terms" target="_blank">Terms</a> (including individual arbitration), <a href="/privacy" target="_blank">Privacy Policy</a> and <a href="/refunds" target="_blank">Refund Policy</a> (all sales final).</span></label>
 );
+/** The exact wording of the box above, stored with each acceptance as evidence. Keep the two in step. */
+export const AGREE_TEXT = 'I am 18 or older and agree to the Terms (including individual arbitration), Privacy Policy and Refund Policy (all sales final).';
 
 type SignupForm = { turnstile?: string; first?: string; last?: string; phone?: string; exam?: string; grad?: string; marketing?: boolean };
 const AuthPage = (p: { mode: 'in' | 'up'; selfReset?: boolean; error?: string; notice?: string; email?: string; name?: string; form?: SignupForm; next?: string; user: any; contact?: string }) => (
@@ -532,7 +534,19 @@ publicRoutes.post('/sign-up', async (c) => {
     .run();
   await createSession(c, Number(r.meta.last_row_id), (await deviceGate(c, Number(r.meta.last_row_id), 'student')).hash);
   await audit(c.env.DB, { actorId: Number(r.meta.last_row_id), action: 'account.created', targetUserId: Number(r.meta.last_row_id), ip: c.req.header('cf-connecting-ip') ?? null });
-  await audit(c.env.DB, { actorId: Number(r.meta.last_row_id), action: 'terms.accepted', targetUserId: Number(r.meta.last_row_id), detail: { context: 'sign-up', age18: true }, ip: c.req.header('cf-connecting-ip') ?? null });
+  // Evidence of agreement: the exact version of each policy in force (by hash), the box wording, time, IP and browser.
+  const uid = Number(r.meta.last_row_id);
+  const st = await getSettings(c.env.DB);
+  const [th, ph, rh] = await Promise.all([st.terms_text, st.privacy_text, st.refund_text].map((t) => sha256Hex(t ?? '')));
+  const keep = (hash: string, kind: string, body: string) => c.env.DB.prepare('INSERT OR IGNORE INTO policy_versions (hash, kind, body) VALUES (?, ?, ?)').bind(hash, kind, body ?? '');
+  await c.env.DB.batch([
+    keep(th, 'terms', st.terms_text),
+    keep(ph, 'privacy', st.privacy_text),
+    keep(rh, 'refund', st.refund_text),
+    c.env.DB.prepare('INSERT INTO terms_acceptances (user_id, context, checkbox_text, terms_hash, privacy_hash, refund_hash, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(uid, 'sign-up', AGREE_TEXT, th, ph, rh, c.req.header('cf-connecting-ip') ?? null, (c.req.header('user-agent') ?? '').slice(0, 300)),
+  ]);
+  await audit(c.env.DB, { actorId: uid, action: 'terms.accepted', targetUserId: uid, detail: { context: 'sign-up', age18: true, terms: th.slice(0, 16), privacy: ph.slice(0, 16), refund: rh.slice(0, 16) }, ip: c.req.header('cf-connecting-ip') ?? null });
   // Someone who signed up for something specific (the Course Book, free lectures, a webinar) goes back to it.
   return c.redirect(typeof f.next === 'string' && /^\/(buy|free-lectures|webinars)(\/|$)/.test(f.next) ? safeNext(f.next) : '/enroll');
 });

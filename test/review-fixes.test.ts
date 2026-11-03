@@ -136,6 +136,13 @@ describe('one agreement box at sign-up', () => {
     expect(ok.status).toBe(302);
     const id = (await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: number }>())!.id;
     expect(await db.prepare("SELECT 1 FROM audit_log WHERE action = 'terms.accepted' AND target_user_id = ?").bind(id).first()).not.toBeNull();
+    // Version-specific evidence: box wording, policy hashes that match stored full texts, time and browser.
+    const acc = await db.prepare('SELECT * FROM terms_acceptances WHERE user_id = ?').bind(id).first<any>();
+    expect(acc.checkbox_text).toMatch(/18 or older.*arbitration/);
+    expect(acc.accepted_at).toMatch(/^\d{4}-\d\d-\d\dT/);
+    for (const [h, kind] of [[acc.terms_hash, 'terms'], [acc.privacy_hash, 'privacy'], [acc.refund_hash, 'refund']]) {
+      expect(await db.prepare('SELECT 1 FROM policy_versions WHERE hash = ? AND kind = ?').bind(h, kind).first(), kind).not.toBeNull();
+    }
     const page = await (await req('/sign-up')).text();
     expect((page.match(/name="agree"/g) ?? []).length).toBe(1);
   });

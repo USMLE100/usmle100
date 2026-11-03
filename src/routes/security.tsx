@@ -817,6 +817,7 @@ security.get('/requests/privacy/:id{[0-9]+}/export', async (c) => {
     enrollments: await q('SELECT id, package_id, status, amount_cents, paid_at, cohort_id, lectures_until FROM enrollments WHERE user_id = ?'),
     course_book_purchases: await q('SELECT id, status, amount_cents, paid_at, refunded_at FROM book_purchases WHERE user_id = ?'),
     agreement_signatures: await q('SELECT agreement_id, legal_name, birth_date, signed_at, ip FROM agreement_signatures WHERE user_id = ?'),
+    terms_acceptances: await q('SELECT context, checkbox_text, terms_hash, privacy_hash, refund_hash, accepted_at, ip FROM terms_acceptances WHERE user_id = ?'),
     devices: await q('SELECT label, status, first_seen, last_seen, last_country FROM devices WHERE user_id = ?'),
     lecture_progress: await q('SELECT lecture_id, completed_at FROM lecture_progress WHERE user_id = ?'),
     lecture_views: await q('SELECT item, kind, started_at, counted, counted_reason FROM view_sessions WHERE user_id = ?'),
