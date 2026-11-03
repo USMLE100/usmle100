@@ -115,12 +115,12 @@ Branch `v12-frontend`. Last updated 28 Oct 2026. Nothing here is merged or deplo
 | Requirement | Source | Where | Tests | Status |
 |---|---|---|---|---|
 | 2 views per lecture per paid enrollment, so each lecture can be watched fully twice (owner, 2 Nov 2026; was 5 views at 65%); fresh views for a new enrollment; history kept | R048, R052 | `viewState` | viewing | Done |
-| 24-hour window from playback; one view at 90% or at expiry; never twice per session | R050 | `recordBeat`, `settleExpired` | viewing | Done |
+| 24-hour window from playback; one view at 90% or at expiry; never twice per session; a viewing stopped by a technical failure (player error, or 25 s frozen while playing) doesn't count, up to 2 per lecture (owner, 2 Nov 2026) | R050 | `recordBeat`, `settleExpired` | viewing | Done |
 | Only unique content counts; seeking is free; faster than 2× is rejected | R055/R056/R066 | `markSeconds`, speed cap | viewing | Done |
 | Resume at the exact point; the session ends at 90% and another view is needed | R064/R065 | `video_positions` | viewing | Done |
 | First-play warning; counts hidden until locked; limits disclosed before checkout | R053/R054, Dir G | player notice; Programs/checkout text | viewing, accounts | Done |
 | End Lecture; 2-minute release; resuming keeps the same viewing | R061–R063 | `claimTab` / `releaseTab` | viewing, browser | Done |
-| Owner-only extra views with reasons; requests reviewed by admins | R051 | Admin → Lecture views | viewing | Done |
+| One additional view per paid lecture on request; the owner approves with one click on the dashboard or Lecture views page, keeping progress; a declined request can't be repeated; owner-only manual extra views with reasons for exceptions (owner, 2 Nov 2026) | R051 | Admin → Lecture views | viewing | Done |
 | No negative balances; no duplicate corrections; restored views can't repeat | p176–p178 | `view_grants.case_id` unique; counts never go below zero | cases | Done |
 | Wrongful blocks: restore a view through a dispute | p174–p175 | Appeals and disputes | cases | Done |
 | Evening Questions recordings: the same protections, no view limit (no owner decision sets one) | Dir G | item `E:` (open access) | viewing | Done (policy documented) |

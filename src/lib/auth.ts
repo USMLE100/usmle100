@@ -231,6 +231,7 @@ const OWNER_ONLY: RegExp[] = [
   /^\/admin\/security\/(reinstate|lockdown)$/,
   /^\/admin\/agreement$/,
   /^\/admin\/views\/(grant|dismiss)$/,
+  /^\/admin\/views\/requests\/\d+\/approve$/,
   /^\/admin\/free-lectures\/\d+\/publish$/,
   /^\/admin\/cases\/\d+\/decide$/,
   /^\/admin\/requests\/privacy\/\d+$/,

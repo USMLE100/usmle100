@@ -10,7 +10,7 @@ import { Icon } from '../views/icons';
 import { ProtectedPlayer } from '../views/player';
 import { clock } from '../lib/catalog';
 import { reportSharing } from '../lib/devices';
-import { claimTab, lastPosition, openOrCreate, parseKey, profileComplete, recordBeat, releaseTab, resolve, sourceVideo, viewState, type Beat, type FreeRow } from '../lib/viewing';
+import { REQUESTABLE_EXTRA, claimTab, lastPosition, openOrCreate, parseKey, profileComplete, recordBeat, releaseTab, resolve, sourceVideo, viewState, type Beat, type FreeRow } from '../lib/viewing';
 
 /**
  * Protected playback (lib/viewing) and the members' Free Lectures pages. Mounted before the portal router,
@@ -77,7 +77,7 @@ play.post('/play/claim', async (c) => {
   const v = await openOrCreate(db, user.id, item, r.access);
   if (!v.session) {
     const requested = !!(await db.prepare('SELECT 1 FROM view_requests WHERE user_id = ? AND item = ? AND resolved_at IS NULL').bind(user.id, item).first());
-    return c.json({ state: 'locked', allowed: v.allowed, used: v.used, request: true, requested });
+    return c.json({ state: 'locked', allowed: v.allowed, used: v.used, request: requested || (await canRequest(db, user.id, item, r.access.kind, v.extra)), requested });
   }
   const t = await claimTab(db, user.id, tab, item, v.session.id, where(c));
   if (!t.ok) return busy(c, user.id, t, item);
@@ -110,6 +110,7 @@ play.post('/play/beat', async (c) => {
     pos: Number(b.pos),
     dur: Number(b.dur),
     add: Array.isArray(b.add) ? b.add : [],
+    failed: b.failed === 'player-error' || b.failed === 'stalled' ? b.failed : undefined,
   };
   const result = await recordBeat(c.env.DB, user, c.get('enrollment'), beat);
   // Staging only: keep what the page heard from Bunny's player (counts and flags only, no personal data).
@@ -142,6 +143,15 @@ play.post('/play/release', async (c) => {
   return c.json({ ok: true });
 });
 
+/**
+ * One additional view per paid lecture, on request, at the owner's discretion (owner, 2 Nov 2026): only once the two
+ * included views are used, only while no extra view has been given, and not again after the owner declined.
+ */
+async function canRequest(db: D1Database, userId: number, item: string, kind: string, extra: number) {
+  if (kind !== 'paid' || extra >= REQUESTABLE_EXTRA) return false;
+  return !(await db.prepare("SELECT 1 FROM view_requests WHERE user_id = ? AND item = ? AND outcome = 'declined'").bind(userId, item).first());
+}
+
 /** A student who has used every view asks for more. Admins review; only the owner grants. */
 play.post('/play/request', async (c) => {
   const user = c.get('user');
@@ -152,6 +162,7 @@ play.post('/play/request', async (c) => {
   if (!r || (r.access.kind !== 'paid' && r.access.kind !== 'free')) return c.json({ ok: false }, 403);
   const v = await viewState(db, user.id, item, r.access);
   if (v.used < v.allowed || v.open) return c.json({ ok: false, reason: 'views left' }, 400);
+  if (!(await canRequest(db, user.id, item, r.access.kind, v.extra))) return c.json({ ok: false, reason: 'no more requests' }, 403);
   if (!(await db.prepare('SELECT 1 FROM view_requests WHERE user_id = ? AND item = ? AND resolved_at IS NULL').bind(user.id, item).first())) {
     await db.prepare('INSERT INTO view_requests (user_id, item, kind) VALUES (?, ?, ?)').bind(user.id, item, r.access.kind).run();
     await audit(db, { actorId: user.id, action: 'views.requested', targetUserId: user.id, detail: { item, kind: r.access.kind }, ip: ip(c) });

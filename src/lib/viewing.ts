@@ -20,6 +20,10 @@ import { eveningAccess } from './evening';
 
 export const FREE_VIEWS = 2;
 export const PAID_VIEWS = 2;
+/** Extra views a student can ask for per lecture; the owner approves each one (owner, 2 Nov 2026). */
+export const REQUESTABLE_EXTRA = 1;
+/** Viewings per lecture that a technical failure may close without using a view (stops it being used as a loophole). */
+export const MAX_FAILURE_REFUNDS = 2;
 /** A viewing is used once this share of the video's unique content has been watched in it (owner, 2 Nov 2026: watch each lecture fully twice). */
 export const THRESHOLD = 0.9;
 export const WINDOW_SECONDS = 24 * 3600;
@@ -110,6 +114,7 @@ export async function resolve(db: D1Database, user: User, enr: Enrollment | null
 export type Session = {
   id: string; user_id: number; item: string; kind: Kind; enrollment_id: number | null; created_at: number; started_at: number | null;
   expires_at: number | null; last_beat_at: number | null; duration: number | null; watched_seconds: number; seen: string; counted: number; counted_reason: string | null;
+  failed_at?: number | null;
 };
 
 const isCounted = (a: Access) => a.kind === 'paid' || a.kind === 'free';
@@ -119,14 +124,14 @@ const scope = (a: Access) => (a.kind === 'paid' ? { kind: 'paid' as const, enr: 
 async function settleExpired(db: D1Database, userId: number, item: string) {
   const t = epoch();
   await db
-    .prepare("UPDATE view_sessions SET counted = 1, counted_at = ?, counted_reason = 'expired' WHERE user_id = ? AND item = ? AND counted = 0 AND started_at IS NOT NULL AND expires_at <= ?")
+    .prepare("UPDATE view_sessions SET counted = 1, counted_at = ?, counted_reason = 'expired' WHERE user_id = ? AND item = ? AND counted = 0 AND failed_at IS NULL AND started_at IS NOT NULL AND expires_at <= ?")
     .bind(t, userId, item, t)
     .run();
 }
 
 /** Views allowed, used, and the open (not yet used-up) session for this video and this kind of access. */
 export async function viewState(db: D1Database, userId: number, item: string, a: Access) {
-  if (!isCounted(a)) return { allowed: Infinity, used: 0, open: null as Session | null, history: 0 };
+  if (!isCounted(a)) return { allowed: Infinity, used: 0, open: null as Session | null, history: 0, extra: 0 };
   await settleExpired(db, userId, item);
   const s = scope(a);
   const enrSql = s.kind === 'paid' ? 'AND enrollment_id = ?' : '';
@@ -134,11 +139,11 @@ export async function viewState(db: D1Database, userId: number, item: string, a:
   const [used, extra, open, history] = await Promise.all([
     db.prepare(`SELECT COUNT(*) AS n FROM view_sessions WHERE user_id = ? AND item = ? AND kind = ? ${enrSql} AND counted = 1`).bind(...binds).first<{ n: number }>(),
     db.prepare(`SELECT COALESCE(SUM(extra), 0) AS n FROM view_grants WHERE user_id = ? AND item = ? AND kind = ? ${enrSql}`).bind(...binds).first<{ n: number }>(),
-    db.prepare(`SELECT * FROM view_sessions WHERE user_id = ? AND item = ? AND kind = ? ${enrSql} AND counted = 0 ORDER BY created_at DESC LIMIT 1`).bind(...binds).first<Session>(),
+    db.prepare(`SELECT * FROM view_sessions WHERE user_id = ? AND item = ? AND kind = ? ${enrSql} AND counted = 0 AND failed_at IS NULL ORDER BY created_at DESC LIMIT 1`).bind(...binds).first<Session>(),
     db.prepare('SELECT COUNT(*) AS n FROM view_sessions WHERE user_id = ? AND item = ? AND started_at IS NOT NULL').bind(userId, item).first<{ n: number }>(),
   ]);
   const base = s.kind === 'paid' ? PAID_VIEWS : FREE_VIEWS;
-  return { allowed: base + (extra?.n ?? 0), used: used?.n ?? 0, open: open ?? null, history: history?.n ?? 0 };
+  return { allowed: base + (extra?.n ?? 0), used: used?.n ?? 0, open: open ?? null, history: history?.n ?? 0, extra: extra?.n ?? 0 };
 }
 
 /** The open session, or a new one if a view is left. `session` is null when every view is used. */
@@ -218,8 +223,8 @@ export async function releaseTab(db: D1Database, userId: number, tab: string) {
 
 // ---------- Progress reports ----------
 
-export type Beat = { sid: string; tab: string; nonce: string; playing: boolean; pos: number; dur: number; add: [number, number][] };
-export type BeatResult = { state: 'ok'; watchedPct: number; expiresAt: number | null } | { state: 'done'; reason: '65%' | 'expired'; viewsLeft?: number } | { state: 'tab' } | { state: 'gone' };
+export type Beat = { sid: string; tab: string; nonce: string; playing: boolean; pos: number; dur: number; add: [number, number][]; failed?: string };
+export type BeatResult = { state: 'ok'; watchedPct: number; expiresAt: number | null } | { state: 'done'; reason: '65%' | 'expired'; viewsLeft?: number } | { state: 'tab' } | { state: 'gone' } | { state: 'failed' };
 
 const savePos = (db: D1Database, userId: number, item: string, pos: number, t: number) =>
   db
@@ -251,6 +256,22 @@ export async function recordBeat(db: D1Database, user: User, enr: Enrollment | n
   const s = await db.prepare('SELECT * FROM view_sessions WHERE id = ? AND user_id = ?').bind(b.sid, user.id).first<Session>();
   if (!s || s.item !== tab.item || a.kind !== s.kind || (a.kind === 'paid' && a.enrollmentId !== s.enrollment_id)) return { state: 'gone' };
   if (s.counted) return { state: 'done', reason: s.counted_reason === 'expired' ? 'expired' : '65%' };
+  if (s.failed_at) return { state: 'failed' };
+  // A technical failure (Bunny's player reported an error, or playback froze) closes this viewing without using a view,
+  // keeping the place reached. At most MAX_FAILURE_REFUNDS times per lecture, so it can't become a way round the limit.
+  if (b.failed) {
+    const refunds = await db
+      .prepare('SELECT COUNT(*) AS n FROM view_sessions WHERE user_id = ? AND item = ? AND kind = ? AND enrollment_id IS ? AND failed_at IS NOT NULL')
+      .bind(user.id, s.item, s.kind, s.enrollment_id)
+      .first<{ n: number }>();
+    if ((refunds?.n ?? 0) < MAX_FAILURE_REFUNDS) {
+      await db.batch([
+        db.prepare('UPDATE view_sessions SET failed_at = ?, failed_reason = ? WHERE id = ? AND counted = 0').bind(t, b.failed.slice(0, 30), s.id),
+        savePos(db, user.id, s.item, pos, t),
+      ]);
+      return { state: 'failed' };
+    }
+  }
   if (s.started_at && s.expires_at! <= t) {
     await settleExpired(db, user.id, s.item);
     return { state: 'done', reason: 'expired' };

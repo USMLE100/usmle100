@@ -312,3 +312,86 @@ describe('Free Lectures list (R035–R046)', () => {
     expect(ok.src).toContain('/info-video-123?token=');
   });
 });
+
+describe('additional view on request, and technical failures (owner, 2 Nov 2026)', () => {
+  it('after both views: request → owner approves with one click → one more view, progress kept; no second extra', async () => {
+    const s = await account();
+    await enroll(s.id, cohortA);
+    const lec = await lecture(cohortA);
+    const tab = newTab();
+    await watchFull(s.cookie, lec, tab);
+    await watchFull(s.cookie, lec, tab);
+    expect(await claim(s.cookie, lec, tab)).toMatchObject({ state: 'locked', allowed: 2, used: 2, request: true, requested: false });
+    expect(await json(await req('/play/request', { cookie: s.cookie, json: { item: key(lec) } }))).toEqual({ ok: true });
+    expect(await claim(s.cookie, lec, tab)).toMatchObject({ state: 'locked', requested: true });
+    const rq = (await db.prepare('SELECT id FROM view_requests WHERE user_id = ? AND resolved_at IS NULL').bind(s.id).first<{ id: number }>())!;
+    // The owner's dashboard lists it with a one-click Approve; a non-owner admin cannot approve.
+    const owner = await account('owner');
+    const dash = await (await req('/dashboard', { cookie: owner.cookie })).text();
+    expect(dash).toContain('Requests for an additional view');
+    expect(dash).toContain(`/admin/views/requests/${rq.id}/approve`);
+    const admin = await account('admin');
+    expect((await req(`/admin/views/requests/${rq.id}/approve`, { cookie: admin.cookie, form: {} })).status).toBe(403);
+    const ok = await req(`/admin/views/requests/${rq.id}/approve`, { cookie: owner.cookie, form: {} });
+    expect(ok.status).toBe(302);
+    expect(ok.headers.get('location')).toMatch(/ok=Approved/);
+    // One more viewing; earlier progress, history and the place reached are kept.
+    const third = await claim(s.cookie, lec, tab);
+    expect(third).toMatchObject({ state: 'ok', first: false, pos: 91 });
+    expect((await db.prepare('SELECT COUNT(*) AS n FROM view_sessions WHERE user_id = ? AND counted = 1').bind(s.id).first<any>()).n).toBe(2);
+    expect(await db.prepare('SELECT completed_at FROM lecture_progress WHERE user_id = ? AND lecture_id = ?').bind(s.id, lec).first()).not.toBeNull();
+    // Using it: no further request is possible for this lecture.
+    await rewindBeat(third.sid);
+    await beat(s.cookie, third, tab, { add: [] });
+    await rewindBeat(third.sid);
+    expect((await beat(s.cookie, third, tab, { add: [[0, 91]] })).state).toBe('done');
+    expect(await claim(s.cookie, lec, tab)).toMatchObject({ state: 'locked', allowed: 3, used: 3, request: false });
+    expect((await req('/play/request', { cookie: s.cookie, json: { item: key(lec) } })).status).toBe(403);
+    // Approving twice is refused.
+    expect((await req(`/admin/views/requests/${rq.id}/approve`, { cookie: owner.cookie, form: {} })).headers.get('location')).toMatch(/error=/);
+  });
+
+  it('a declined request cannot be repeated', async () => {
+    const s = await account();
+    await enroll(s.id, cohortA);
+    const lec = await lecture(cohortA);
+    const tab = newTab();
+    await watchFull(s.cookie, lec, tab);
+    await watchFull(s.cookie, lec, tab);
+    await req('/play/request', { cookie: s.cookie, json: { item: key(lec) } });
+    const rq = (await db.prepare('SELECT id FROM view_requests WHERE user_id = ? AND resolved_at IS NULL').bind(s.id).first<{ id: number }>())!;
+    const owner = await account('owner');
+    await req('/admin/views/dismiss', { cookie: owner.cookie, form: { request_id: String(rq.id) } });
+    expect(await claim(s.cookie, lec, tab)).toMatchObject({ state: 'locked', request: false });
+    expect((await req('/play/request', { cookie: s.cookie, json: { item: key(lec) } })).status).toBe(403);
+  });
+
+  it('a technical failure closes the viewing without using a view, keeps the place; at most twice per lecture', async () => {
+    const s = await account();
+    await enroll(s.id, cohortA);
+    const lec = await lecture(cohortA);
+    const tab = newTab();
+    for (let i = 0; i < 2; i++) {
+      const c = await claim(s.cookie, lec, tab);
+      expect(c.state).toBe('ok');
+      await beat(s.cookie, c, tab, { playing: true });
+      await rewindBeat(c.sid);
+      await beat(s.cookie, c, tab, { add: [[0, 40]], pos: 40 });
+      expect((await beat(s.cookie, c, tab, { failed: i === 0 ? 'player-error' : 'stalled', pos: 40 })).state).toBe('failed');
+      const row = await session(c.sid);
+      expect(row.counted).toBe(0);
+      expect(row.failed_at).not.toBeNull();
+      // The same viewing can't be revived, and expiry never counts it.
+      expect((await beat(s.cookie, c, tab, {})).state).toBe('failed');
+    }
+    const next = await claim(s.cookie, lec, tab);
+    expect(next).toMatchObject({ state: 'ok', pos: 40 });
+    expect((await db.prepare('SELECT COUNT(*) AS n FROM view_sessions WHERE user_id = ? AND counted = 1').bind(s.id).first<any>()).n).toBe(0);
+    // A third reported failure is ignored: the viewing carries on normally (no unlimited loophole).
+    await beat(s.cookie, next, tab, { playing: true });
+    expect((await beat(s.cookie, next, tab, { failed: 'stalled' })).state).toBe('ok');
+    expect((await session(next.sid)).failed_at).toBeNull();
+    // Anything else the page sends is not treated as a failure.
+    expect((await beat(s.cookie, next, tab, { failed: 'whatever' })).state).toBe('ok');
+  });
+});

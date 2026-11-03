@@ -19,6 +19,7 @@ import m0018 from '../../migrations/0018_webinars.sql';
 import m0019 from '../../migrations/0019_payments_ops.sql';
 import m0021 from '../../migrations/0021_passkeys.sql';
 import m0022 from '../../migrations/0022_cases.sql';
+import m0023 from '../../migrations/0023_view_failures.sql';
 import m0020 from '../../migrations/0020_messaging.sql';
 
 /**
@@ -48,6 +49,7 @@ const MIGRATIONS: [string, string][] = [
   ['0020_messaging', m0020],
   ['0021_passkeys', m0021],
   ['0022_cases', m0022],
+  ['0023_view_failures', m0023],
 ];
 
 function statements(sql: string): string[] {

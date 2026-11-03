@@ -2,7 +2,8 @@ import { ProtectedPlayer } from '../views/player';
 import { RULES, throttle } from '../lib/abuse';
 import { Hono, type Context } from 'hono';
 import type { AppEnv, User } from '../lib/types';
-import { isStaff } from '../lib/types';
+import { isAdmin, isOwner, isStaff } from '../lib/types';
+import { itemLabel } from '../lib/viewing';
 import { requireEnrolled } from '../lib/auth';
 import { PortalLayout, PageHead, Eyebrow, Flash, initials } from '../views/layout';
 import { Icon, type IconName } from '../views/icons';
@@ -127,6 +128,43 @@ const Ring = (p: { pct: number; color?: string; label: string }) => (
   </div>
 );
 
+/** Admin dashboard: students' requests for an additional lecture view; the owner approves with one click. */
+async function viewRequestsFor(db: D1Database, user: User) {
+  if (!isAdmin(user)) return null;
+  const rows = (
+    await db
+      .prepare("SELECT r.id, r.item, r.created_at, u.name, u.email FROM view_requests r JOIN users u ON u.id = r.user_id WHERE r.resolved_at IS NULL AND r.kind = 'paid' ORDER BY r.id LIMIT 10")
+      .all<{ id: number; item: string; created_at: string; name: string; email: string }>()
+  ).results;
+  return Promise.all(rows.map(async (r) => ({ ...r, label: await itemLabel(db, r.item) })));
+}
+const ViewRequests = (p: { rows: { id: number; label: string; created_at: string; name: string; email: string }[]; owner: boolean; ok?: string; error?: string }) => (
+  <section class="card stack" style="gap:10px">
+    {p.ok && <Flash>{p.ok}</Flash>}
+    {p.error && <Flash kind="error">{p.error}</Flash>}
+    <h2 style="margin:0;font-size:18px">Requests for an additional view</h2>
+    {p.rows.length === 0 ? (
+      <p class="muted small" style="margin:0">No requests waiting.</p>
+    ) : (
+      p.rows.map((r) => (
+        <div class="row" style="justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <span>
+            <strong>{r.name}</strong> <span class="muted small">{r.email}</span>
+            <br />
+            <span class="small">{r.label}</span> <span class="muted small">· asked {String(r.created_at).slice(0, 16)} UTC</span>
+          </span>
+          {p.owner ? (
+            <form method="post" action={`/admin/views/requests/${r.id}/approve`}><button class="btn btn-primary btn-sm" type="submit">Approve (+1 view)</button></form>
+          ) : (
+            <span class="muted small">Waiting for the owner</span>
+          )}
+        </div>
+      ))
+    )}
+    <a class="small" href="/admin/views">All lecture views</a>
+  </section>
+);
+
 portal.get('/dashboard', async (c) => {
   const user = c.get('user')!;
   const enr = c.get('enrollment');
@@ -140,6 +178,7 @@ portal.get('/dashboard', async (c) => {
       </PortalLayout>,
     );
   }
+  const viewReqs = await viewRequestsFor(db, user);
   const today = cohortDay(cohort);
   const todayT = todayUtc();
   const weekend = isOffToday(cohort);
@@ -223,6 +262,7 @@ portal.get('/dashboard', async (c) => {
           <h1>Welcome back, {firstName(user)}</h1>
         </div>
         {countdown && <p class="muted small" style="margin-top:-8px">{countdown}</p>}
+        {viewReqs && (viewReqs.length > 0 || c.req.query('ok') || c.req.query('error')) && <ViewRequests rows={viewReqs} owner={isOwner(user)} ok={c.req.query('ok')} error={c.req.query('error')} />}
         <LectureNotice n={lectureNotice(c, cohort)} />
         {ended && <Flash>Your lecture recordings closed on {fmtDate(new Date(ended + 'T00:00:00Z'), { month: 'long', day: 'numeric', year: 'numeric' })}. The question bank and your progress stay open.</Flash>}
 

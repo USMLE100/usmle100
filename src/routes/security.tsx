@@ -9,7 +9,7 @@ import { lockdownOn } from '../lib/gate';
 import { hasPasskey } from '../lib/passkeys';
 import { PASSKEY_PAGE_JS, WEBAUTHN_JS } from './passkeys';
 import { notify } from '../lib/messaging';
-import { FREE_VIEWS, PAID_VIEWS, itemLabel, parseKey, titleOf } from '../lib/viewing';
+import { FREE_VIEWS, PAID_VIEWS, REQUESTABLE_EXTRA, itemLabel, parseKey, titleOf } from '../lib/viewing';
 
 /**
  * Admin security tools: owner re-confirmation, the security log, locked accounts, warnings,
@@ -450,9 +450,9 @@ security.get('/views', async (c) => {
       <h1>Lecture views</h1>
       {c.req.query('ok') && <Flash>Saved.</Flash>}
       {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
-      <p class="muted">Paid lectures: 2 views per lecture for each enrollment. Free lectures: 2 views. A view is used at 90% watched or when a started viewing’s 24 hours end. Only the owner can give extra views; every change is logged.</p>
+      <p class="muted">Paid lectures: 2 views per lecture for each enrollment. Free lectures: 2 views. A view is used at 90% watched or when a started viewing’s 24 hours end; a viewing stopped by a technical problem doesn’t count (up to 2 per lecture). Students can request one additional view per lecture, which you approve here or on your dashboard. Only the owner can give extra views; every change is logged.</p>
       <section class="card stack">
-        <h2 style="margin:0">Requests for more views</h2>
+        <h2 style="margin:0">Requests for an additional view</h2>
         {requests.length === 0 ? (
           <p class="muted" style="margin:0">No open requests.</p>
         ) : (
@@ -465,7 +465,11 @@ security.get('/views', async (c) => {
                   <td>{r.label}</td>
                   <td class="small muted">{String(r.created_at).slice(0, 16)} UTC</td>
                   <td class="stack" style="gap:6px">
-                    <GrantForm userId={r.user_id} item={r.item} kind={r.kind} requestId={r.id} />
+                    {owner ? (
+                      <form method="post" action={`/admin/views/requests/${r.id}/approve`}><button class="btn btn-primary btn-sm" type="submit">Approve (+1 view)</button></form>
+                    ) : (
+                      <span class="muted small">Only the owner can approve.</span>
+                    )}
                     {owner && <form method="post" action="/admin/views/dismiss"><input type="hidden" name="request_id" value={String(r.id)} /><button class="btn btn-ghost btn-sm" type="submit">Decline</button></form>}
                   </td>
                 </tr>
@@ -523,6 +527,33 @@ security.post('/views/grant', async (c) => {
   ]);
   await audit(db, { actorId: me.id, action: 'views.granted', targetUserId: userId, detail: { item, kind, extra, reason }, ip: ip(c) });
   return c.redirect('/admin/views?ok=1&email=' + encodeURIComponent(u.email));
+});
+
+/**
+ * Owner only (OWNER_ONLY): approve a student's request with one click. Adds exactly one view to their current
+ * enrollment for that lecture; earlier viewings, progress and the resume point are untouched.
+ */
+security.post('/views/requests/:id{[0-9]+}/approve', async (c) => {
+  const me = c.get('user')!;
+  const db = c.env.DB;
+  const back = (m: string, err = false) => {
+    const to = (c.req.header('referer') ?? '').replace(/^https?:\/\/[^/]+/, '');
+    const base = to.startsWith('/dashboard') ? '/dashboard' : '/admin/views';
+    return c.redirect(`${base}?${err ? 'error' : 'ok'}=` + encodeURIComponent(m));
+  };
+  const r = await db.prepare('SELECT id, user_id, item, kind FROM view_requests WHERE id = ? AND resolved_at IS NULL').bind(Number(c.req.param('id'))).first<{ id: number; user_id: number; item: string; kind: string }>();
+  if (!r) return back('That request was already handled.', true);
+  if (r.kind !== 'paid' || !r.item.startsWith('L:')) return back('Only course lectures can get an additional view.', true);
+  const enr = await db.prepare("SELECT id FROM enrollments WHERE user_id = ? AND status = 'active' ORDER BY paid_at DESC LIMIT 1").bind(r.user_id).first<{ id: number }>();
+  if (!enr) return back('That student has no active program.', true);
+  const had = await db.prepare("SELECT COALESCE(SUM(extra), 0) AS n FROM view_grants WHERE user_id = ? AND item = ? AND kind = 'paid' AND enrollment_id = ?").bind(r.user_id, r.item, enr.id).first<{ n: number }>();
+  if ((had?.n ?? 0) >= REQUESTABLE_EXTRA) return back('This student already has the additional view for this lecture.', true);
+  await db.batch([
+    db.prepare("INSERT INTO view_grants (user_id, item, kind, enrollment_id, extra, reason, granted_by) VALUES (?, ?, 'paid', ?, 1, 'Additional view requested by the student', ?)").bind(r.user_id, r.item, enr.id, me.id),
+    db.prepare("UPDATE view_requests SET resolved_at = datetime('now'), resolved_by = ?, outcome = 'granted' WHERE id = ?").bind(me.id, r.id),
+  ]);
+  await audit(db, { actorId: me.id, action: 'views.granted', targetUserId: r.user_id, detail: { item: r.item, kind: 'paid', extra: 1, reason: 'Additional view requested by the student' }, ip: ip(c) });
+  return back('Approved: one additional view added.');
 });
 
 security.post('/views/dismiss', async (c) => {
