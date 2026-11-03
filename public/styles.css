@@ -1,6 +1,7 @@
-/* USMLE100 — V12 design system (Red Hat Display / Red Hat Text, emerald + cream pastels). Mobile first. */
+/* USMLE100 — V12 design system (Red Hat Display / Red Hat Text). Colours: the original site's forest, emerald and gold
+   (owner, 2 Nov 2026), with V12's pastels. Mobile first. */
 :root {
-  --bg: #faf9f7;
+  --bg: #f6f4ee;
   --surface: #ffffff;
   --soft: #f7f5f2;
   --line: #e6e2dc;
@@ -9,13 +10,13 @@
   --body: #3a3632;
   --muted: #6b6560;
   --faint: #a08875;
-  --green: #2e936f;
-  --green-dark: #247a5b;
-  --green-ink: #1d6b4f;
-  --sage: #deece0;
+  --green: #1e6b4c;
+  --green-dark: #163f2f;
+  --green-ink: #163f2f;
+  --sage: #e3eee6;
   --sage-2: #f1f5e9;
-  --cream: #f2ebe1;
-  --gold: #c6a672;
+  --cream: #f3ead3;
+  --gold: #c8a24b;
   --sky: #e3ecf2;
   --sky-ink: #8cb0b2;
   --lilac: #efe5f5;

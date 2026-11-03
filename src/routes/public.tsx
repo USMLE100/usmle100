@@ -101,7 +101,7 @@ publicRoutes.get('/', async (c) => {
 
       <section class="aud-wrap" aria-label="Who it is for">
         <div class="aud">
-          <a href="/programs"><Bust bg="#deece0" skin="#e9c39f" hair="#3a2a20" shirt="#2e936f" /><span class="lbl">Medical students <Icon name="arrow_forward" class="gic" /></span></a>
+          <a href="/programs"><Bust bg="#e3eee6" skin="#e9c39f" hair="#3a2a20" shirt="#1e6b4c" /><span class="lbl">Medical students <Icon name="arrow_forward" class="gic" /></span></a>
           <a href="/programs"><Bust bg="#e3ecf2" skin="#c98c62" hair="#1f1a17" shirt="#8cb0b2" long /><span class="lbl">IMGs &amp; FMGs <Icon name="arrow_forward" class="gic" /></span></a>
           <a href="/programs"><Bust bg="#f2e6ec" skin="#8a5a3b" hair="#2b1d16" shirt="#9b6bb0" /><span class="lbl">Repeat takers <Icon name="arrow_forward" class="gic" /></span></a>
         </div>
