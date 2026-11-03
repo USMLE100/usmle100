@@ -54,6 +54,7 @@ Our player link already uses `preload=false` (nothing downloads before play) and
 | MediaCage Basic DRM | **On** (free) |
 | Encoding | Free tier, H.264, 240p/360p/480p; MP4 fallback off; Early-Play off; original files kept |
 | Storage | Frankfurt only, no replication |
+| Player controls | Picture-in-picture, AirPlay, Chromecast and Bunny full screen **off** (our full-screen button keeps the watermark); 10 s back on; speeds 0.5×–2× (4× removed: the server counts at most 2×); resume position off (our player resumes); colour #2E936F |
 
 **Not yet confirmed:** whether MediaCage also covers videos uploaded before it was switched on. Check on the next real upload.
 
