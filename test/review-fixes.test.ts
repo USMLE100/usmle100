@@ -119,7 +119,7 @@ describe('Bunny player link', () => {
     const { bunnyEmbedUrl } = await import('../src/lib/content');
     const u = new URL((await bunnyEmbedUrl({ BUNNY_LIBRARY_ID: '785730', BUNNY_TOKEN_KEY: 'k' } as any, 'vid-1'))!);
     expect(u.origin + u.pathname).toBe('https://iframe.mediadelivery.net/embed/785730/vid-1');
-    for (const [k, v] of [['disableAirPlay', 'true'], ['chromecast', 'false'], ['disableIosPlayer', 'true'], ['rememberPosition', 'false']]) expect(u.searchParams.get(k), k).toBe(v);
+    for (const [k, v] of [['disableAirPlay', 'true'], ['chromecast', 'false'], ['disableIosPlayer', 'true'], ['rememberPosition', 'false'], ['preload', 'false'], ['levelCap', 'true']]) expect(u.searchParams.get(k), k).toBe(v);
     expect(u.searchParams.get('token')).toMatch(/^[0-9a-f]{64}$/);
   });
 });

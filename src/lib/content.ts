@@ -98,8 +98,10 @@ export async function bunnyEmbedUrl(env: Env, videoId: string, ttlSeconds = vide
   const token = await sha256Hex(env.BUNNY_TOKEN_KEY + videoId + expires);
   // Bunny player options (bunny.net/docs/stream/embedding): no casting to TVs (our watermark would not be shown there),
   // no native iPhone fullscreen player (it would hide the watermark), and resume is handled by our own player.
+  // Lower Bunny bill: nothing downloads until play is pressed (preload=false), and phones get a size that fits their
+  // screen instead of the largest one (levelCap=true).
   // The token covers only the key, video and expiry, so these options don't change the signature.
-  return `${base}?token=${token}&expires=${expires}&disableAirPlay=true&chromecast=false&playsinline=true&disableIosPlayer=true&rememberPosition=false`;
+  return `${base}?token=${token}&expires=${expires}&disableAirPlay=true&chromecast=false&playsinline=true&disableIosPlayer=true&rememberPosition=false&preload=false&levelCap=true`;
 }
 
 /** Days lecture recordings stay available after the cohort's last day (Day 100). */
