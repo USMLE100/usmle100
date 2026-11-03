@@ -87,7 +87,7 @@ function beat(){if(!S.sid||!S.frame){return}if(inflight){schedule(2000);return}i
   if(j.state==='ok'){if(S.block==='offline'){unblock()}schedule(S.playing?10000:30000);return}
   if(j.state==='account'){location.href=j.url;return}
   if(j.state==='tab'){teardown();block('tab','This lecture was opened in another tab or window, so it stopped here.',[{label:'Watch here instead',primary:true,fn:claim}]);return}
-  if(j.state==='done'){var why=j.reason==='expired'?'This viewing’s 24 hours have ended.':'You’ve watched 65% of this lecture, so this viewing is complete.';teardown();S.sid=null;block('done',why+' Starting again uses another view, and the lecture resumes where you stopped.',[{label:'Start another viewing',primary:true,fn:claim}]);return}
+  if(j.state==='done'){var why=j.reason==='expired'?'This viewing’s 24 hours have ended.':'You’ve watched 65% of this lecture, so this viewing is complete.';teardown();S.sid=null;if(j.viewsLeft===0){block('done',why+' You’ve now used all the views of this lecture.',[{label:'Ask for more views',primary:true,fn:claim}])}else{block('done',why+' Starting again uses another view'+(j.viewsLeft>0?' ('+j.viewsLeft+' left)':'')+', and the lecture resumes where you stopped.',[{label:'Start another viewing',primary:true,fn:claim}])}return}
   teardown();block('gone','This lecture is no longer available to you.')}).catch(function(){inflight=false;
   if(Date.now()-S.okAt>30000&&S.block!=='offline'){block('offline','Connection lost. The lecture is paused until we can confirm your progress again.')}schedule(5000)})}
 document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden'){S.wasPlaying=S.playing;cmd('pause');schedule(200)}else{if(S.wasPlaying&&!S.block)cmd('play');S.wasPlaying=false}});

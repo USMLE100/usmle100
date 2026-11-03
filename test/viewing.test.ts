@@ -112,7 +112,7 @@ describe('paid lectures: 5 views, 65% or 24 hours', () => {
     await rewindBeat(c.sid);
     expect((await beat(s.cookie, c, tab, { add: [[0, 30], [0, 30]] })).state).toBe('ok');
     await rewindBeat(c.sid);
-    expect(await beat(s.cookie, c, tab, { add: [[30, 66]], pos: 66 })).toEqual({ state: 'done', reason: '65%' });
+    expect(await beat(s.cookie, c, tab, { add: [[30, 66]], pos: 66 })).toEqual({ state: 'done', reason: '65%', viewsLeft: 4 });
     expect(await db.prepare('SELECT completed_at FROM lecture_progress WHERE user_id = ? AND lecture_id = ?').bind(s.id, lec).first()).not.toBeNull();
     // The next viewing resumes where they stopped and no longer shows the first-time notice.
     const again = await claim(s.cookie, lec, tab);

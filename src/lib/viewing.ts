@@ -218,7 +218,7 @@ export async function releaseTab(db: D1Database, userId: number, tab: string) {
 // ---------- Progress reports ----------
 
 export type Beat = { sid: string; tab: string; nonce: string; playing: boolean; pos: number; dur: number; add: [number, number][] };
-export type BeatResult = { state: 'ok'; watchedPct: number; expiresAt: number | null } | { state: 'done'; reason: '65%' | 'expired' } | { state: 'tab' } | { state: 'gone' };
+export type BeatResult = { state: 'ok'; watchedPct: number; expiresAt: number | null } | { state: 'done'; reason: '65%' | 'expired'; viewsLeft?: number } | { state: 'tab' } | { state: 'gone' };
 
 const savePos = (db: D1Database, userId: number, item: string, pos: number, t: number) =>
   db
@@ -294,7 +294,10 @@ export async function recordBeat(db: D1Database, user: User, enr: Enrollment | n
         ]
       : []),
   ]);
-  if (reached) return { state: 'done', reason: '65%' };
+  if (reached) {
+    const v = await viewState(db, user.id, s.item, a);
+    return { state: 'done', reason: '65%', viewsLeft: Number.isFinite(v.allowed) ? Math.max(0, v.allowed - v.used) : undefined };
+  }
   return { state: 'ok', watchedPct: duration ? Math.round((watched / duration) * 100) : 0, expiresAt: startedAt ? startedAt + WINDOW_SECONDS : null };
 }
 
