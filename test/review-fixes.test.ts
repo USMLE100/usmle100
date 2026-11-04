@@ -101,6 +101,20 @@ describe('pre-launch review fixes', () => {
     expect(await db.prepare('SELECT 1 FROM account_locks WHERE email = ? AND unlocked_at IS NULL').bind(stu.email).first()).not.toBeNull();
   });
 
+  it('/admin opens the admin area for staff and stays closed to students', async () => {
+    const stu = await acct('adminroot');
+    const r = await req('/admin', { cookie: stu.cookie });
+    expect(r.headers.get('location') ?? '').not.toBe('/admin/lectures');
+    const own = await acct('adminrootown');
+    await makeOwner(db, own.email);
+    await db.prepare("UPDATE settings SET value = '0' WHERE key = 'staff_passkeys'").run();
+    try {
+      expect((await req('/admin', { cookie: own.cookie })).headers.get('location')).toBe('/admin/lectures');
+    } finally {
+      await db.prepare("UPDATE settings SET value = '1' WHERE key = 'staff_passkeys'").run();
+    }
+  });
+
   it('sign-in never sends people to another site', async () => {
     const a = await acct('redir');
     for (const next of ['/\\evil.example', '//evil.example', '/\tevil']) {

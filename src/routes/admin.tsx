@@ -33,6 +33,9 @@ async function taxonomy(db: D1Database): Promise<Taxonomy> {
 
 // ---------- Cohorts and lectures ----------
 
+// Typing /admin opens the first admin page instead of "page not found" (staff checks above still apply).
+admin.get('/', (c) => c.redirect('/admin/lectures'));
+
 admin.get('/lectures', async (c) => {
   const user = c.get('user')!;
   const cohort = await currentCohort(c.env.DB);

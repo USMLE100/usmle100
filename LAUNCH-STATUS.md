@@ -39,6 +39,16 @@ Single source of truth for what is left before launch. Updated 2 Nov 2026. Every
 8. Send Zoho a test email to and from info@usmle100.com.
 9. Admin → Site settings: Calendly `https://calendly.com/usmle100/usmle100-1-on-1-tutoring-60mins`; leave the student count empty (hidden; owner removed the unverified "1,400+" claim); contact email; leave the practice-test date empty (hidden).
 
+## Production checks still to do by hand (owner, on a real device; cannot be simulated)
+Code-level tests pass (182, 4 Nov 2026). These need the live site, a real lecture and the owner's login:
+1. **Real lecture playback** on usmle100.com: approve one real recording (never the two test videos), then play it on iPhone.
+2. **Watermark** visible during playback: name, account number, session code, plus the faint tiled pattern; still there in full screen.
+3. **Playback beyond 15 minutes**: keep watching past the 15-minute signed-link expiry; it must keep playing (and resume after a pause).
+4. **Signed-link reuse protection**: while it plays, copy the player link and open it in a new tab or another browser; Bunny must refuse it (allowed domains + token).
+5. **MediaCage DRM** on the first real upload: in Bunny, the video shows DRM protection (and no MP4 download exists).
+6. **Live payment**: the first real payment (or an owner test) shows a 200 delivery in Stripe → Webhooks, and the student is enrolled automatically.
+7. **Zoom import**: after the next class, the recording appears in Admin → Lectures as "waiting for approval" (not failed).
+
 ## Not needed for launch (optional later)
 - Password-reset email: Resend, free tier, needs the domain.
 - Zoom automatic import; SMS.
