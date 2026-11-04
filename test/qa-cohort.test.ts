@@ -1,6 +1,7 @@
 import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import sql from '../migrations/0027_qa_test_cohort.sql';
+import offSql from '../migrations/0028_qa_test_cohort_off.sql';
 import { statements } from '../src/lib/migrate';
 import { SIGNUP, cookies } from './owner';
 
@@ -55,5 +56,12 @@ describe('QA test cohort (0027)', () => {
     expect(c.state).toBe('ok');
     expect(c.src).toMatch(/token=[0-9a-f]{64}&expires=\d+/);
     expect(c.wm.code).toBe(c.sid);
+    // Retiring it (0028, prepared for after the owner's test): the tester loses the video, other cohorts are untouched.
+    const realLecture = Number((await db.prepare("INSERT INTO lectures (cohort_id, day_number, title, status, bunny_video_id) VALUES (?, 1, 'Real', 'live', 'vid-real')").bind(real).run()).meta.last_row_id);
+    for (const s of statements(offSql)) await db.prepare(s).run();
+    expect(((await (await req('/play/claim', tester, { item: item.item, tab: 'abcabcabcab9' })).json()) as any).state).not.toBe('ok');
+    expect(await db.prepare("SELECT 1 FROM cohorts WHERE name = 'QA test (retired)'").first()).not.toBeNull();
+    expect(await db.prepare('SELECT status, bunny_video_id FROM lectures WHERE id = ?').bind(realLecture).first()).toEqual({ status: 'live', bunny_video_id: 'vid-real' });
+    expect(((await (await req('/play/claim', other, { item: `L:${realLecture}`, tab: 'abcabcabca10' })).json()) as any).state).toBe('ok');
   });
 });
