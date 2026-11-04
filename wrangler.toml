@@ -24,7 +24,7 @@ crons = ["*/5 * * * *"]
 [vars]
 ENVIRONMENT = "production"
 BUNNY_LIBRARY_ID = "785730"
-# SITE_URL = "https://usmle100.com"   # uncomment once usmle100.com points at this Worker (see LAUNCH.md)
+SITE_URL = "https://usmle100.com"   # usmle100.com attached to this Worker on 3 Nov 2026 (launch)
 # Secrets (Cloudflare dashboard → Worker → Settings → Variables and Secrets, type "Secret"; never committed):
 #   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, BUNNY_TOKEN_KEY, BUNNY_API_KEY, ZOOM_WEBHOOK_SECRET
 #   optional: ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET
