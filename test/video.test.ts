@@ -2,7 +2,8 @@ import { env, exports } from 'cloudflare:workers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { importRecording, syncImports } from '../src/lib/zoom';
 import { syncDurations } from '../src/lib/catalog';
-import { ensureMigrated } from '../src/lib/migrate';
+import { ensureMigrated, statements } from '../src/lib/migrate';
+import detachSql from '../migrations/0026_detach_declined.sql';
 import { SIGNUP, cookies, makeOwner } from './owner';
 
 // Zoom → Bunny → lecture, with Zoom and Bunny mocked. This checks USMLE100's own logic, not the real services.
@@ -82,6 +83,61 @@ describe('Zoom recording to lecture', () => {
     expect((await approve(admin.cookie)).status).toBe(403);
     expect((await approve(owner.cookie)).status).toBe(302);
     expect((await db.prepare('SELECT status FROM lectures WHERE id = ?').bind(lec.id).first<any>())!.status).toBe('live');
+  });
+
+  it('declining a recording frees its day, so the real recording of that day still attaches (also when declined before Bunny finished)', async () => {
+    const fetched: string[] = [];
+    let g = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url.endsWith('/videos/fetch')) { fetched.push(JSON.parse(init.body).title); return new Response('{"success":true}'); }
+      if (url.includes('/videos?')) {
+        const tag = decodeURIComponent(url.split('search=')[1]);
+        const title = fetched.find((t) => t.includes(`[${tag}]`));
+        return new Response(JSON.stringify({ items: title ? [{ guid: `guid-${tag}`, title, status: 4 }] : [] }));
+      }
+      if (/\/videos\/guid-/.test(url) && init?.method === 'POST') return new Response('{}');
+      if (/\/videos\/guid-/.test(url)) return new Response(JSON.stringify({ guid: url.split('/').pop(), title: 'x', status: 4, length: 100 }));
+      return new Response('{}');
+    });
+    const owner = await account('owner');
+    const decide = (id: number, decision: string) =>
+      worker.fetch(new Request(`https://usmle100.test/admin/zoom-imports/${id}/approve`, { method: 'POST', body: new URLSearchParams({ decision }), headers: { cookie: owner.cookie, origin: 'https://usmle100.test', 'content-type': 'application/x-www-form-urlencoded' }, redirect: 'manual' }));
+    const day = async (n: number) => (await db.prepare("SELECT l.* FROM lectures l JOIN cohorts c ON c.id = l.cohort_id WHERE c.name = 'Video test' AND l.day_number = ?").bind(n).first<any>())!;
+    const impOf = async (file: string) => (await db.prepare('SELECT * FROM zoom_imports WHERE zoom_file_id = ?').bind(file).first<any>())!;
+
+    // Day 4 (Oct 8): a test recording is attached, then declined after Bunny finished.
+    await importRecording(e, recording('11122233344', '2026-10-08T23:00:00Z', 'test-rec-a'));
+    await syncImports(e);
+    expect((await day(4)).bunny_video_id).toBe(`guid-u100-${(await impOf('test-rec-a')).id}`);
+    expect((await decide((await impOf('test-rec-a')).id, 'decline')).status).toBe(302);
+    expect(await day(4)).toMatchObject({ bunny_video_id: null, status: 'processing' });
+    // The real class recording of the same day now attaches.
+    await importRecording(e, recording('11122233344', '2026-10-08T23:30:00Z', 'real-rec-a'));
+    await syncImports(e);
+    expect((await day(4)).bunny_video_id).toBe(`guid-u100-${(await impOf('real-rec-a')).id}`);
+    expect((await impOf('real-rec-a')).note).toBeNull();
+
+    // Day 5 (Oct 9): declined while Bunny was still preparing it: the sync never attaches it afterwards.
+    await importRecording(e, recording('11122233344', '2026-10-09T23:00:00Z', 'test-rec-b'));
+    expect((await decide((await impOf('test-rec-b')).id, 'decline')).status).toBe(302);
+    await syncImports(e);
+    expect((await day(5)).bunny_video_id).toBeNull();
+    expect((await day(5)).status).toBe('processing');
+  });
+
+  it('one-time cleanup detaches recordings declined earlier, never a live lecture or an undeclined one', async () => {
+    const c = Number((await db.prepare("INSERT INTO cohorts (name, start_date) VALUES ('Cleanup', '2026-09-07')").run()).meta.last_row_id);
+    const add = async (d: number, status: string, vid: string) => Number((await db.prepare('INSERT INTO lectures (cohort_id, day_number, title, status, bunny_video_id) VALUES (?, ?, ?, ?, ?)').bind(c, d, 'x', status, vid).run()).meta.last_row_id);
+    const declinedHidden = await add(1, 'processing', 'vid-declined');
+    const liveSameVideo = await add(2, 'live', 'vid-declined-live');
+    const waiting = await add(3, 'processing', 'vid-waiting');
+    await db.prepare("INSERT INTO zoom_imports (zoom_file_id, meeting_id, topic, bunny_video_id, declined_at) VALUES ('cl-1', '1', 't', 'vid-declined', datetime('now')), ('cl-2', '1', 't', 'vid-declined-live', datetime('now')), ('cl-3', '1', 't', 'vid-waiting', NULL)").run();
+    for (const q of statements(detachSql)) await db.prepare(q).run();
+    const vid = async (id: number) => (await db.prepare('SELECT bunny_video_id FROM lectures WHERE id = ?').bind(id).first<any>()).bunny_video_id;
+    expect(await vid(declinedHidden)).toBeNull();
+    expect(await vid(liveSameVideo)).toBe('vid-declined-live');
+    expect(await vid(waiting)).toBe('vid-waiting');
   });
 
   it('recordings of other meetings are ignored once class meeting IDs are saved', async () => {

@@ -193,8 +193,13 @@ export async function syncImports(env: Env) {
       });
       await db.batch([
         db.prepare("UPDATE zoom_imports SET bunny_video_id = ?, status = 'processing', updated_at = datetime('now') WHERE id = ?").bind(vid, imp.id),
-        db.prepare('UPDATE lectures SET bunny_video_id = ? WHERE id = ? AND bunny_video_id IS NULL').bind(vid, imp.lecture_id),
-        db.prepare('UPDATE evening_sessions SET bunny_video_id = ? WHERE id = ? AND bunny_video_id IS NULL').bind(vid, imp.evening_session_id),
+        // A recording the owner already declined is never attached to its day.
+        ...(imp.declined_at
+          ? []
+          : [
+              db.prepare('UPDATE lectures SET bunny_video_id = ? WHERE id = ? AND bunny_video_id IS NULL').bind(vid, imp.lecture_id),
+              db.prepare('UPDATE evening_sessions SET bunny_video_id = ? WHERE id = ? AND bunny_video_id IS NULL').bind(vid, imp.evening_session_id),
+            ]),
       ]);
     } else {
       const res = await fetch(`${bunnyBase(env)}/videos/${vid}`, { headers });

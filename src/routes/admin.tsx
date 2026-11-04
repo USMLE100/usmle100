@@ -348,8 +348,9 @@ admin.post('/zoom-imports/:id{[0-9]+}/approve', async (c) => {
       : db.prepare("UPDATE zoom_imports SET approved_at = datetime('now'), approved_by = ?, declined_at = NULL, updated_at = datetime('now') WHERE id = ?").bind(me.id, imp.id),
     ...(decline
       ? [
-          db.prepare("UPDATE lectures SET status = 'processing' WHERE id = ? AND bunny_video_id = ?").bind(imp.lecture_id, imp.bunny_video_id),
-          db.prepare("UPDATE evening_sessions SET status = 'processing' WHERE id = ? AND bunny_video_id = ?").bind(imp.evening_session_id, imp.bunny_video_id),
+          // Declining also detaches the video, so that day stays open for the real recording (owner, 4 Nov 2026).
+          db.prepare("UPDATE lectures SET status = 'processing', bunny_video_id = NULL WHERE id = ? AND bunny_video_id = ?").bind(imp.lecture_id, imp.bunny_video_id),
+          db.prepare("UPDATE evening_sessions SET status = 'processing', bunny_video_id = NULL WHERE id = ? AND bunny_video_id = ?").bind(imp.evening_session_id, imp.bunny_video_id),
         ]
       : ready
         ? [
