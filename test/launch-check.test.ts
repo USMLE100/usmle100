@@ -30,6 +30,7 @@ describe('launch check page', () => {
       }
       return realFetch(input, init);
     });
+    expect((await worker.fetch(new Request(BASE + '/admin/launch-check', { redirect: 'manual' }))).status).toBe(302); // signed out
     const student = await acct('student');
     expect((await get(student)).status).not.toBe(200);
     const admin = await acct('admin');
