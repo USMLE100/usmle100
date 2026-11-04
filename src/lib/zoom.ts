@@ -76,7 +76,7 @@ const bunnyBase = (env: Env) => `https://video.bunnycdn.com/library/${env.BUNNY_
 const marker = (importId: number) => `[u100-${importId}]`;
 
 /** Handle a "recording.completed" event. Safe to call twice for the same recording (Zoom retries). */
-export async function importRecording(env: Env, payload: any) {
+export async function importRecording(env: Env, payload: any, downloadToken?: string) {
   const db = env.DB;
   const obj = payload?.object ?? {};
   const picked = pickRecording(Array.isArray(obj.recording_files) ? obj.recording_files : []);
@@ -146,7 +146,8 @@ export async function importRecording(env: Env, payload: any) {
 
   const fail = (why: string) => db.prepare("UPDATE zoom_imports SET status = 'failed', note = ?, updated_at = datetime('now') WHERE id = ?").bind(why, importId).run();
   if (!env.BUNNY_API_KEY || !env.BUNNY_LIBRARY_ID) return fail('The Bunny API key is not set in Cloudflare yet.');
-  const token = payload.download_token || (await zoomServerToken(env));
+  // Zoom sends download_token at the top level of the event, next to "payload" (not inside it).
+  const token = downloadToken || payload.download_token || (await zoomServerToken(env));
   if (!token) return fail('Zoom did not include a download permission.');
   const res = await fetch(`${bunnyBase(env)}/videos/fetch`, {
     method: 'POST',

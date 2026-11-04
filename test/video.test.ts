@@ -91,6 +91,30 @@ describe('Zoom recording to lecture', () => {
     expect(await db.prepare("SELECT 1 FROM zoom_imports WHERE zoom_file_id = 'file-personal'").first()).toBeNull();
   });
 
+  it('a signed Zoom webhook uses the download token Zoom sends at the top level of the event', async () => {
+    const calls: { url: string; body: any }[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : input.url;
+      calls.push({ url, body: init?.body ? JSON.parse(init.body) : null });
+      return new Response('{"success":true}');
+    });
+    // Real Zoom shape: download_token is a sibling of "payload", not inside it.
+    const { download_token: _ignored, ...object } = recording('11122233344', '2026-10-09T23:00:00Z', 'file-top-token');
+    const body = JSON.stringify({ event: 'recording.completed', event_ts: Date.now(), payload: object, download_token: 'top-level-token' });
+    const ts = String(Math.floor(Date.now() / 1000));
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode('test-secret'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sig = 'v0=' + [...new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`v0:${ts}:${body}`)))].map((x) => x.toString(16).padStart(2, '0')).join('');
+    const res = await worker.fetch(new Request('https://usmle100.test/zoom/webhook', { method: 'POST', body, headers: { 'x-zm-request-timestamp': ts, 'x-zm-signature': sig } }));
+    expect(res.status).toBe(200);
+    // The copy to Bunny runs after the reply; wait for it.
+    for (let i = 0; i < 50 && !calls.some((x) => x.url.endsWith('/videos/fetch')); i++) await new Promise((r) => setTimeout(r, 20));
+    const fetchCall = calls.find((x) => x.url.endsWith('/videos/fetch'));
+    expect(fetchCall, 'Bunny was asked to copy the recording').toBeTruthy();
+    expect(fetchCall!.body.headers.Authorization).toBe('Bearer top-level-token');
+    const imp = await db.prepare("SELECT status FROM zoom_imports WHERE zoom_file_id = 'file-top-token'").first<{ status: string }>();
+    expect(imp!.status).not.toBe('failed');
+  });
+
   it('a Zoom webhook with a bad signature is refused', async () => {
     const res = await worker.fetch(new Request('https://usmle100.test/zoom/webhook', {
       method: 'POST', body: JSON.stringify({ event: 'recording.completed', payload: {} }),

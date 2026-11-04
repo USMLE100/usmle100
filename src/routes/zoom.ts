@@ -23,7 +23,7 @@ zoom.post('/webhook', async (c) => {
   }
   if (event.event === 'recording.completed') {
     // Reply to Zoom straight away; the copy to Bunny carries on in the background.
-    c.executionCtx.waitUntil(importRecording(c.env, event.payload).catch((e) => console.error('zoom import', e)));
+    c.executionCtx.waitUntil(importRecording(c.env, event.payload, typeof event.download_token === 'string' ? event.download_token : undefined).catch((e) => console.error('zoom import', e)));
   }
   return c.json({ received: true });
 });
