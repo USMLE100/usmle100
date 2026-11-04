@@ -40,7 +40,8 @@ const paras = (text: string) =>
     .split(/\n\s*\n/)
     .map((p) => p.trim())
     .filter(Boolean)
-    .map((p) => <p>{p}</p>);
+    // A paragraph starting "## " is a section heading.
+    .map((p) => (p.startsWith('## ') ? <h2>{p.slice(3)}</h2> : <p>{p}</p>));
 
 const Notice = (p: { title: string; children: any; tone?: 'error' }) => (
   <PublicLayout title={p.title} user={null} plain>

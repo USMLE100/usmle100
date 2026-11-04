@@ -22,6 +22,7 @@ import m0022 from '../../migrations/0022_cases.sql';
 import m0023 from '../../migrations/0023_view_failures.sql';
 import m0020 from '../../migrations/0020_messaging.sql';
 import m0024 from '../../migrations/0024_terms_acceptances.sql';
+import m0025 from '../../migrations/0025_launch_content.sql';
 
 /**
  * Database migrations run by the Worker itself on first request, so deploys
@@ -52,9 +53,10 @@ const MIGRATIONS: [string, string][] = [
   ['0022_cases', m0022],
   ['0023_view_failures', m0023],
   ['0024_terms_acceptances', m0024],
+  ['0025_launch_content', m0025],
 ];
 
-function statements(sql: string): string[] {
+export function statements(sql: string): string[] {
   return sql
     .split('\n')
     .filter((l) => !l.trim().startsWith('--'))

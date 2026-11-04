@@ -330,7 +330,7 @@ const legalPage = (title: string, key: 'terms_text' | 'privacy_text' | 'refund_t
     <PublicLayout title={title} user={c.get('user')} legal={{ terms: !!settings.terms_text, privacy: !!settings.privacy_text, refunds: !!settings.refund_text }}>
       <main class="wrap page legal">
         <h1>{title}</h1>
-        {text.split(/\n\s*\n/).map((p: string) => <p>{p.trim()}</p>)}
+        {text.split(/\n\s*\n/).map((p: string) => p.trim()).filter(Boolean).map((p: string) => (p.startsWith('## ') ? <h2>{p.slice(3)}</h2> : <p>{p}</p>))}
       </main>
     </PublicLayout>,
   );
