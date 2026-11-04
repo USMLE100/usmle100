@@ -38,6 +38,11 @@ launchCheck.get('/launch-check', async (c) => {
   const imports = (await db.prepare("SELECT topic, status, note, start_time, declined_at, approved_at FROM zoom_imports ORDER BY id DESC LIMIT 5").all<any>()).results;
   const qa = await db.prepare("SELECT c.id, c.name, l.id AS lecture_id, l.bunny_video_id FROM cohorts c LEFT JOIN lectures l ON l.cohort_id = c.id WHERE c.name LIKE 'QA test%'").first<any>();
   const qaStudents = qa ? await n(`SELECT COUNT(*) AS n FROM enrollments WHERE cohort_id = ${Number(qa.id)}`) : 0;
+  const qaItem = qa?.lecture_id ? `L:${Number(qa.lecture_id)}` : '';
+  const qaViews = qaItem ? (await db.prepare('SELECT id, user_id, created_at, started_at, last_beat_at, expires_at, duration, watched_seconds, counted, counted_reason FROM view_sessions WHERE item = ? ORDER BY created_at').bind(qaItem).all<any>()).results : [];
+  const qaUsed = qaItem ? (await db.prepare("SELECT s.user_id, SUM(s.counted) AS used, (SELECT COALESCE(SUM(extra), 0) FROM view_grants g WHERE g.user_id = s.user_id AND g.item = ?1) AS extra FROM view_sessions s WHERE s.item = ?1 GROUP BY s.user_id").bind(qaItem).all<any>()).results : [];
+  const qaLen = qa?.lecture_id ? (await db.prepare('SELECT duration_seconds AS d FROM lectures WHERE id = ?').bind(Number(qa.lecture_id)).first<{ d: number | null }>())?.d ?? null : null;
+  const t = (e: number | null) => (e ? new Date(e * 1000).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' }) : '—');
 
   let links: { ok: true; items: { id: string; url: string; created: number }[] } | { ok: false; why: string };
   if (!c.env.STRIPE_SECRET_KEY) links = { ok: false, why: 'Stripe key not set' };
@@ -83,6 +88,17 @@ launchCheck.get('/launch-check', async (c) => {
       <section class="card stack">
         <h2 style="margin:0">QA test setup</h2>
         <p style="margin:0">{qa ? `${qa.name}: test lecture ${qa.bunny_video_id ? 'has the test recording' : 'has NO recording'} · ${qaStudents} test student(s)` : 'Not present.'}</p>
+        {qa?.lecture_id && (
+          <div class="table-box"><table class="t">
+            <thead><tr><th scope="col">Student</th><th scope="col">Viewing</th><th scope="col">Opened</th><th scope="col">Playback began</th><th scope="col">Last progress</th><th scope="col">24 h ends</th><th scope="col">Watched</th><th scope="col">View used?</th></tr></thead>
+            <tbody>{qaViews.map((v: any) => (
+              <tr><td>ID {v.user_id}</td><td>{v.id}</td><td>{t(v.created_at)}</td><td>{t(v.started_at)}</td><td>{t(v.last_beat_at)}</td><td>{t(v.expires_at)}</td>
+                <td>{Math.round(v.watched_seconds)} s of {v.duration ? `${Math.round(v.duration)} s (${Math.round((100 * v.watched_seconds) / v.duration)}%)` : 'unknown length'}</td>
+                <td>{v.counted ? `yes (${v.counted_reason === 'expired' ? '24 h ended' : '90% reached'})` : 'no'}</td></tr>
+            ))}</tbody>
+          </table></div>
+        )}
+        {qa?.lecture_id && <p class="small muted" style="margin:0">Lecture length on file: {qaLen ?? 'not yet known'} s. Views used per student: {qaUsed.map((u: any) => `ID ${u.user_id}: ${u.used} of ${2 + (u.extra ?? 0)}`).join(' · ') || 'none'}.</p>}
       </section>
     </PortalLayout>,
   );
