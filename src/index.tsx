@@ -181,8 +181,10 @@ app.route('/', learn);
 app.route('/', library);
 app.route('/', community);
 
-app.notFound((c) =>
-  c.html(
+// "Not found" is never kept by the browser or Cloudflare, so a page added later shows up straight away.
+app.notFound((c) => {
+  c.header('Cache-Control', 'no-store');
+  return c.html(
     <PublicLayout title="Page not found" user={c.get('user') ?? null}>
       <main class="wrap page" style="text-align:center;padding-top:72px;padding-bottom:96px">
         <div class="eyebrow">404</div>
@@ -192,8 +194,8 @@ app.notFound((c) =>
       </main>
     </PublicLayout>,
     404,
-  ),
-);
+  );
+});
 app.onError((err, c) => {
   console.error(err);
   return c.text('Something went wrong. Please try again.', 500);

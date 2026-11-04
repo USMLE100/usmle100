@@ -16,6 +16,10 @@ launchCheck.use('*', requireAdminOrFacultyAllowed);
 const REQUIRED_OFF = [['2026-11-26', 'Thanksgiving'], ['2026-12-24', 'Christmas Eve'], ['2026-12-25', 'Christmas Day']] as const;
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
+// Typed variants (trailing slash, no hyphen) go to the page instead of "not found".
+launchCheck.get('/launch-check/', (c) => c.redirect('/admin/launch-check'));
+launchCheck.get('/launchcheck', (c) => c.redirect('/admin/launch-check'));
+
 launchCheck.get('/launch-check', async (c) => {
   const user = c.get('user')!;
   if (!isOwner(user)) return c.notFound();
@@ -59,7 +63,7 @@ launchCheck.get('/launch-check', async (c) => {
   const ok = (b: boolean) => <strong style={b ? 'color:var(--green)' : 'color:#a3402c'}>{b ? 'OK' : 'NEEDS ATTENTION'}</strong>;
   const offOk = REQUIRED_OFF.every(([d]) => offRows.some((r) => r.date === d));
   return c.html(
-    <PortalLayout shell={c.get('shell')} title="Launch check" active="admin-lectures" user={user}>
+    <PortalLayout shell={c.get('shell')} title="Launch check" active="admin-launch" user={user}>
       <Eyebrow>Owner · read-only</Eyebrow>
       <h1>Launch check</h1>
       <section class="card stack">

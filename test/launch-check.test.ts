@@ -40,6 +40,12 @@ describe('launch check page', () => {
     const r = await get(owner);
     expect(r.status).toBe(200);
     const html = await r.text();
+    // Reachable from the owner's admin menu, and typed variants lead to it.
+    const menu = await (await worker.fetch(new Request(BASE + '/admin/lectures', { headers: { cookie: owner } }))).text();
+    expect(menu).toContain('href="/admin/launch-check"');
+    const adminMenu = await (await worker.fetch(new Request(BASE + '/admin/lectures', { headers: { cookie: admin } }))).text();
+    expect(adminMenu).not.toContain('href="/admin/launch-check"');
+    for (const v of ['/admin/launch-check/', '/admin/launchcheck']) expect((await worker.fetch(new Request(BASE + v, { headers: { cookie: owner }, redirect: 'manual' }))).headers.get('location'), v).toBe('/admin/launch-check');
     for (const s of ['Question bank and Course Book', 'holidays', 'Thanksgiving', 'Active Stripe Payment Links', 'https://buy.stripe.com/old123', 'Lectures so far', 'QA test setup']) expect(html, s).toContain(s);
     // Read-only: only a GET list of payment links reaches Stripe; nothing is written.
     expect(calls).toEqual([{ url: 'https://api.stripe.com/v1/payment_links?active=true&limit=100', method: 'GET' }]);

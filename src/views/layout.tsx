@@ -1,6 +1,6 @@
 import type { Child } from 'hono/jsx';
 import type { Shell, User } from '../lib/types';
-import { isAdmin, isStaff } from '../lib/types';
+import { isAdmin, isOwner, isStaff } from '../lib/types';
 import { Icon, type IconName } from './icons';
 
 /** The official USMLE100 "U" mark (traced from the owner's logo): split U with the gold dot. */
@@ -117,7 +117,7 @@ export function PublicLayout(props: { title: string; user: User | null; children
 
 type NavItem = { key: string; label: string; href: string; icon: IconName };
 
-const groups = (staff: boolean, admin: boolean): { label: string; items: NavItem[] }[] => [
+const groups = (staff: boolean, admin: boolean, owner = false): { label: string; items: NavItem[] }[] => [
   { label: '', items: [{ key: 'home', label: 'Home', href: '/dashboard', icon: 'home' }] },
   {
     label: 'Help',
@@ -180,6 +180,7 @@ const groups = (staff: boolean, admin: boolean): { label: string; items: NavItem
                   { key: 'admin-cases', label: 'Appeals and disputes', href: '/admin/cases', icon: 'flag' as IconName },
                   { key: 'admin-webinars', label: 'Webinars', href: '/admin/webinars', icon: 'videocam' as IconName },
                   { key: 'admin-agreement', label: 'Student agreement', href: '/admin/agreement', icon: 'description' as IconName },
+                  ...(owner ? [{ key: 'admin-launch', label: 'Launch check', href: '/admin/launch-check', icon: 'check_circle' as IconName }] : []),
                 ]
               : []),
           ],
@@ -249,7 +250,7 @@ export function PortalLayout(props: { title: string; active: string; user: User;
                 <span class="hint">{s.lecturesDone ? `${pct}% of the course watched` : 'Finish one lecture to start'}</span>
               </div>
             )}
-            {groups(isStaff(props.user), isAdmin(props.user)).map((g) => (
+            {groups(isStaff(props.user), isAdmin(props.user), isOwner(props.user)).map((g) => (
               <>
                 {g.label && <div class="nav-label">{g.label}</div>}
                 {g.items.map((i) => (
