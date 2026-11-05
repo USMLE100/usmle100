@@ -26,7 +26,8 @@ describe('launch check page', () => {
       const url = typeof input === 'string' ? input : input.url;
       if (url.startsWith('https://api.stripe.com/')) {
         calls.push({ url, method: init?.method ?? 'GET' });
-        return new Response(JSON.stringify({ data: [{ id: 'plink_1', url: 'https://buy.stripe.com/old123', created: 1700000000 }] }));
+        // Stripe's real Payment Link shape: no 'created' field (this once crashed the page in production).
+        return new Response(JSON.stringify({ object: 'list', data: [{ id: 'plink_1', object: 'payment_link', active: true, url: 'https://buy.stripe.com/old123', livemode: true, metadata: {} }], has_more: false }));
       }
       return realFetch(input, init);
     });
@@ -35,6 +36,13 @@ describe('launch check page', () => {
     expect((await get(student)).status).not.toBe(200);
     const admin = await acct('admin');
     expect((await get(admin)).status).toBe(404);
+    // Production has the QA cohort with viewing records: the page must render them (this section once failed in production).
+    const qaC = Number((await db.prepare("INSERT INTO cohorts (name, start_date) VALUES ('QA test (owner only - not for students)', '2026-09-07')").run()).meta.last_row_id);
+    const qaL = Number((await db.prepare("INSERT INTO lectures (cohort_id, day_number, title, status, bunny_video_id, duration_seconds) VALUES (?, 1, 'QA', 'live', 'vid-qa', 300)").bind(qaC).run()).meta.last_row_id);
+    const anyUser = (await db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').first<{ id: number }>())!.id;
+    const now = Math.floor(Date.now() / 1000);
+    await db.prepare("INSERT INTO view_sessions (id, user_id, item, kind, enrollment_id, created_at, started_at, expires_at, last_beat_at, duration, watched_seconds, counted, counted_reason) VALUES ('QAVIEW1', ?, ?, 'paid', NULL, ?, ?, ?, ?, 300, 271, 1, '65%'), ('QAVIEW2', ?, ?, 'paid', NULL, ?, ?, ?, ?, 300, 120, 0, NULL)")
+      .bind(anyUser, `L:${qaL}`, now - 900, now - 890, now - 890 + 86400, now - 600, anyUser, `L:${qaL}`, now - 500, now - 490, now - 490 + 86400, now - 300).run();
     const owner = await acct('owner');
     const before = await db.prepare('SELECT COUNT(*) AS n FROM audit_log').first<{ n: number }>();
     const r = await get(owner);
@@ -46,7 +54,7 @@ describe('launch check page', () => {
     const adminMenu = await (await worker.fetch(new Request(BASE + '/admin/lectures', { headers: { cookie: admin } }))).text();
     expect(adminMenu).not.toContain('href="/admin/launch-check"');
     for (const v of ['/admin/launch-check/', '/admin/launchcheck']) expect((await worker.fetch(new Request(BASE + v, { headers: { cookie: owner }, redirect: 'manual' }))).headers.get('location'), v).toBe('/admin/launch-check');
-    for (const s of ['Question bank and Course Book', 'holidays', 'Thanksgiving', 'Active Stripe Payment Links', 'https://buy.stripe.com/old123', 'Lectures so far', 'QA test setup']) expect(html, s).toContain(s);
+    for (const s of ['QAVIEW1', '271 s of 300 s (90%)', 'yes (90% reached)', 'Question bank and Course Book', 'holidays', 'Thanksgiving', 'Active Stripe Payment Links', 'https://buy.stripe.com/old123', 'Lectures so far', 'QA test setup']) expect(html, s).toContain(s);
     // Read-only: only a GET list of payment links reaches Stripe; nothing is written.
     expect(calls).toEqual([{ url: 'https://api.stripe.com/v1/payment_links?active=true&limit=100', method: 'GET' }]);
     expect((await db.prepare('SELECT COUNT(*) AS n FROM audit_log').first<{ n: number }>())!.n).toBe(before!.n);

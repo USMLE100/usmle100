@@ -14,7 +14,6 @@ export const launchCheck = new Hono<AppEnv>();
 launchCheck.use('*', requireAdminOrFacultyAllowed);
 
 const REQUIRED_OFF = [['2026-11-26', 'Thanksgiving'], ['2026-12-24', 'Christmas Eve'], ['2026-12-25', 'Christmas Day']] as const;
-const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
 // Typed variants (trailing slash, no hyphen) go to the page instead of "not found".
 launchCheck.get('/launch-check/', (c) => c.redirect('/admin/launch-check'));
@@ -48,13 +47,14 @@ launchCheck.get('/launch-check', async (c) => {
   const qaLen = qa?.lecture_id ? (await db.prepare('SELECT duration_seconds AS d FROM lectures WHERE id = ?').bind(Number(qa.lecture_id)).first<{ d: number | null }>())?.d ?? null : null;
   const t = (e: number | null) => (e ? new Date(e * 1000).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' }) : '—');
 
-  let links: { ok: true; items: { id: string; url: string; created: number }[] } | { ok: false; why: string };
+  // Stripe's Payment Link objects carry no creation date: show the link and its product name only.
+  let links: { ok: true; items: { id: string; url: string; name: string }[] } | { ok: false; why: string };
   if (!c.env.STRIPE_SECRET_KEY) links = { ok: false, why: 'Stripe key not set' };
   else {
     try {
       const r = await fetch('https://api.stripe.com/v1/payment_links?active=true&limit=100', { headers: { Authorization: `Bearer ${c.env.STRIPE_SECRET_KEY}` } });
       const j = (await r.json()) as any;
-      links = r.ok ? { ok: true, items: (j.data ?? []).map((x: any) => ({ id: x.id, url: x.url, created: x.created })) } : { ok: false, why: `Stripe answered ${r.status}` };
+      links = r.ok ? { ok: true, items: (j.data ?? []).map((x: any) => ({ id: String(x.id ?? ''), url: String(x.url ?? ''), name: String(x.metadata?.name ?? x.line_items?.data?.[0]?.description ?? '') })) } : { ok: false, why: `Stripe answered ${r.status}` };
     } catch {
       links = { ok: false, why: 'Stripe could not be reached' };
     }
@@ -79,7 +79,7 @@ launchCheck.get('/launch-check', async (c) => {
       </section>
       <section class="card stack">
         <h2 style="margin:0">3. Active Stripe Payment Links {links.ok ? ok(links.items.length === 0) : <strong>{links.why}</strong>}</h2>
-        {links.ok && (links.items.length ? <ul class="small" style="margin:0">{links.items.map((l) => <li>{l.url} (created {ymd(new Date(l.created * 1000))}): buyers through this link are not enrolled automatically</li>)}</ul> : <p style="margin:0">None active.</p>)}
+        {links.ok && (links.items.length ? <ul class="small" style="margin:0">{links.items.map((l) => <li>{l.url}{l.name ? ` (${l.name})` : ''}: buyers through this link are not enrolled automatically</li>)}</ul> : <p style="margin:0">None active.</p>)}
       </section>
       <section class="card stack">
         <h2 style="margin:0">4. Lectures so far {ok(lectures.length >= Math.min(today, 90) && lectures.every((l) => l.bunny_video_id))}</h2>
