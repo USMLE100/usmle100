@@ -9,6 +9,7 @@ import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { deviceLabel } from '../lib/devices';
 import { itemLabel } from '../lib/viewing';
 import { money } from '../lib/content';
+import { giveEveningMonths, includedEvening, todayYmd } from '../lib/evening';
 import { fulfil, retrieveCheckoutSession } from '../lib/stripe';
 
 /**
@@ -104,7 +105,7 @@ studentsAdmin.get('/students/view', async (c) => {
   if (!u) return c.html(<PortalLayout shell={c.get('shell')} title="Student" active="admin-students" user={me}><Flash kind="error">No account uses {email}.</Flash><a href="/admin/students/directory">Back</a></PortalLayout>, 404);
   const passkeyCount = (await db.prepare('SELECT COUNT(*) AS n FROM passkeys WHERE user_id = ?').bind(u.id).first<{ n: number }>())?.n ?? 0;
   const [enr, book, evening, devices, sessions, views, signed, packages, cohorts, log] = await Promise.all([
-    db.prepare('SELECT e.*, p.name AS package_name, c.name AS cohort FROM enrollments e JOIN packages p ON p.id = e.package_id LEFT JOIN cohorts c ON c.id = e.cohort_id WHERE e.user_id = ? ORDER BY e.id DESC').bind(u.id).all<any>(),
+    db.prepare('SELECT e.*, p.name AS package_name, p.evening_q_months, c.name AS cohort FROM enrollments e JOIN packages p ON p.id = e.package_id LEFT JOIN cohorts c ON c.id = e.cohort_id WHERE e.user_id = ? ORDER BY e.id DESC').bind(u.id).all<any>(),
     db.prepare('SELECT note, created_at FROM book_access WHERE user_id = ?').bind(u.id).first<any>().catch(() => null),
     db.prepare('SELECT start_date, months FROM evening_subscriptions WHERE user_id = ? ORDER BY start_date DESC LIMIT 5').bind(u.id).all<any>().catch(() => ({ results: [] as any[] })),
     db.prepare('SELECT label, status, first_seen, last_seen, last_country FROM devices WHERE user_id = ? ORDER BY id').bind(u.id).all<any>(),
@@ -146,15 +147,70 @@ studentsAdmin.get('/students/view', async (c) => {
           </ul>
         )}
         <p class="small" style="margin:0">Course Book: {book ? `yes (${book.note ?? 'given'})` : 'no'} · Evening Questions: {evening.results.length ? evening.results.map((x: any) => `${x.start_date} (${x.months} mo)`).join(', ') : 'no'}</p>
-        {owner ? (
-          <form method="post" action={`/admin/students/${u.id}/give-program`} class="row" style="align-items:flex-end">
-            <label class="field" style="flex:1 1 160px">Give a program<select name="package">{packages.results.map((p: any) => <option value={p.id}>{p.name}</option>)}</select></label>
-            <label class="field" style="flex:1 1 160px">Cohort<select name="cohort">{cohorts.results.map((x: any) => <option value={String(x.id)}>{x.name}</option>)}</select></label>
-            <label class="field" style="flex:2 1 200px">Reason<input type="text" name="reason" required maxlength={200} placeholder="e.g. paid by bank transfer" /></label>
-            <button class="btn btn-outline" type="submit">Give</button>
-          </form>
-        ) : (
-          <p class="muted small" style="margin:0">Only the owner can give a program.</p>
+        {owner ? (() => {
+          const active = enr.results.find((e: any) => e.status === 'active');
+          const today = new Date().toISOString().slice(0, 10);
+          const evOn = evening.results.length > 0 || (active && active.evening_q_months > 0 && !active.evening_removed_at);
+          return (
+            <div class="stack">
+              <div class="card stack" style="margin:0">
+                <h3 style="margin:0">100-Day Course</h3>
+                {active ? (
+                  <>
+                    <p class="small" style="margin:0"><strong>Has access</strong>: {active.package_name}{active.cohort ? ` · ${active.cohort}` : ''} · lectures open until {active.lectures_until ? active.lectures_until : 'the cohort’s normal end (60 days after Day 100)'}{active.suspended_at ? ' · SUSPENDED' : ''}</p>
+                    <form method="post" action={`/admin/students/${u.id}/course/until`} class="row" style="align-items:flex-end">
+                      <label class="field">Lecture access end date<input type="date" name="until" value={active.lectures_until ?? ''} /></label>
+                      <button class="btn btn-outline btn-sm" type="submit">Save end date</button>
+                      <button class="btn btn-ghost btn-sm" type="submit" name="clear" value="1">No end date</button>
+                    </form>
+                    <form method="post" action={`/admin/students/${u.id}/course/remove`} class="row" style="align-items:flex-end">
+                      <label class="field" style="flex:2 1 200px">Reason<input type="text" name="reason" required maxlength={200} /></label>
+                      <button class="btn btn-ghost btn-sm" type="submit">Remove course access</button>
+                    </form>
+                  </>
+                ) : (
+                  <form method="post" action={`/admin/students/${u.id}/give-program`} class="row" style="align-items:flex-end">
+                    <input type="hidden" name="evening_choice" value="1" />
+                    <label class="field" style="flex:1 1 160px">Program<select name="package">{packages.results.map((p: any) => <option value={p.id}>{p.name}</option>)}</select></label>
+                    <label class="field" style="flex:1 1 160px">Cohort<select name="cohort">{cohorts.results.map((x: any) => <option value={String(x.id)}>{x.name}</option>)}</select></label>
+                    <label class="field">Lecture access end date (optional)<input type="date" name="until" /></label>
+                    <label class="field" style="flex:2 1 200px">Reason<input type="text" name="reason" required maxlength={200} placeholder="e.g. paid by Payment Link" /></label>
+                    <label class="small"><input type="checkbox" name="include_evening" value="1" /> Also give the Evening Questions months this program includes</label>
+                    <button class="btn btn-outline" type="submit">Give course access</button>
+                  </form>
+                )}
+              </div>
+              <div class="card stack" style="margin:0">
+                <h3 style="margin:0">Evening Questions</h3>
+                <p class="small" style="margin:0">{evOn ? <strong>Has access</strong> : 'No access'}
+                  {evening.results.length ? ` · given: ${evening.results.map((x: any) => `${x.months} mo from ${x.start_date}`).join(', ')}` : ''}
+                  {active && active.evening_q_months > 0 && !active.evening_removed_at ? ` · ${active.evening_q_months} mo included with the program` : ''}
+                  {u.evening_until ? ` · ends after ${u.evening_until}${u.evening_until < today ? ' (ended)' : ''}` : ''}</p>
+                <form method="post" action={`/admin/students/${u.id}/evening/give`} class="row" style="align-items:flex-end">
+                  <label class="field">Start<input type="date" name="start" value={today} /></label>
+                  <label class="field">Months<input type="number" name="months" min={1} max={12} value={1} /></label>
+                  <label class="field">End date (optional)<input type="date" name="until" /></label>
+                  <label class="field" style="flex:2 1 160px">Note<input type="text" name="note" maxlength={80} placeholder="e.g. monthly Payment Link" /></label>
+                  <button class="btn btn-outline btn-sm" type="submit">Give Evening Questions</button>
+                </form>
+                {evOn && (
+                  <>
+                    <form method="post" action={`/admin/students/${u.id}/evening/until`} class="row" style="align-items:flex-end">
+                      <label class="field">End date<input type="date" name="until" value={u.evening_until ?? ''} /></label>
+                      <button class="btn btn-outline btn-sm" type="submit">Save end date</button>
+                      <button class="btn btn-ghost btn-sm" type="submit" name="clear" value="1">No end date</button>
+                    </form>
+                    <form method="post" action={`/admin/students/${u.id}/evening/remove`} class="row" style="align-items:flex-end">
+                      <label class="field" style="flex:2 1 200px">Reason<input type="text" name="reason" required maxlength={200} /></label>
+                      <button class="btn btn-ghost btn-sm" type="submit">Remove Evening Questions</button>
+                    </form>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })() : (
+          <p class="muted small" style="margin:0">Only the owner can change program access.</p>
         )}
       </section>
 
@@ -210,9 +266,101 @@ studentsAdmin.post('/students/:uid{[0-9]+}/give-program', async (c) => {
   if (!u || !pkg || !cohort) return back('Choose a program and a cohort.', true);
   if (!reason) return back('Please give a reason.', true);
   if (await db.prepare("SELECT 1 FROM enrollments WHERE user_id = ? AND status = 'active'").bind(uid).first()) return back('This student already has an active program.', true);
-  await db.prepare("INSERT INTO enrollments (user_id, package_id, status, paid_at, amount_cents, cohort_id, note) VALUES (?, ?, 'active', datetime('now'), 0, ?, ?)").bind(uid, pkg.id, cohort.id, `Given by the owner: ${reason}`).run();
-  await audit(db, { actorId: me.id, action: 'access.program_given', targetUserId: uid, detail: { package: pkg.id, cohort: cohort.id, reason }, ip: c.req.header('cf-connecting-ip') ?? null });
+  const until = /^\d{4}-\d{2}-\d{2}$/.test(String(f.until ?? '')) ? String(f.until) : null;
+  // The form sends include_evening=1 when its box is ticked; older forms (no field) keep the included months.
+  const noEvening = f.evening_choice === '1' && f.include_evening !== '1';
+  await db.prepare("INSERT INTO enrollments (user_id, package_id, status, paid_at, amount_cents, cohort_id, note, lectures_until, evening_removed_at) VALUES (?, ?, 'active', datetime('now'), 0, ?, ?, ?, ?)")
+    .bind(uid, pkg.id, cohort.id, `Given by the owner: ${reason}`, until, noEvening ? new Date().toISOString() : null).run();
+  await audit(db, { actorId: me.id, action: 'access.program_given', targetUserId: uid, detail: { package: pkg.id, cohort: cohort.id, reason, until, included_evening: !noEvening }, ip: c.req.header('cf-connecting-ip') ?? null });
   return back('Program given.');
+});
+
+// ---------- Separate access: 100-Day Course and Evening Questions (owner, 5 Nov 2026) ----------
+// Each control changes only its own program. Removing the course keeps any Evening Questions months it included,
+// as months given by hand; removing Evening Questions never touches the course.
+
+const ymdOrNull = (v: unknown) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v ?? '')) ? String(v) : null);
+async function studentFor(c: any) {
+  const uid = Number(c.req.param('uid'));
+  const u = await c.env.DB.prepare("SELECT id, email FROM users WHERE id = ? AND role = 'student'").bind(uid).first() as { id: number; email: string } | null;
+  const back = (msg: string, err = false) => c.redirect(`/admin/students/view?email=${encodeURIComponent(u?.email ?? '')}&${err ? 'error' : 'ok'}=${encodeURIComponent(msg)}`);
+  return { u, back };
+}
+const activeEnrollment = (db: D1Database, uid: number) => db.prepare("SELECT id, package_id FROM enrollments WHERE user_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1").bind(uid).first<{ id: number; package_id: string }>();
+
+studentsAdmin.post('/students/:uid{[0-9]+}/course/until', async (c) => {
+  const db = c.env.DB;
+  const { u, back } = await studentFor(c);
+  if (!u) return c.text('Not found', 404);
+  const f = await c.req.parseBody();
+  const e = await activeEnrollment(db, u.id);
+  if (!e) return back('This student has no 100-Day Course access.', true);
+  const until = f.clear ? null : ymdOrNull(f.until);
+  if (!f.clear && !until) return back('Pick a date, or choose “No end date”.', true);
+  await db.prepare('UPDATE enrollments SET lectures_until = ? WHERE id = ?').bind(until, e.id).run();
+  await audit(db, { actorId: c.get('user')!.id, action: 'access.course_until', targetUserId: u.id, detail: { enrollment: e.id, until }, ip: c.req.header('cf-connecting-ip') ?? null });
+  return back(until ? `Lectures now open until ${until}.` : 'Lecture end date removed (the cohort’s normal end applies).');
+});
+
+studentsAdmin.post('/students/:uid{[0-9]+}/course/remove', async (c) => {
+  const db = c.env.DB;
+  const { u, back } = await studentFor(c);
+  if (!u) return c.text('Not found', 404);
+  const reason = String((await c.req.parseBody()).reason ?? '').trim().slice(0, 200);
+  if (!reason) return back('Please give a reason.', true);
+  const e = await activeEnrollment(db, u.id);
+  if (!e) return back('This student has no 100-Day Course access.', true);
+  // Evening Questions months that came with the program stay with the student.
+  const inc = await includedEvening(db, e.id);
+  const steps = [];
+  if (inc) steps.push(db.prepare('INSERT INTO evening_subscriptions (user_id, start_date, months, note) VALUES (?, ?, ?, ?)').bind(u.id, inc.start, inc.months, `Kept from ${e.package_id} when course access was removed`));
+  steps.push(db.prepare("UPDATE enrollments SET status = 'cancelled', note = trim(COALESCE(note, '') || ' · Course access removed by the owner: ' || ?) WHERE id = ? AND status = 'active'").bind(reason, e.id));
+  await db.batch(steps);
+  await audit(db, { actorId: c.get('user')!.id, action: 'access.course_removed', targetUserId: u.id, detail: { enrollment: e.id, reason, evening_kept_months: inc?.months ?? 0 }, ip: c.req.header('cf-connecting-ip') ?? null });
+  return back('100-Day Course access removed. Evening Questions unchanged.');
+});
+
+studentsAdmin.post('/students/:uid{[0-9]+}/evening/give', async (c) => {
+  const db = c.env.DB;
+  const { u, back } = await studentFor(c);
+  if (!u) return c.text('Not found', 404);
+  const f = await c.req.parseBody();
+  const start = ymdOrNull(f.start) ?? todayYmd();
+  const months = Math.min(12, Math.max(1, Math.floor(Number(f.months) || 1)));
+  const until = ymdOrNull(f.until);
+  const note = String(f.note ?? '').trim().slice(0, 80) || null;
+  await giveEveningMonths(db, u.id, start, months, note);
+  await db.prepare('UPDATE users SET evening_until = ? WHERE id = ?').bind(until, u.id).run();
+  await audit(db, { actorId: c.get('user')!.id, action: 'access.evening_given', targetUserId: u.id, detail: { start, months, until, note }, ip: c.req.header('cf-connecting-ip') ?? null });
+  return back(`Evening Questions given: ${months} month(s) from ${start}${until ? `, ending after ${until}` : ''}.`);
+});
+
+studentsAdmin.post('/students/:uid{[0-9]+}/evening/until', async (c) => {
+  const db = c.env.DB;
+  const { u, back } = await studentFor(c);
+  if (!u) return c.text('Not found', 404);
+  const f = await c.req.parseBody();
+  const until = f.clear ? null : ymdOrNull(f.until);
+  if (!f.clear && !until) return back('Pick a date, or choose “No end date”.', true);
+  await db.prepare('UPDATE users SET evening_until = ? WHERE id = ?').bind(until, u.id).run();
+  await audit(db, { actorId: c.get('user')!.id, action: 'access.evening_until', targetUserId: u.id, detail: { until }, ip: c.req.header('cf-connecting-ip') ?? null });
+  return back(until ? `Evening Questions now end after ${until}.` : 'Evening Questions end date removed.');
+});
+
+studentsAdmin.post('/students/:uid{[0-9]+}/evening/remove', async (c) => {
+  const db = c.env.DB;
+  const { u, back } = await studentFor(c);
+  if (!u) return c.text('Not found', 404);
+  const reason = String((await c.req.parseBody()).reason ?? '').trim().slice(0, 200);
+  if (!reason) return back('Please give a reason.', true);
+  await db.batch([
+    db.prepare('DELETE FROM evening_subscriptions WHERE user_id = ?').bind(u.id),
+    // Months included with the program are switched off on the program itself; the course is untouched.
+    db.prepare("UPDATE enrollments SET evening_removed_at = ? WHERE user_id = ? AND evening_removed_at IS NULL").bind(new Date().toISOString(), u.id),
+    db.prepare('UPDATE users SET evening_until = NULL WHERE id = ?').bind(u.id),
+  ]);
+  await audit(db, { actorId: c.get('user')!.id, action: 'access.evening_removed', targetUserId: u.id, detail: { reason }, ip: c.req.header('cf-connecting-ip') ?? null });
+  return back('Evening Questions removed. 100-Day Course unchanged.');
 });
 
 // ---------- Payments check: Stripe vs enrollments (owner decision: reconciliation, owner approves retries) ----------

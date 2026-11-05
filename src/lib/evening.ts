@@ -70,7 +70,7 @@ async function subsFor(db: D1Database, userId: number): Promise<(Sub & { id?: nu
       .prepare(
         `SELECT substr(COALESCE(e.paid_at, e.created_at), 1, 10) AS paid, p.evening_q_months AS months, c.start_date
          FROM enrollments e JOIN packages p ON p.id = e.package_id LEFT JOIN cohorts c ON c.id = e.cohort_id
-         WHERE e.user_id = ? AND e.status = 'active' AND e.suspended_at IS NULL AND p.evening_q_months > 0`,
+         WHERE e.user_id = ? AND e.status = 'active' AND e.suspended_at IS NULL AND e.evening_removed_at IS NULL AND p.evening_q_months > 0`,
       )
       .bind(userId)
       .all<{ paid: string; months: number; start_date: string | null }>()
@@ -84,10 +84,13 @@ export const allSessions = async (db: D1Database) =>
 /** What this person may watch today, or null for no access. */
 export async function eveningAccess(db: D1Database, user: User): Promise<EveningAccess | null> {
   if (isStaff(user)) return { staff: true };
+  const today = todayYmd();
+  // An end date set by the owner closes Evening Questions after that day, whatever months remain.
+  const until = (await db.prepare('SELECT evening_until AS u FROM users WHERE id = ?').bind(user.id).first<{ u: string | null }>())?.u ?? null;
+  if (until && today > until) return null;
   const subs = await subsFor(db, user.id);
   if (!subs.length) return null;
   const sessions = await allSessions(db);
-  const today = todayYmd();
   const active = subs.flatMap((s) => subStatus(s, sessions, today).active);
   if (!active.length) return null;
   const visible = new Set(active.flatMap((b) => b.sessions.map((s) => s.id)));
@@ -111,4 +114,17 @@ export async function giveEveningMonths(db: D1Database, userId: number, start: s
   } else {
     await db.prepare('INSERT INTO evening_subscriptions (user_id, start_date, months, note) VALUES (?, ?, ?, ?)').bind(userId, start, months, note).run();
   }
+}
+
+/** Months of Evening Questions a program includes, as they would start for this enrollment (see subsFor). */
+export async function includedEvening(db: D1Database, enrollmentId: number) {
+  return db
+    .prepare(
+      `SELECT e.user_id, p.evening_q_months AS months,
+         CASE WHEN c.start_date > substr(COALESCE(e.paid_at, e.created_at), 1, 10) THEN c.start_date ELSE substr(COALESCE(e.paid_at, e.created_at), 1, 10) END AS start
+       FROM enrollments e JOIN packages p ON p.id = e.package_id LEFT JOIN cohorts c ON c.id = e.cohort_id
+       WHERE e.id = ? AND e.status = 'active' AND e.suspended_at IS NULL AND e.evening_removed_at IS NULL AND p.evening_q_months > 0`,
+    )
+    .bind(enrollmentId)
+    .first<{ user_id: number; months: number; start: string }>();
 }

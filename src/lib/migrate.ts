@@ -28,6 +28,7 @@ import m0027 from '../../migrations/0027_qa_test_cohort.sql';
 import m0029 from '../../migrations/0029_view_diag.sql';
 import m0030 from '../../migrations/0030_agreement_viewing_limit.sql';
 import m0031 from '../../migrations/0031_viewing_threshold_65.sql';
+import m0032 from '../../migrations/0032_separate_access.sql';
 
 /**
  * Database migrations run by the Worker itself on first request, so deploys
@@ -64,6 +65,7 @@ const MIGRATIONS: [string, string][] = [
   ['0029_view_diag', m0029],
   ['0030_agreement_viewing_limit', m0030],
   ['0031_viewing_threshold_65', m0031],
+  ['0032_separate_access', m0032],
 ];
 
 export function statements(sql: string): string[] {
