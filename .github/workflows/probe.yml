@@ -11,7 +11,7 @@ jobs:
       - name: Stripe TEST-mode purchase on staging (no real money; production untouched)
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          npm i --no-save playwright@1.48.2 >/dev/null 2>&1 && npx playwright install --with-deps chromium >/dev/null 2>&1
+          true
           node .github/sandbox-purchase.cjs > out.txt 2>&1 || true
           cat out.txt
           i=0; while IFS= read -r line; do i=$((i+1)); gh api repos/${{ github.repository }}/statuses/${{ github.sha }} -f state=success -f context="step$i" -f description="$(echo "$line" | cut -c1-138)" >/dev/null; done < <(grep '^RESULT' out.txt | head -12)
