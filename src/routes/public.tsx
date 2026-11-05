@@ -19,6 +19,7 @@ import { BOOK_PRICE_CENTS, hasBook } from '../lib/book';
 import { currentCohort, dayDate, fmtDate, money, todayUtc, ymdToUtc } from '../lib/content';
 import { getSettings } from '../lib/settings';
 import { enrollingCohort, enrollingLine } from '../lib/enrolling';
+import { HOME_FAQ } from '../views/homeFaq';
 
 export type Pkg = { id: string; name: string; tagline: string; price_cents: number; one_on_one_sessions: number; evening_q_months: number; recommended: number };
 
@@ -155,6 +156,18 @@ publicRoutes.get('/', async (c) => {
           </div>
         </section>
       )}
+
+      <section class="wrap home-faq">
+        <h2 class="section-title">Frequently Asked Questions</h2>
+        <div class="faq">
+          {HOME_FAQ.map(([q, paras]) => (
+            <details>
+              <summary>{q}<span class="pl"><Icon name="close" size={16} /></span></summary>
+              {paras.map((t) => <p>{t === 'To get started, visit our Programs page, review the current package details, and choose the option that fits your preparation needs.' ? <>To get started, visit our <a href="/programs">Programs page</a>, review the current package details, and choose the option that fits your preparation needs.</> : t}</p>)}
+            </details>
+          ))}
+        </div>
+      </section>
 
       <section class="wrap" style="padding-bottom:56px">
         <div class="cta-band">

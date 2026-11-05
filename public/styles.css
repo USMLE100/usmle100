@@ -532,6 +532,8 @@ details.more[open] summary .ic { transform: rotate(180deg); }
 .faq summary .pl { transform: rotate(45deg); transition: transform .15s; }
 .faq details[open] summary .pl { transform: rotate(90deg); }
 .faq details p { padding: 0 0 16px; color: var(--body); font-size: 15px; }
+.faq details p + p { margin-top: -6px; }
+.home-faq { padding-top: 8px; padding-bottom: 40px; }
 
 /* Misc kept for admin pages */
 .price { font-weight: 700; }
