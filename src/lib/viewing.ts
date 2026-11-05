@@ -241,7 +241,7 @@ const savePos = (db: D1Database, userId: number, item: string, pos: number, t: n
  * seconds (no faster than 2× real time), saves the position, and uses the view at 90% (THRESHOLD).
  * Uncounted videos (Evening classes) only keep the tab and position.
  */
-export async function recordBeat(db: D1Database, user: User, enr: Enrollment | null, b: Beat): Promise<BeatResult> {
+export async function recordBeat(db: D1Database, user: User, enr: Enrollment | null, b: Beat, diag: string | null = null): Promise<BeatResult> {
   const t = epoch();
   if (b.sid === 'staff') return isStaff(user) ? { state: 'ok', watchedPct: 0, expiresAt: null } : { state: 'gone' };
   const tab = await db.prepare('SELECT * FROM play_tabs WHERE user_id = ?').bind(user.id).first<Tab>();
@@ -306,9 +306,9 @@ export async function recordBeat(db: D1Database, user: User, enr: Enrollment | n
     db
       .prepare(
         `UPDATE view_sessions SET started_at = COALESCE(started_at, ?), expires_at = COALESCE(expires_at, ?), last_beat_at = ?, duration = COALESCE(duration, ?),
-           seen = ?, watched_seconds = ?, counted = ?, counted_at = ?, counted_reason = ? WHERE id = ? AND counted = 0`,
+           seen = ?, watched_seconds = ?, counted = ?, counted_at = ?, counted_reason = ?, diag = COALESCE(?, diag) WHERE id = ? AND counted = 0`,
       )
-      .bind(startedAt, startedAt ? startedAt + WINDOW_SECONDS : null, t, reported, seen, watched, reached ? 1 : 0, reached ? t : null, reached ? '65%' : null, s.id),
+      .bind(startedAt, startedAt ? startedAt + WINDOW_SECONDS : null, t, reported, seen, watched, reached ? 1 : 0, reached ? t : null, reached ? '65%' : null, diag, s.id),
     ...(savePosNow || reached ? [savePos(db, user.id, s.item, pos, t)] : []),
     db.prepare('UPDATE play_tabs SET session_id = ?, seen_at = ? WHERE user_id = ?').bind(s.id, t, user.id),
     // Reaching the threshold on a course lecture also marks it watched.

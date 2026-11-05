@@ -113,7 +113,17 @@ play.post('/play/beat', async (c) => {
     add: Array.isArray(b.add) ? b.add : [],
     failed: b.failed === 'player-error' || b.failed === 'stalled' || b.failed === 'offline' ? b.failed : undefined,
   };
-  const result = await recordBeat(c.env.DB, user, c.get('enrollment'), beat);
+  // What the page heard from Bunny's player, saved on the viewing in the same write (no extra cost): flags, counts and
+  // the browser type only, so a progress count that fails on a device can be diagnosed in production.
+  let diagLine: string | null = null;
+  if (b.diag && typeof b.diag === 'object') {
+    const d = b.diag as Record<string, unknown>;
+    const ev = d.ev && typeof d.ev === 'object' ? Object.entries(d.ev as Record<string, unknown>).slice(0, 8).map(([k, v]) => `${String(k).slice(0, 12)}:${Number(v) || 0}`).join(',') : '';
+    const ua = (c.req.header('user-agent') ?? '').replace(/\s+/g, ' ');
+    const device = /iPad|Macintosh.*Mobile|Macintosh.*Safari(?!.*Chrome)/.test(ua) && /Mobile|Macintosh/.test(ua) ? (/iPad/.test(ua) ? 'iPad' : /Mobile/.test(ua) ? 'iPad/iPhone' : 'Mac/iPad Safari') : /iPhone/.test(ua) ? 'iPhone' : /Android/.test(ua) ? 'Android' : /Chrome/.test(ua) ? 'Chrome' : 'other';
+    diagLine = `lib ${d.lib === true ? 'loaded' : 'NOT loaded'}${d.libReady === true ? '+ready' : ''} · direct ${d.rawReady === true ? 'ready' : 'not ready'} · messages ${Number(d.msgs) || 0} · events {${ev}} · origins ${Array.isArray(d.origins) ? d.origins.slice(0, 3).map((o) => String(o).replace(/^https?:\/\//, '').slice(0, 40)).join(' ') : ''} · ${device}`.slice(0, 400);
+  }
+  const result = await recordBeat(c.env.DB, user, c.get('enrollment'), beat, diagLine);
   // Staging only: keep what the page heard from Bunny's player (counts and flags only, no personal data).
   // Written about once every 5 minutes, or when something isn't OK: staging shares the account's free daily limits.
   if (!isProduction(c.env) && b.diag && typeof b.diag === 'object' && (result.state !== 'ok' || Math.floor(Date.now() / 1000) % 300 < 30)) {
