@@ -79,6 +79,7 @@ launchCheck.get('/launch-check', async (c) => {
       </section>
       <section class="card stack">
         <h2 style="margin:0">3. Active Stripe Payment Links {links.ok ? ok(links.items.length === 0) : <strong>{links.why}</strong>}</h2>
+        <a class="btn btn-outline btn-sm" href="/admin/payment-links" style="align-self:flex-start">Open payment link audit (read-only)</a>
         {links.ok && (links.items.length ? <ul class="small" style="margin:0">{links.items.map((l) => <li>{l.url}{l.name ? ` (${l.name})` : ''}: buyers through this link are not enrolled automatically</li>)}</ul> : <p style="margin:0">None active.</p>)}
       </section>
       <section class="card stack">
@@ -105,6 +106,99 @@ launchCheck.get('/launch-check', async (c) => {
         )}
         {qa?.lecture_id && <p class="small muted" style="margin:0">Lecture length on file: {qaLen ?? 'not yet known'} s. Views used per student: {qaUsed.map((u: any) => `ID ${u.user_id}: ${u.used} of ${2 + (u.extra ?? 0)}`).join(' · ') || 'none'}.</p>}
       </section>
+    </PortalLayout>,
+  );
+});
+
+/**
+ * Owner only, read-only (owner, 5 Nov 2026): what each active Payment Link sells and who paid through it, matched to
+ * site accounts by email, so link buyers can be checked for access by hand. Payment Link checkouts carry no site
+ * reference, so the site never enrolls them automatically; this page only reports. Only GET requests reach Stripe.
+ */
+launchCheck.get('/payment-links', async (c) => {
+  const user = c.get('user')!;
+  if (!isOwner(user)) return c.notFound();
+  c.header('Cache-Control', 'no-store');
+  const db = c.env.DB;
+  const key = c.env.STRIPE_SECRET_KEY;
+  const H = { headers: { Authorization: `Bearer ${key}` } };
+  const usd = (cents: number | null | undefined) => (cents == null ? '?' : `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`);
+  const day = (t: number) => new Date(t * 1000).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  let error = '';
+  let links: any[] = [];
+  if (!key) error = 'Stripe key not set';
+  else {
+    try {
+      const r = await fetch('https://api.stripe.com/v1/payment_links?active=true&limit=100&expand[]=data.line_items', H);
+      if (r.ok) links = ((await r.json()) as any).data ?? [];
+      else error = `Stripe answered ${r.status}`;
+    } catch {
+      error = 'Stripe could not be reached';
+    }
+  }
+  const rows: { link: any; price: string; after: string; sessions: any[]; more: boolean; err?: string }[] = [];
+  for (const l of links) {
+    const li = l.line_items?.data?.[0];
+    const pr = li?.price;
+    const price = pr ? `${usd(pr.unit_amount)}${pr.recurring ? ` every ${pr.recurring.interval_count > 1 ? pr.recurring.interval_count + ' ' : ''}${pr.recurring.interval}` : ' one-time'}${li.description ? ' · ' + li.description : ''}` : 'price not shown';
+    const ac = l.after_completion;
+    const after = ac?.type === 'redirect' ? `redirects to ${String(ac.redirect?.url ?? '')}` : 'Stripe confirmation page';
+    let sessions: any[] = [], more = false, err: string | undefined;
+    try {
+      const r = await fetch(`https://api.stripe.com/v1/checkout/sessions?payment_link=${encodeURIComponent(l.id)}&status=complete&limit=100&expand[]=data.subscription`, H);
+      if (r.ok) {
+        const j = (await r.json()) as any;
+        sessions = j.data ?? [];
+        more = !!j.has_more;
+      } else err = `Stripe answered ${r.status}`;
+    } catch {
+      err = 'Stripe could not be reached';
+    }
+    rows.push({ link: l, price, after, sessions, more, err });
+  }
+  // What each buyer has on the site, by email. Read-only.
+  const access = async (email: string) => {
+    const u = email ? await db.prepare('SELECT id FROM users WHERE lower(email) = lower(?)').bind(email).first<{ id: number }>() : null;
+    if (!u) return { id: null as number | null, has: 'no site account with this email' };
+    const progs = (await db.prepare("SELECT package_id, status, amount_cents, note FROM enrollments WHERE user_id = ? AND status IN ('active','refunded','cancelled') ORDER BY id").bind(u.id).all<any>()).results;
+    const ev = (await db.prepare('SELECT COALESCE(SUM(months), 0) AS m FROM evening_subscriptions WHERE user_id = ?').bind(u.id).first<{ m: number }>())?.m ?? 0;
+    const book = !!(await db.prepare('SELECT 1 FROM book_access WHERE user_id = ?').bind(u.id).first());
+    const parts = [
+      ...progs.map((e: any) => `program ${e.package_id} (${e.status}${e.amount_cents ? ', ' + usd(e.amount_cents) : ''}${e.note ? ', ' + String(e.note).slice(0, 60) : ''})`),
+      ev ? `Evening Questions: ${ev} month(s) given` : '',
+      book ? 'Course Book' : '',
+    ].filter(Boolean);
+    return { id: u.id, has: parts.join(' · ') || 'account exists, no access given' };
+  };
+  const detail: Record<string, { id: number | null; has: string }> = {};
+  for (const r of rows) for (const s of r.sessions) {
+    const em = String(s.customer_details?.email ?? s.customer_email ?? '');
+    if (!(em in detail)) detail[em] = await access(em);
+  }
+  return c.html(
+    <PortalLayout shell={c.get('shell')} title="Payment link audit" active="admin-launch" user={user} wide>
+      <Eyebrow>Owner · read-only</Eyebrow>
+      <h1>Payment link audit</h1>
+      <p class="muted">Payments made through Stripe Payment Links are not matched to a site account automatically. This page lists every completed payment per active link and what that buyer currently has on the site. Nothing here changes Stripe or the site.</p>
+      {error && <p><strong>{error}</strong></p>}
+      {rows.map((r) => (
+        <section class="card stack">
+          <h2 style="margin:0">{r.price}</h2>
+          <p class="small" style="margin:0">Link ID <code>{r.link.id}</code> · {r.link.url} · after payment: {r.after}{r.link.metadata?.name ? ` · ${r.link.metadata.name}` : ''}</p>
+          {r.err ? <p><strong>{r.err}</strong></p> : r.sessions.length === 0 ? <p class="small muted" style="margin:0">No completed payments.</p> : (
+            <div class="table-box"><table class="t">
+              <thead><tr><th scope="col">Paid</th><th scope="col">Buyer</th><th scope="col">Amount</th><th scope="col">Stripe</th><th scope="col">Site account</th><th scope="col">Has on the site now</th></tr></thead>
+              <tbody>{r.sessions.map((s: any) => {
+                const em = String(s.customer_details?.email ?? s.customer_email ?? '');
+                const d = detail[em] ?? { id: null, has: '' };
+                const sub = s.subscription && typeof s.subscription === 'object' ? `subscription ${s.subscription.status}` : s.mode;
+                return <tr><td class="small">{day(s.created)}</td><td class="small">{s.customer_details?.name ?? ''} {em}</td><td class="small">{usd(s.amount_total)} ({s.payment_status})</td><td class="small">{sub} · {s.id.slice(0, 14)}…</td><td class="small">{d.id ? `ID ${d.id}` : '—'}</td><td class="small">{d.has}</td></tr>;
+              })}</tbody>
+            </table></div>
+          )}
+          {r.more && <p class="small muted" style="margin:0">Showing the latest 100 payments only.</p>}
+        </section>
+      ))}
     </PortalLayout>,
   );
 });

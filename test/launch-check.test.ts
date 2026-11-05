@@ -61,3 +61,37 @@ describe('launch check page', () => {
     await db.prepare("UPDATE settings SET value = '1' WHERE key = 'staff_passkeys'").run();
   });
 });
+
+describe('payment link audit', () => {
+  it('owner only; lists each link with price and buyers matched to site access; only GETs reach Stripe', async () => {
+    await db.prepare("INSERT INTO settings (key, value) VALUES ('staff_passkeys', '0') ON CONFLICT (key) DO UPDATE SET value = '0'").run();
+    const buyer = `linkbuyer-${Date.now()}@example.com`;
+    const realFetch = globalThis.fetch;
+    const calls: { url: string; method: string }[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (!url.startsWith('https://api.stripe.com/')) return realFetch(input, init);
+      calls.push({ url, method: init?.method ?? 'GET' });
+      if (url.includes('/payment_links')) return new Response(JSON.stringify({ data: [
+        { id: 'plink_course', url: 'https://buy.stripe.com/c1', metadata: {}, after_completion: { type: 'hosted_confirmation' }, line_items: { data: [{ description: '100-Day Course', price: { unit_amount: 138150, recurring: null } }] } },
+        { id: 'plink_tutor', url: 'https://buy.stripe.com/t1', metadata: {}, after_completion: { type: 'redirect', redirect: { url: 'https://calendly.com/x' } }, line_items: { data: [{ description: 'Tutoring', price: { unit_amount: 4999, recurring: null } }] } },
+      ] }));
+      if (url.includes('payment_link=plink_course')) return new Response(JSON.stringify({ data: [{ id: 'cs_live_abc123456789', created: 1793900000, amount_total: 138150, payment_status: 'paid', mode: 'payment', customer_details: { email: buyer.toUpperCase(), name: 'Link Buyer' } }], has_more: false }));
+      return new Response(JSON.stringify({ data: [], has_more: false }));
+    });
+    const stu = await acct('student');
+    await db.prepare("UPDATE users SET email = ? WHERE id = (SELECT MAX(id) FROM users)").bind(buyer).run();
+    const admin = await acct('admin');
+    expect((await worker.fetch(new Request(BASE + '/admin/payment-links', { headers: { cookie: admin }, redirect: 'manual' }))).status).toBe(404);
+    expect((await worker.fetch(new Request(BASE + '/admin/payment-links', { headers: { cookie: stu }, redirect: 'manual' }))).status).not.toBe(200);
+    const owner = await acct('owner');
+    const before = await db.prepare('SELECT (SELECT COUNT(*) FROM enrollments) + (SELECT COUNT(*) FROM audit_log) AS n').first<{ n: number }>();
+    const r = await worker.fetch(new Request(BASE + '/admin/payment-links', { headers: { cookie: owner } }));
+    expect(r.status).toBe(200);
+    const html = await r.text();
+    for (const s of ['plink_course', '$1,381.50 one-time', '100-Day Course', 'Link Buyer', 'account exists, no access given', 'plink_tutor', 'redirects to https://calendly.com/x', 'No completed payments.']) expect(html, s).toContain(s);
+    expect(calls.every((x) => x.method === 'GET')).toBe(true);
+    expect((await db.prepare('SELECT (SELECT COUNT(*) FROM enrollments) + (SELECT COUNT(*) FROM audit_log) AS n').first<{ n: number }>())!.n).toBe(before!.n);
+    await db.prepare("UPDATE settings SET value = '1' WHERE key = 'staff_passkeys'").run();
+  });
+});
