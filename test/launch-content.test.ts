@@ -2,6 +2,7 @@ import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import sql from '../migrations/0025_launch_content.sql';
 import v2 from '../migrations/0030_agreement_viewing_limit.sql';
+import v3 from '../migrations/0031_viewing_threshold_65.sql';
 import { statements } from '../src/lib/migrate';
 import { sha256Hex } from '../src/lib/auth';
 
@@ -46,6 +47,16 @@ describe('launch content (0025)', () => {
       expect(latest.body).toContain('each lecture can be viewed twice per enrollment, and I can watch each viewing to the end');
       expect(await sha256Hex(latest.body)).toBe(latest.body_hash);
       expect((await db.prepare("SELECT COUNT(*) AS n FROM agreements WHERE body LIKE '%viewed twice per enrollment%'").first<any>()).n).toBe(1);
+      // Version 3 (owner's final decision): counted at 65%; the Terms sentence follows. Running twice changes nothing.
+      for (const q of statements(v3)) await db.prepare(q).run();
+      for (const q of statements(v3)) await db.prepare(q).run();
+      const l3 = await db.prepare('SELECT body, body_hash, material FROM agreements ORDER BY id DESC LIMIT 1').first<any>();
+      expect(l3.body).toContain('A viewing counts as used once I have watched 65% of the lecture');
+      expect(l3.body).not.toContain('90%');
+      expect(await sha256Hex(l3.body)).toBe(l3.body_hash);
+      expect(l3.material).toBe(1);
+      expect(await val('terms_text')).toContain('A viewing is used once you have watched 65% of the lecture');
+      expect(await val('terms_text')).not.toContain('90%');
     } finally {
       await db.prepare("UPDATE settings SET value = 'development' WHERE key = 'db_environment'").run();
     }

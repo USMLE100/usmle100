@@ -98,7 +98,7 @@ launchCheck.get('/launch-check', async (c) => {
             <tbody>{qaViews.map((v: any) => (
               <><tr><td>ID {v.user_id}</td><td>{v.id}</td><td>{t(v.created_at)}</td><td>{t(v.started_at)}</td><td>{t(v.last_beat_at)}</td><td>{t(v.expires_at)}</td>
                 <td>{Math.round(v.watched_seconds)} s of {v.duration ? `${Math.round(v.duration)} s (${Math.round((100 * v.watched_seconds) / v.duration)}%)` : 'unknown length'}</td>
-                <td>{v.counted ? `yes (${v.counted_reason === 'expired' ? '24 h ended' : '90% reached'})` : 'no'}</td></tr>
+                <td>{v.counted ? `yes (${v.counted_reason === 'expired' ? '24 h ended' : '65% reached'})` : 'no'}</td></tr>
               {v.diag && <tr><td colSpan={8} class="small muted">Player: {v.diag}</td></tr>}</>
             ))}</tbody>
           </table></div>

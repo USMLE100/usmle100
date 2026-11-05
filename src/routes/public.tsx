@@ -926,7 +926,7 @@ const BookCheckout = (p: { user: any; owned: boolean; cancelled?: boolean; pendi
 /** Disclosed before checkout (R053 hides remaining counts in the portal until a lecture locks, so they're explained here). */
 const ViewingTerms = () => (
   <p class="small muted">
-    Lecture recordings stream in the portal only, with no downloads. Each lecture can be watched twice per enrollment; a viewing counts once you’ve watched 90% of it or 24
+    Lecture recordings stream in the portal only, with no downloads. Each lecture can be watched twice per enrollment; a viewing counts once you’ve watched 65% of it or 24
     hours after you press play. A viewing interrupted by a technical problem keeps its progress. Your account is for you alone and works on up to 2 registered devices.
   </p>
 );

@@ -117,7 +117,7 @@ app.get('/__staging', async (c) => {
       kind: v.kind,
       playback_started: !!v.started_at,
       watched: `${Math.round(v.watched_seconds)}s` + (v.duration ? ` of ${Math.round(v.duration)}s (${Math.round((100 * v.watched_seconds) / v.duration)}%)` : ', length not reported'),
-      counted_as_view: v.counted ? `yes (${v.counted_reason ?? ''})` : 'not yet (counts at 90% or after 24 h)',
+      counted_as_view: v.counted ? `yes (${v.counted_reason ?? ''})` : 'not yet (counts at 65% or after 24 h)',
       last_progress_report: v.last_beat_at ? new Date(v.last_beat_at * 1000).toISOString().slice(0, 19) + 'Z' : 'none',
     })),
     // What the lecture player last heard from Bunny's player (staging only): shows which step fails if progress isn't counted.

@@ -54,7 +54,7 @@ describe('launch check page', () => {
     const adminMenu = await (await worker.fetch(new Request(BASE + '/admin/lectures', { headers: { cookie: admin } }))).text();
     expect(adminMenu).not.toContain('href="/admin/launch-check"');
     for (const v of ['/admin/launch-check/', '/admin/launchcheck']) expect((await worker.fetch(new Request(BASE + v, { headers: { cookie: owner }, redirect: 'manual' }))).headers.get('location'), v).toBe('/admin/launch-check');
-    for (const s of ['QAVIEW1', '271 s of 300 s (90%)', 'yes (90% reached)', 'Question bank and Course Book', 'holidays', 'Thanksgiving', 'Active Stripe Payment Links', 'https://buy.stripe.com/old123', 'Lectures so far', 'QA test setup']) expect(html, s).toContain(s);
+    for (const s of ['QAVIEW1', '271 s of 300 s (90%)', 'yes (65% reached)', 'Question bank and Course Book', 'holidays', 'Thanksgiving', 'Active Stripe Payment Links', 'https://buy.stripe.com/old123', 'Lectures so far', 'QA test setup']) expect(html, s).toContain(s);
     // Read-only: only a GET list of payment links reaches Stripe; nothing is written.
     expect(calls).toEqual([{ url: 'https://api.stripe.com/v1/payment_links?active=true&limit=100', method: 'GET' }]);
     expect((await db.prepare('SELECT COUNT(*) AS n FROM audit_log').first<{ n: number }>())!.n).toBe(before!.n);

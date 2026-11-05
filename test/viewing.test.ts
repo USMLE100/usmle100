@@ -67,7 +67,7 @@ const beat = (cookie: string, c: any, tab: string, body: Record<string, unknown>
 /** Pretend the last progress report was long ago, so the 2×-speed limit allows a big jump. */
 const rewindBeat = (sid: string) => db.prepare('UPDATE view_sessions SET last_beat_at = last_beat_at - 1000 WHERE id = ?').bind(sid).run();
 const session = (sid: string) => db.prepare('SELECT * FROM view_sessions WHERE id = ?').bind(sid).first<any>();
-/** Watch 91 of 100 seconds in one session (a viewing is used at 90%). */
+/** Watch 91 of 100 seconds in one session (a viewing is used at 65%). */
 async function watchFull(cookie: string, lectureId: number | string, tab: string) {
   const c = await claim(cookie, lectureId, tab);
   expect(c.state, JSON.stringify(c)).toBe('ok');
@@ -88,8 +88,8 @@ describe('unique seconds', () => {
   });
 });
 
-describe('paid lectures: 2 views (watch it fully twice), 90% or 24 hours', () => {
-  it('a viewing starts at playback, ends at 90% unique content, and the 3rd viewing is locked', async () => {
+describe('paid lectures: 2 views (watch it fully twice), 65% or 24 hours', () => {
+  it('a viewing starts at playback, is used at 65% unique content, and the 3rd viewing is locked', async () => {
     const s = await account();
     await enroll(s.id, cohortA);
     const lec = await lecture(cohortA);
@@ -108,17 +108,17 @@ describe('paid lectures: 2 views (watch it fully twice), 90% or 24 hours', () =>
     const fast = await beat(s.cookie, c, tab, { add: [[0, 90]] });
     expect(fast.state).toBe('ok');
     expect((await session(c.sid)).watched_seconds).toBeLessThan(40);
-    // Rewatching the same part counts once; reaching 90% ends the viewing and marks the lecture watched.
+    // Rewatching the same part counts once; reaching 65% uses the viewing and marks the lecture watched.
     await rewindBeat(c.sid);
     expect((await beat(s.cookie, c, tab, { add: [[0, 30], [0, 30]] })).state).toBe('ok');
     await rewindBeat(c.sid);
-    expect((await beat(s.cookie, c, tab, { add: [[30, 66]], pos: 66 })).state).toBe('ok');
+    expect((await beat(s.cookie, c, tab, { add: [[30, 60]], pos: 60 })).state).toBe('ok');
     await rewindBeat(c.sid);
-    expect(await beat(s.cookie, c, tab, { add: [[66, 91]], pos: 91 })).toEqual({ state: 'done', reason: '65%', viewsLeft: 1 });
+    expect(await beat(s.cookie, c, tab, { add: [[60, 66]], pos: 66 })).toEqual({ state: 'done', reason: '65%', viewsLeft: 1 });
     expect(await db.prepare('SELECT completed_at FROM lecture_progress WHERE user_id = ? AND lecture_id = ?').bind(s.id, lec).first()).not.toBeNull();
     // The next viewing resumes where they stopped and no longer shows the first-time notice.
     const again = await claim(s.cookie, lec, tab);
-    expect(again).toMatchObject({ state: 'ok', first: false, pos: 91 });
+    expect(again).toMatchObject({ state: 'ok', first: false, pos: 66 });
     expect(again.sid).not.toBe(c.sid);
     await watchFull(s.cookie, lec, tab);
     const locked = await claim(s.cookie, lec, tab);
@@ -374,13 +374,13 @@ describe('additional view on request, and technical failures (owner, 2 Nov 2026)
     const c = await claim(s.cookie, lec, tab);
     await beat(s.cookie, c, tab, { playing: true });
     await rewindBeat(c.sid);
-    await beat(s.cookie, c, tab, { add: [[0, 70]], pos: 70 });
-    // Real watching (70 s counted by the server) + a live report: recorded, and the player is told to retry.
-    expect((await beat(s.cookie, c, tab, { failed: 'player-error', pos: 70 })).state).toBe('interrupted');
+    await beat(s.cookie, c, tab, { add: [[0, 60]], pos: 60 });
+    // Real watching (60 s counted by the server) + a live report: recorded, and the player is told to retry.
+    expect((await beat(s.cookie, c, tab, { failed: 'player-error', pos: 60 })).state).toBe('interrupted');
     expect((await session(c.sid)).failed_at).not.toBeNull();
     // Try again: the same viewing, same place, nothing used.
     const again = await claim(s.cookie, lec, tab);
-    expect(again).toMatchObject({ state: 'ok', sid: c.sid, pos: 70 });
+    expect(again).toMatchObject({ state: 'ok', sid: c.sid, pos: 60 });
     expect((await session(c.sid)).counted).toBe(0);
     // No automatic extension: the 24 hours still end the viewing as usual.
     await db.prepare('UPDATE view_sessions SET expires_at = ? WHERE id = ?').bind(Math.floor(Date.now() / 1000) - 1, c.sid).run();
@@ -406,8 +406,8 @@ describe('additional view on request, and technical failures (owner, 2 Nov 2026)
     expect((await beat(s.cookie, c, tab, { failed: 'whatever' })).state).toBe('ok');
     // A claimed lost connection needs a gap the server saw itself.
     await rewindBeat(c.sid);
-    await beat(s.cookie, c, tab, { add: [[0, 70]], pos: 70 });
-    expect((await beat(s.cookie, c, tab, { failed: 'offline', pos: 70 })).state).toBe('ok');
+    await beat(s.cookie, c, tab, { add: [[0, 60]], pos: 60 });
+    expect((await beat(s.cookie, c, tab, { failed: 'offline', pos: 60 })).state).toBe('ok');
     expect((await session(c.sid)).failed_at).toBeNull();
   });
 

@@ -105,7 +105,7 @@ function beat(){if(!S.sid||!S.frame){return}if(inflight){schedule(2000);return}i
   if(j.state==='tab'){teardown();block('tab','This lecture was opened in another tab or window, so it stopped here.',[{label:'Watch here instead',primary:true,fn:claim}]);return}
   if(j.state==='interrupted'){teardown();S.fail=null;block('failed','A technical problem interrupted playback. Your viewing and your progress are kept, and nothing was used up. Press Try again to continue where it stopped.',[{label:'Try again',primary:true,fn:claim}]);return}
   if(j.state==='done'){
-   // Used at 90%: the lecture keeps playing to the end, with a quiet "Lecture completed" note (owner, 4 Nov 2026).
+   // Used at 65%: the lecture keeps playing to the end, with a quiet "Lecture completed" note (owner, 4 Nov 2026).
    if(j.reason!=='expired'){S.completed=true;doneN.hidden=false;schedule(S.playing?30000:60000);return}
    teardown();S.sid=null;S.completed=false;doneN.hidden=true;block('done','This viewing has ended. Press Start lecture to continue where you stopped.',[{label:'Start lecture',primary:true,fn:claim}]);return}
   teardown();block('gone','This lecture is no longer available to you.')}).catch(function(){inflight=false;

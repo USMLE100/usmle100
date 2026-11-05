@@ -76,7 +76,7 @@ play.post('/play/claim', async (c) => {
     return src ? c.json({ state: 'ok', sid: 'open', nonce: t.nonce, src, ttl: videoLinkSeconds(c.env), pos: await lastPosition(db, user.id, item), first: false, wm: wm(t.nonce.slice(0, 9)) }) : c.json(unplayable);
   }
 
-  // Continuing a viewing that was just used at 90% (to finish the lecture, or after a pause expired its link): same viewing,
+  // Continuing a viewing that was just used at 65% (to finish the lecture, or after a pause expired its link): same viewing,
   // nothing new counted, only within its short continuation window. Otherwise a new viewing is opened as usual.
   if (typeof b.continue === 'string' && b.continue.length <= 32) {
     const prev = await db.prepare("SELECT * FROM view_sessions WHERE id = ? AND user_id = ? AND item = ? AND counted = 1 AND counted_reason = '65%'").bind(b.continue, user.id, item).first<Session>();

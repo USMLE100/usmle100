@@ -7,7 +7,7 @@
  *   'E:<id>'  an Evening Questions class — its subscribers, with no view limit (no owner decision sets one).
  *
  * - A viewing session's 24-hour window starts when playback actually begins. A session uses one view, once:
- *   when 90% (THRESHOLD) of the video's unique content has been watched in it (the session then ends), or when its
+ *   when 65% (THRESHOLD) of the video's unique content has been watched in it (the session then ends), or when its
  *   24 hours run out after playback began, however little was watched. Unstarted sessions never count.
  * - Only content actually played counts; replaying the same part in one session counts once. Seeking is free.
  * - One protected tab per account (all devices). Released by End Lecture, closing the tab, or 2 minutes of silence.
@@ -30,7 +30,7 @@ export const REQUESTABLE_EXTRA = 1;
  */
 export const MIN_WATCHED_FOR_INTERRUPTION = 60;
 /** A viewing is used once this share of the video's unique content has been watched in it (owner, 2 Nov 2026: watch each lecture fully twice). */
-export const THRESHOLD = 0.9;
+export const THRESHOLD = 0.65;
 export const WINDOW_SECONDS = 24 * 3600;
 export const TAB_RELEASE_SECONDS = 120;
 /** Fastest allowed playback speed (R055), used to reject impossible progress reports. */
@@ -230,11 +230,11 @@ export async function releaseTab(db: D1Database, userId: number, tab: string) {
 // ---------- Progress reports ----------
 
 /**
- * How long after a viewing is used at 90% it may still be continued to the end (and its expired link refreshed after a
- * pause): 30 minutes plus a tenth of the lecture, never past its 24 hours. Enough to finish the last 10%, not to rewatch.
+ * How long after a viewing is used at 65% it may still be continued to the end (and its expired link refreshed after a
+ * pause): 30 minutes plus the unwatched remainder of the lecture (35%), never past its 24 hours. Enough to finish, not to rewatch.
  */
 export const continueUntil = (s: Pick<Session, 'counted_at' | 'expires_at' | 'duration'>) =>
-  Math.min((s.counted_at ?? 0) + 30 * 60 + Math.ceil(0.1 * (s.duration ?? 0)), s.expires_at ?? 0);
+  Math.min((s.counted_at ?? 0) + 30 * 60 + Math.ceil((1 - THRESHOLD) * (s.duration ?? 0)), s.expires_at ?? 0);
 export const mayContinue = (s: Pick<Session, 'counted_at' | 'expires_at' | 'duration'>, t = epoch()) => !!s.counted_at && t < continueUntil(s);
 
 export type Beat = { sid: string; tab: string; nonce: string; playing: boolean; pos: number; dur: number; add: [number, number][]; failed?: string };
@@ -247,7 +247,7 @@ const savePos = (db: D1Database, userId: number, item: string, pos: number, t: n
 
 /**
  * Record a progress report from the player. Starts the 24-hour window on first playback, adds newly watched
- * seconds (no faster than 2× real time), saves the position, and uses the view at 90% (THRESHOLD).
+ * seconds (no faster than 2× real time), saves the position, and uses the view at 65% (THRESHOLD).
  * Uncounted videos (Evening classes) only keep the tab and position.
  */
 export async function recordBeat(db: D1Database, user: User, enr: Enrollment | null, b: Beat, diag: string | null = null): Promise<BeatResult> {
@@ -273,7 +273,7 @@ export async function recordBeat(db: D1Database, user: User, enr: Enrollment | n
   const s = await db.prepare('SELECT * FROM view_sessions WHERE id = ? AND user_id = ?').bind(b.sid, user.id).first<Session>();
   if (!s || s.item !== tab.item || a.kind !== s.kind || (a.kind === 'paid' && a.enrollmentId !== s.enrollment_id)) return { state: 'gone' };
   if (s.counted) {
-    // A viewing that has just been used at 90% keeps playing to the end (owner, 4 Nov 2026): its check-ins still hold the
+    // A viewing that has just been used at 65% keeps playing to the end (owner, 4 Nov 2026): its check-ins still hold the
     // one-tab slot and save the resume point, and access is still re-checked above. Nothing more is counted.
     if (s.counted_reason !== 'expired' && mayContinue(s, t)) {
       await db.batch([db.prepare('UPDATE play_tabs SET seen_at = ? WHERE user_id = ?').bind(t, user.id), ...(savePosNow ? [savePos(db, user.id, s.item, pos, t)] : [])]);

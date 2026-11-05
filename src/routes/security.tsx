@@ -450,7 +450,7 @@ security.get('/views', async (c) => {
       <h1>Lecture views</h1>
       {c.req.query('ok') && <Flash>Saved.</Flash>}
       {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
-      <p class="muted">Paid lectures: 2 views per lecture for each enrollment. Free lectures: 2 views. A view is used at 90% watched or when a started viewing’s 24 hours end; a viewing interrupted by a technical problem keeps its progress and doesn’t give a view back; if it cost the student their views, their request shows “technical interruption recorded”. Students can request one additional view per lecture, which you approve here or on your dashboard. Only the owner can give extra views; every change is logged.</p>
+      <p class="muted">Paid lectures: 2 views per lecture for each enrollment. Free lectures: 2 views. A view is used at 65% watched or when a started viewing’s 24 hours end; a viewing interrupted by a technical problem keeps its progress and doesn’t give a view back; if it cost the student their views, their request shows “technical interruption recorded”. Students can request one additional view per lecture, which you approve here or on your dashboard. Only the owner can give extra views; every change is logged.</p>
       <section class="card stack">
         <h2 style="margin:0">Requests for an additional view</h2>
         {requests.length === 0 ? (
