@@ -100,7 +100,17 @@ describe('real-world viewing sequence (5-minute lecture)', () => {
     const r = await post('/play/beat', cookie, { sid: c.sid, nonce: c.nonce, tab: 'dddddddddddd', playing: false, pos: 0, dur: 0, add: [], diag });
     expect(r.state).toBe('ok');
     const row = await db.prepare('SELECT diag FROM view_sessions WHERE id = ?').bind(c.sid).first<{ diag: string }>();
-    expect(row!.diag).toMatch(/^lib loaded · direct not ready · messages 0 · events \{\} · origins {2}· /);
+    expect(row!.diag).toMatch(/^lib loaded · direct not ready · messages 0 · events \{\} · answers 0 · subscribes 0 · other 0 · origins {2}· /);
     expect(row!.diag).not.toMatch(/@|example\.com/);
+  });
+});
+
+describe('lecture player progress fallback (iPad Safari, 4 Nov 2026)', () => {
+  it('the lecture page subscribes again until events arrive and asks the player for its time when none come', async () => {
+    const html = await (await worker.fetch(new Request(BASE + `/lectures/${lec}`, { headers: { cookie } }))).text();
+    expect(html).toContain('function subscribe()');
+    expect(html).toMatch(/\[1500,4000,10000,20000\]/);
+    expect(html).toContain("cmd('getCurrentTime',undefined,'g1')");
+    expect(html).toContain("d.event==='getCurrentTime'");
   });
 });

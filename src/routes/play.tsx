@@ -121,7 +121,7 @@ play.post('/play/beat', async (c) => {
     const ev = d.ev && typeof d.ev === 'object' ? Object.entries(d.ev as Record<string, unknown>).slice(0, 8).map(([k, v]) => `${String(k).slice(0, 12)}:${Number(v) || 0}`).join(',') : '';
     const ua = (c.req.header('user-agent') ?? '').replace(/\s+/g, ' ');
     const device = /iPad|Macintosh.*Mobile|Macintosh.*Safari(?!.*Chrome)/.test(ua) && /Mobile|Macintosh/.test(ua) ? (/iPad/.test(ua) ? 'iPad' : /Mobile/.test(ua) ? 'iPad/iPhone' : 'Mac/iPad Safari') : /iPhone/.test(ua) ? 'iPhone' : /Android/.test(ua) ? 'Android' : /Chrome/.test(ua) ? 'Chrome' : 'other';
-    diagLine = `lib ${d.lib === true ? 'loaded' : 'NOT loaded'}${d.libReady === true ? '+ready' : ''} · direct ${d.rawReady === true ? 'ready' : 'not ready'} · messages ${Number(d.msgs) || 0} · events {${ev}} · origins ${Array.isArray(d.origins) ? d.origins.slice(0, 3).map((o) => String(o).replace(/^https?:\/\//, '').slice(0, 40)).join(' ') : ''} · ${device}`.slice(0, 400);
+    diagLine = `lib ${d.lib === true ? 'loaded' : 'NOT loaded'}${d.libReady === true ? '+ready' : ''} · direct ${d.rawReady === true ? 'ready' : 'not ready'} · messages ${Number(d.msgs) || 0} · events {${ev}} · answers ${Number(d.answers) || 0} · subscribes ${Number(d.subs) || 0} · other ${Number(d.other) || 0}${d.sample ? ' (' + String(d.sample).replace(/[^\w,:. -]/g, '').slice(0, 40) + ')' : ''} · origins ${Array.isArray(d.origins) ? d.origins.slice(0, 3).map((o) => String(o).replace(/^https?:\/\//, '').slice(0, 40)).join(' ') : ''} · ${device}`.slice(0, 400);
   }
   const result = await recordBeat(c.env.DB, user, c.get('enrollment'), beat, diagLine);
   // Staging only: keep what the page heard from Bunny's player (counts and flags only, no personal data).

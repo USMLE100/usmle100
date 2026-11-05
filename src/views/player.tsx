@@ -35,7 +35,7 @@ var root=document.getElementById('pp');if(!root||root.dataset.init)return;root.d
 var ITEM=root.dataset.item,box=root.querySelector('.pp-frame'),wm=root.querySelector('.pp-wm'),faint=root.querySelector('.pp-wm-faint'),ov=root.querySelector('.pp-overlay'),msg=root.querySelector('.pp-msg'),acts=root.querySelector('.pp-actions'),endB=root.querySelector('[data-pp-end]'),fsB=root.querySelector('[data-pp-fs]'),stage=root.querySelector('.pp-stage');
 function rand(){var a=new Uint8Array(12);crypto.getRandomValues(a);return Array.prototype.map.call(a,function(b){return('0'+b.toString(16)).slice(-2)}).join('')}
 var TAB;try{TAB=sessionStorage.getItem('u100tab');if(!TAB){TAB=rand();sessionStorage.setItem('u100tab',TAB)}}catch(e){TAB=rand()}
-var D={lib:false,libReady:false,rawReady:false,msgs:0,ev:{},origins:[]};
+var D={lib:false,libReady:false,rawReady:false,msgs:0,ev:{},origins:[],other:0,sample:'',subs:0,answers:0};
 var S={sid:null,nonce:null,frame:null,origin:'',ready:false,playing:false,last:null,ranges:[],pos:0,dur:0,okAt:Date.now(),block:null,resume:0,wasPlaying:false,timer:null,lid:0};
 function post(u,b){return fetch(u,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(b)})}
 function show(t,buttons){msg.textContent=t;acts.innerHTML='';(buttons||[]).forEach(function(b){var x=document.createElement(b.href?'a':'button');x.className='btn '+(b.primary?'btn-primary':'btn-outline');x.textContent=b.label;if(b.href)x.href=b.href;else{x.type='button';x.onclick=b.fn}acts.appendChild(x)});ov.hidden=false}
@@ -61,10 +61,20 @@ function handle(j){
 function load(src){unblock();S.origin=new URL(src).origin;var f=document.createElement('iframe');f.src=src;f.title=root.dataset.title||'Lecture';f.setAttribute('allow',"autoplay; encrypted-media; picture-in-picture 'none'; fullscreen 'none'; display-capture 'none'");
 // Sealed frame: the video player can run, but cannot open windows or tabs, download files, cast, or navigate this page.
 f.setAttribute('sandbox','allow-scripts allow-same-origin');f.setAttribute('referrerpolicy','strict-origin');box.appendChild(f);S.frame=f;libAttach(f);endB.hidden=false;var fs=stage.requestFullscreen||stage.webkitRequestFullscreen;fsB.hidden=!fs;schedule(1000)}
-addEventListener('message',function(e){if(!S.frame)return;var d=e.data;if(typeof d==='string'){try{d=JSON.parse(d)}catch(x){return}}if(!d||d.context!=='player.js')return;D.msgs++;if(D.origins.indexOf(e.origin)<0&&D.origins.length<4)D.origins.push(e.origin);if(e.source!==S.frame.contentWindow&&e.origin!==S.origin)return;
- if(d.event==='ready'){D.rawReady=true;S.ready=true;['play','pause','timeupdate','ended','error'].forEach(function(ev,i){cmd('addEventListener',ev,'u'+i)});if(S.resume>5)cmd('setCurrentTime',S.resume);return}
+addEventListener('message',function(e){if(!S.frame)return;var d=e.data;if(typeof d==='string'){try{d=JSON.parse(d)}catch(x){if(e.origin===S.origin){D.other++;if(!D.sample)D.sample=String(e.data).slice(0,40)}return}}if(!d||d.context!=='player.js'){if(e.origin===S.origin){D.other++;if(!D.sample)try{D.sample=Object.keys(d||{}).slice(0,6).join(',')}catch(x){}}return}D.msgs++;if(D.origins.indexOf(e.origin)<0&&D.origins.length<4)D.origins.push(e.origin);if(e.source!==S.frame.contentWindow&&e.origin!==S.origin)return;
+ if(d.event==='ready'){D.rawReady=true;S.ready=true;subscribe();
+  // On some devices (iPad Safari) a subscription sent the instant the player says "ready" is lost: repeat it until events arrive.
+  [1500,4000,10000,20000].forEach(function(ms){setTimeout(function(){if(S.frame&&!Object.keys(D.ev).length)subscribe()},ms)});
+  if(S.resume>5)cmd('setCurrentTime',S.resume);return}
+ // Answers to our progress questions (see poll): where the video is, whether it is paused, how long it is.
+ if(d.event==='getCurrentTime'||d.listener==='g1'){D.answers++;var tt=+d.value;if(isFinite(tt)&&!S.pollPaused)onEv('timeupdate',{seconds:tt,duration:S.dur||0},true);return}
+ if(d.event==='getPaused'||d.listener==='g2'){D.answers++;var pz=d.value===true||d.value==='true';if(pz&&!S.pollPaused&&S.playing)onEv('pause',null,true);S.pollPaused=pz;return}
+ if(d.event==='getDuration'||d.listener==='g3'){D.answers++;var du=+d.value;if(du>0)S.dur=du;return}
  onEv(d.event,d.value)});
-function onEv(ev,v){D.ev[ev]=(D.ev[ev]||0)+1;
+function subscribe(){D.subs++;['play','pause','timeupdate','ended','error'].forEach(function(ev,i){cmd('addEventListener',ev,'u'+i)})}
+// Fallback when the player sends no time updates: ask it every second where the video is (stops as soon as real updates arrive).
+setInterval(function(){if(!S.frame||!(D.rawReady||D.libReady)||S.block||document.visibilityState==='hidden')return;if(S.tuAt&&Date.now()-S.tuAt<2500)return;if(!S.dur)cmd('getDuration',undefined,'g3');cmd('getPaused',undefined,'g2');cmd('getCurrentTime',undefined,'g1')},1000);
+function onEv(ev,v,polled){if(!polled){D.ev[ev]=(D.ev[ev]||0)+1;if(ev==='timeupdate')S.tuAt=Date.now()}
  // A real playback error (not 'unknown command' 2 or 'autoplay blocked' 5) is a technical failure.
  if(ev==='error'){var code=v&&v.code;if(code!==2&&code!==5&&S.sid&&!S.fail){S.fail='player-error';schedule(0)}return}
  if(ev==='play'){if(S.block||document.visibilityState==='hidden'){cmd('pause');return}
