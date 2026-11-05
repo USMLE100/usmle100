@@ -1,13 +1,14 @@
 const R = (s) => console.log('RESULT ' + s);
 (async () => {
-  const out = [];
-  for (const p of ['/', '/programs', '/sign-in', '/sign-up', '/dashboard', '/terms', '/privacy', '/refund-policy']) {
-    const r = await fetch('https://usmle100.com' + p, { redirect: 'manual' });
-    out.push(`${p} ${r.status}`);
+  let all = '';
+  for (const p of ['/', '/programs', '/faq', '/terms', '/refund-policy', '/sitemap.xml', '/robots.txt']) {
+    const r = await fetch('https://usmle100.com' + p);
+    all += (await r.text());
   }
-  R(out.join(' · '));
-  const t = (await (await fetch('https://usmle100.com/programs')).text()).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-  const m = t.match(/[^.]{0,60}November \d+, 2026[^.]{0,40}/g) || [];
-  R('programs dates: ' + (m.join(' | ') || 'no November date shown').slice(0, 130));
-  R('Nov 2 mentioned: ' + /November 2, 2026/.test(t) + ' · Nov 9 mentioned: ' + /November 9, 2026/.test(t) + ' · error page: ' + /Something went wrong/.test(t));
+  const t = all.replace(/<[^>]+>/g, ' ');
+  R('public $1,500: ' + /\$1,500/.test(t) + ' · $1,300: ' + /1,300|1300\.00/.test(t) + ' · $1,381.50: ' + /1,381|1381/.test(t) + ' · buy.stripe.com links: ' + /buy\.stripe\.com/.test(all));
+  for (const p of ['/admin/payment-links', '/admin/launch-check']) {
+    const r = await fetch('https://usmle100.com' + p, { redirect: 'manual' });
+    R(`${p} signed out: ${r.status} -> ${r.headers.get('location')}`);
+  }
 })();
