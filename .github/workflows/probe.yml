@@ -1,6 +1,6 @@
 name: probe-route-check
 on: { push: { branches: [probe-route-check] } }
-permissions: { statuses: write, contents: read }
+permissions: { statuses: write, contents: write }
 jobs:
   capture:
     runs-on: ubuntu-latest
@@ -13,5 +13,9 @@ jobs:
           npm i --no-save playwright@1.48.2 >/dev/null 2>&1 && npx playwright install --with-deps chromium >/dev/null 2>&1
           node .github/capture.cjs || true
           ls -la cap | head -50
-      - uses: actions/upload-artifact@v4
-        with: { name: capture, path: cap, retention-days: 3 }
+      - name: Store the capture on this branch (reference files only)
+        run: |
+          rm -rf cap/*-video
+          find cap -size +3M -delete
+          git config user.email noreply@anthropic.com; git config user.name Claude
+          git add cap && git commit -qm "Reference capture of original V12 and Build v4 pages" && git push -q origin HEAD:probe-route-check

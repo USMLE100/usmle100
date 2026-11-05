@@ -9,7 +9,7 @@ const sites = [
   const b = await chromium.launch();
   for (const [tag, url] of sites) {
     for (const [vw, vh, dev] of [[390, 844, 'mobile'], [1440, 900, 'desktop']]) {
-      const ctx = await b.newContext({ viewport: { width: vw, height: vh }, recordVideo: dev === 'desktop' ? { dir: `cap/${tag}-video`, size: { width: 1280, height: 800 } } : undefined });
+      const ctx = await b.newContext({ viewport: { width: vw, height: vh },  });
       const p = await ctx.newPage();
       const saved = new Set();
       p.on('response', async (r) => {
