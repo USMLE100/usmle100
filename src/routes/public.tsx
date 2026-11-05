@@ -195,8 +195,8 @@ const FAQ = (p: { start: string | null }) => {
     ['How long is the program?', `100 days: 90 weekday lecture days, then a 10-weekday exam window.${p.start ? ` The next cohort starts on ${p.start}.` : ''}`],
     ['How long can I watch the lecture recordings?', 'Until 60 days after the last day of your program (Day 100).'],
     [
-      'How many times can I watch each recording?',
-      'Recordings stream in your portal only; they can’t be downloaded. Each lecture can be watched twice per enrollment. A viewing counts once you’ve watched 90% of it, or 24 hours after you press play, and you can pause and come back within those 24 hours. If a technical problem interrupts a viewing, your progress is kept and you can continue where it stopped. Your name and account number appear on the video, and your account works on up to 2 registered devices.',
+      'Can I download the recordings?',
+      'No. Recordings stream in your portal only, and your name and account number appear on the video. Your progress is saved, so you can pause and continue where you stopped. Your account works on up to 2 registered devices, and viewing limits are set out in the Terms of Service.',
     ],
     ['How do Evening Questions work?', 'Live question sessions on Monday, Wednesday and Friday evenings. Each month covers the next 12 classes from your start date, and you can rewatch them until 2 days after the 12th class goes up. Companion, Complete and MAX include 4 months.'],
     ['How many tutoring sessions are included?', 'Complete includes 10 private one-on-one sessions and MAX includes 40, each 60 minutes. Extra sessions are $50 each.'],

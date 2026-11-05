@@ -114,3 +114,51 @@ describe('lecture player progress fallback (iPad Safari, 4 Nov 2026)', () => {
     expect(html).toContain("d.event==='getCurrentTime'");
   });
 });
+
+describe('uninterrupted playback after 90% (owner, 4 Nov 2026)', () => {
+  it('a viewing used at 90% keeps its tab and resume point, can be continued to the end, and only within its short window', async () => {
+    const lec3 = Number((await db.prepare("INSERT INTO lectures (cohort_id, day_number, title, status, bunny_video_id, duration_seconds) SELECT cohort_id, 3, 'Continue', 'live', 'vid-c', 300 FROM lectures WHERE id = ?").bind(lec).run()).meta.last_row_id);
+    const item = `L:${lec3}`;
+    await release('dddddddddddd', 0); // the diagnostics test above still holds the one-tab slot
+    const c = await post('/play/claim', cookie, { item, tab: 'cccccccccccc' });
+    expect(c.state).toBe('ok');
+    const r = await play(c, 'cccccccccccc', 0, 280);
+    expect(r.state).toBe('done'); // used at 90%; the player keeps playing
+    // Playing on to 100%: check-ins still answer, keep the one-tab slot (another tab is refused) and save the position.
+    await elapse(c.sid, 30);
+    const more = await post('/play/beat', cookie, { sid: c.sid, nonce: c.nonce, tab: 'cccccccccccc', playing: true, pos: 300, dur: LEN, add: [[280, 300]] });
+    expect(more.state).toBe('done');
+    expect((await post('/play/claim', cookie, { item, tab: 'cccccccccc99' })).state).not.toBe('ok');
+    expect((await db.prepare('SELECT seconds FROM video_positions WHERE user_id = ? AND item = ?').bind(uid, item).first<any>()).seconds).toBeGreaterThanOrEqual(270);
+    // After a long pause the link is refreshed for the SAME viewing (nothing new counted).
+    await release('cccccccccccc', 300);
+    const cont = await post('/play/claim', cookie, { item, tab: 'cccccccccccc', continue: c.sid });
+    expect(cont).toMatchObject({ state: 'ok', sid: c.sid, completed: true });
+    expect((await db.prepare('SELECT COUNT(*) AS n FROM view_sessions WHERE user_id = ? AND item = ? AND counted = 1').bind(uid, item).first<any>()).n).toBe(1); // still one view used
+    // Past its window (30 min + 10% of the lecture), continuing opens no extra time: a new viewing starts as usual.
+    await db.prepare('UPDATE view_sessions SET counted_at = counted_at - 7200 WHERE id = ?').bind(c.sid).run();
+    await release('cccccccccccc', 300);
+    const later = await post('/play/claim', cookie, { item, tab: 'cccccccccccc', continue: c.sid });
+    expect(later.state).toBe('ok');
+    expect(later.sid).not.toBe(c.sid);
+    expect(later.completed).toBeUndefined();
+    // Someone else's viewing id can never be continued.
+    await release('cccccccccccc', 0);
+    const other = await post('/play/claim', cookie, { item, tab: 'cccccccccccc', continue: 'NOTMINE12' });
+    expect(other.sid).not.toBe('NOTMINE12');
+  });
+
+  it('students see neutral wording; the limits stay disclosed before purchase', async () => {
+    const page = await (await worker.fetch(new Request(BASE + `/lectures/${lec}`, { headers: { cookie } }))).text();
+    expect(page).toContain('Lecture completed');
+    expect(page).toContain('Your lecture access has been completed');
+    expect(page).not.toMatch(/watched twice|views left|both views|another view|Request additional view/);
+    const home = await (await worker.fetch(new Request(BASE + '/'))).text();
+    const programs = await (await worker.fetch(new Request(BASE + '/programs'))).text();
+    for (const h of [home, programs]) expect(h).not.toMatch(/watched twice|2 views/);
+    const email = `buyer-${Date.now()}@example.com`;
+    const su = await worker.fetch(new Request(BASE + '/sign-up', { method: 'POST', redirect: 'manual', body: new URLSearchParams({ ...SIGNUP, email, password: 'correct-horse-battery' }), headers: { origin: BASE, 'sec-fetch-site': 'same-origin', 'content-type': 'application/x-www-form-urlencoded' } }));
+    const enroll = await (await worker.fetch(new Request(BASE + '/enroll', { headers: { cookie: cookies(su) } }))).text();
+    expect(enroll).toMatch(/watched twice per enrollment/); // the purchase page still discloses the limit
+  });
+});

@@ -829,6 +829,8 @@ fieldset.bare legend { padding: 0; margin-bottom: 12px; }
 .pp-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 .pp-actions .btn-outline { color: #fff; border-color: rgba(255, 255, 255, 0.6); background: transparent; }
 .pp-bar { display: flex; gap: 8px; flex-wrap: wrap; }
+.pp-done { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; color: var(--green); padding: 6px 4px; }
+.pp-done[hidden] { display: none; }
 @media (max-width: 520px) { .pp-msg { font-size: 13px; } .pp-wm { font-size: 10.5px; } }
 @media print { .pp, .book-reader { display: none !important; } }
 

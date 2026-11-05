@@ -1,6 +1,7 @@
 import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import sql from '../migrations/0025_launch_content.sql';
+import v2 from '../migrations/0030_agreement_viewing_limit.sql';
 import { statements } from '../src/lib/migrate';
 import { sha256Hex } from '../src/lib/auth';
 
@@ -37,6 +38,14 @@ describe('launch content (0025)', () => {
       expect(await sha256Hex(ags[0].body)).toBe(ags[0].body_hash);
       expect(ags[0].body).not.toMatch(/date of birth|\*\*/);
       for (const t of [await val('terms_text'), await val('privacy_text'), await val('refund_text')]) expect(t).not.toMatch(/\*\*|\[BUSINESS|\[STATE|1,400/);
+      // Version 2 adds the viewing limit to the agreement itself, once, as a material change; never over an owner edit.
+      for (const q of statements(v2)) await db.prepare(q).run();
+      for (const q of statements(v2)) await db.prepare(q).run();
+      const latest = await db.prepare('SELECT body, body_hash, material FROM agreements ORDER BY id DESC LIMIT 1').first<any>();
+      expect(latest.material).toBe(1);
+      expect(latest.body).toContain('each lecture can be viewed twice per enrollment, and I can watch each viewing to the end');
+      expect(await sha256Hex(latest.body)).toBe(latest.body_hash);
+      expect((await db.prepare("SELECT COUNT(*) AS n FROM agreements WHERE body LIKE '%viewed twice per enrollment%'").first<any>()).n).toBe(1);
     } finally {
       await db.prepare("UPDATE settings SET value = 'development' WHERE key = 'db_environment'").run();
     }

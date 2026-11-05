@@ -10,7 +10,7 @@ import { Icon } from '../views/icons';
 import { ProtectedPlayer } from '../views/player';
 import { clock } from '../lib/catalog';
 import { reportSharing } from '../lib/devices';
-import { REQUESTABLE_EXTRA, claimTab, lastPosition, openOrCreate, parseKey, profileComplete, recordBeat, releaseTab, resolve, sourceVideo, viewState, type Beat, type FreeRow } from '../lib/viewing';
+import { REQUESTABLE_EXTRA, claimTab, lastPosition, mayContinue, openOrCreate, parseKey, profileComplete, recordBeat, releaseTab, resolve, sourceVideo, viewState, type Beat, type FreeRow, type Session } from '../lib/viewing';
 
 /**
  * Protected playback (lib/viewing) and the members' Free Lectures pages. Mounted before the portal router,
@@ -28,10 +28,12 @@ async function body(c: Context<AppEnv>): Promise<any> {
 const noStore = (c: Context<AppEnv>) => c.header('Cache-Control', 'no-store');
 const ip = (c: Context<AppEnv>) => c.req.header('cf-connecting-ip') ?? null;
 
+// Shown once before a student's first viewing of each kind. The viewing limits themselves are set out in the Terms and
+// Student Agreement, which every student accepts before buying (owner, 4 Nov 2026: not repeated around the portal).
 const NOTICE_PAID =
-  'Before you start: each lecture can be watched twice. A viewing lasts 24 hours from when you press play. It counts as one view when you have watched 90% of the lecture, or when its 24 hours end. You can pause, press End Lecture and come back within those 24 hours without using another view. If a technical problem interrupts a viewing, your progress is kept and you can continue where it stopped. Lectures are for you alone: your name and account number appear on the video, and recording or sharing them is not allowed.';
+  'Before you start: lectures are for you alone. Your name and account number appear on the video, and recording or sharing it is not allowed. Your progress is saved, so you can pause, press End Lecture and come back to continue where you stopped. Viewing limits are set out in your Student Agreement and the Terms of Service.';
 const NOTICE_FREE =
-  'Before you start: each free lecture can be watched 2 times. A viewing lasts 24 hours from when you press play. It counts as one view when you have watched 90% of the video, or when its 24 hours end. You can pause, press End Lecture and come back within those 24 hours without using another view. If a technical problem interrupts a viewing, your progress is kept and you can continue where it stopped. Your name and account number appear on the video, and recording or sharing it is not allowed.';
+  'Before you start: this video is for you alone. Your name and account number appear on it, and recording or sharing it is not allowed. Your progress is saved, so you can pause and come back to continue where you stopped. Viewing limits are set out in the Terms of Service.';
 
 const where = (c: Context<AppEnv>) => ({ device: c.get('session')?.deviceHash ?? null, ip: ip(c) });
 
@@ -74,6 +76,19 @@ play.post('/play/claim', async (c) => {
     return src ? c.json({ state: 'ok', sid: 'open', nonce: t.nonce, src, ttl: videoLinkSeconds(c.env), pos: await lastPosition(db, user.id, item), first: false, wm: wm(t.nonce.slice(0, 9)) }) : c.json(unplayable);
   }
 
+  // Continuing a viewing that was just used at 90% (to finish the lecture, or after a pause expired its link): same viewing,
+  // nothing new counted, only within its short continuation window. Otherwise a new viewing is opened as usual.
+  if (typeof b.continue === 'string' && b.continue.length <= 32) {
+    const prev = await db.prepare("SELECT * FROM view_sessions WHERE id = ? AND user_id = ? AND item = ? AND counted = 1 AND counted_reason = '65%'").bind(b.continue, user.id, item).first<Session>();
+    const scopeOk = prev && prev.kind === r.access.kind && (r.access.kind !== 'paid' || prev.enrollment_id === r.access.enrollmentId);
+    if (prev && scopeOk && mayContinue(prev)) {
+      const t = await claimTab(db, user.id, tab, item, prev.id, where(c));
+      if (!t.ok) return busy(c, user.id, t, item);
+      const src = await link();
+      if (!src) return c.json(unplayable);
+      return c.json({ state: 'ok', sid: prev.id, nonce: t.nonce, src, ttl: videoLinkSeconds(c.env), pos: await lastPosition(db, user.id, item), first: false, completed: true, wm: wm(prev.id) });
+    }
+  }
   const v = await openOrCreate(db, user.id, item, r.access);
   if (!v.session) {
     const requested = !!(await db.prepare('SELECT 1 FROM view_requests WHERE user_id = ? AND item = ? AND resolved_at IS NULL').bind(user.id, item).first());

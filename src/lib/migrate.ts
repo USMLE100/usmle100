@@ -26,6 +26,7 @@ import m0025 from '../../migrations/0025_launch_content.sql';
 import m0026 from '../../migrations/0026_detach_declined.sql';
 import m0027 from '../../migrations/0027_qa_test_cohort.sql';
 import m0029 from '../../migrations/0029_view_diag.sql';
+import m0030 from '../../migrations/0030_agreement_viewing_limit.sql';
 
 /**
  * Database migrations run by the Worker itself on first request, so deploys
@@ -60,6 +61,7 @@ const MIGRATIONS: [string, string][] = [
   ['0026_detach_declined', m0026],
   ['0027_qa_test_cohort', m0027],
   ['0029_view_diag', m0029],
+  ['0030_agreement_viewing_limit', m0030],
 ];
 
 export function statements(sql: string): string[] {

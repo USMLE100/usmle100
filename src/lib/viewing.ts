@@ -120,6 +120,7 @@ export type Session = {
   id: string; user_id: number; item: string; kind: Kind; enrollment_id: number | null; created_at: number; started_at: number | null;
   expires_at: number | null; last_beat_at: number | null; duration: number | null; watched_seconds: number; seen: string; counted: number; counted_reason: string | null;
   failed_at?: number | null;
+  counted_at?: number | null;
 };
 
 const isCounted = (a: Access) => a.kind === 'paid' || a.kind === 'free';
@@ -228,6 +229,14 @@ export async function releaseTab(db: D1Database, userId: number, tab: string) {
 
 // ---------- Progress reports ----------
 
+/**
+ * How long after a viewing is used at 90% it may still be continued to the end (and its expired link refreshed after a
+ * pause): 30 minutes plus a tenth of the lecture, never past its 24 hours. Enough to finish the last 10%, not to rewatch.
+ */
+export const continueUntil = (s: Pick<Session, 'counted_at' | 'expires_at' | 'duration'>) =>
+  Math.min((s.counted_at ?? 0) + 30 * 60 + Math.ceil(0.1 * (s.duration ?? 0)), s.expires_at ?? 0);
+export const mayContinue = (s: Pick<Session, 'counted_at' | 'expires_at' | 'duration'>, t = epoch()) => !!s.counted_at && t < continueUntil(s);
+
 export type Beat = { sid: string; tab: string; nonce: string; playing: boolean; pos: number; dur: number; add: [number, number][]; failed?: string };
 export type BeatResult = { state: 'ok'; watchedPct: number; expiresAt: number | null } | { state: 'done'; reason: '65%' | 'expired'; viewsLeft?: number } | { state: 'tab' } | { state: 'gone' } | { state: 'interrupted' };
 
@@ -263,7 +272,14 @@ export async function recordBeat(db: D1Database, user: User, enr: Enrollment | n
   const a = r.access;
   const s = await db.prepare('SELECT * FROM view_sessions WHERE id = ? AND user_id = ?').bind(b.sid, user.id).first<Session>();
   if (!s || s.item !== tab.item || a.kind !== s.kind || (a.kind === 'paid' && a.enrollmentId !== s.enrollment_id)) return { state: 'gone' };
-  if (s.counted) return { state: 'done', reason: s.counted_reason === 'expired' ? 'expired' : '65%' };
+  if (s.counted) {
+    // A viewing that has just been used at 90% keeps playing to the end (owner, 4 Nov 2026): its check-ins still hold the
+    // one-tab slot and save the resume point, and access is still re-checked above. Nothing more is counted.
+    if (s.counted_reason !== 'expired' && mayContinue(s, t)) {
+      await db.batch([db.prepare('UPDATE play_tabs SET seen_at = ? WHERE user_id = ?').bind(t, user.id), ...(savePosNow ? [savePos(db, user.id, s.item, pos, t)] : [])]);
+    }
+    return { state: 'done', reason: s.counted_reason === 'expired' ? 'expired' : '65%' };
+  }
   // A technical interruption keeps this viewing open (same progress, same place). It is recorded, once per viewing and only
   // on the server's own evidence of real watching, so the owner can see it if the student later asks for another view.
   if (b.failed && !s.failed_at && s.started_at && s.watched_seconds >= MIN_WATCHED_FOR_INTERRUPTION && s.last_beat_at) {
