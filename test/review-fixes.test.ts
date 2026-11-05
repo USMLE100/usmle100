@@ -115,6 +115,14 @@ describe('pre-launch review fixes', () => {
     }
   });
 
+  it('plain http is redirected to https (and http form posts refused); local development is unaffected', async () => {
+    const r = await worker.fetch(new Request('http://usmle100.test/programs?x=1', { redirect: 'manual' }));
+    expect(r.status).toBe(301);
+    expect(r.headers.get('location')).toBe('https://usmle100.test/programs?x=1');
+    expect((await worker.fetch(new Request('http://usmle100.test/sign-in', { method: 'POST', body: 'a=1', headers: { 'content-type': 'application/x-www-form-urlencoded' } }))).status).toBe(400);
+    expect((await worker.fetch(new Request('http://127.0.0.1/programs', { redirect: 'manual' }))).status).toBe(200);
+  });
+
   it('sign-in never sends people to another site', async () => {
     const a = await acct('redir');
     for (const next of ['/\\evil.example', '//evil.example', '/\tevil']) {
