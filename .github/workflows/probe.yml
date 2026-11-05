@@ -1,0 +1,20 @@
+name: probe-route-check
+on: { push: { branches: [probe-route-check] } }
+permissions: { statuses: write, contents: read }
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read-only, signed-out requests to the live site
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          r=""
+          for p in / /admin /admin/launch-check /admin/launchcheck /admin/launch-check/ /admin/lectures /definitely-not-a-page; do
+            o=$(curl -s -o /dev/null -w "%{http_code}>%{redirect_url}" "https://usmle100.com$p")
+            r="$r $p=$o;"
+          done
+          echo "$r"
+          gh api repos/${{ github.repository }}/statuses/${{ github.sha }} -f state=success -f context=probe -f description="$(echo "$r" | sed 's#https://usmle100.com##g' | cut -c1-138)"
+          r2=""
+          for p in /admin/launch-check /admin/launchcheck; do r2="$r2 $p=$(curl -s -D - -o /dev/null "https://usmle100.com$p" | grep -i -E '^(cache-control|cf-cache-status|age):' | tr -d '\r' | tr '\n' ' ')"; done
+          gh api repos/${{ github.repository }}/statuses/${{ github.sha }} -f state=success -f context=probe-headers -f description="$(echo "$r2" | cut -c1-138)"
