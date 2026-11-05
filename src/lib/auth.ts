@@ -3,6 +3,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { AppEnv, Enrollment, User } from './types';
 import { isAdmin, isOwner, isStaff } from './types';
 import { audit } from './audit';
+import { courseOpen, exemptAlreadyEnded } from './content';
 
 const COOKIE = 'u100_session';
 const PBKDF2_ITERATIONS = 100_000; // Workers' maximum
@@ -134,14 +135,21 @@ export async function loadUser(c: Context<AppEnv>, next: Next) {
       if (c.req.path !== '/session/status' && t - seen >= 120) {
         await c.env.DB.prepare('UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?').bind(t, th).run();
       }
-      const enr = await c.env.DB.prepare(
-        `SELECT e.id, e.package_id, e.cohort_id, e.status, p.name AS package_name, p.one_on_one_sessions, p.evening_q_months, e.lectures_until
-         FROM enrollments e JOIN packages p ON p.id = e.package_id
-         WHERE e.user_id = ? AND e.status = 'active' AND e.suspended_at IS NULL ORDER BY e.paid_at DESC LIMIT 1`,
-      )
-        .bind(user.id)
-        .first<Enrollment>();
-      c.set('enrollment', enr ?? null);
+      // Paid course access (lectures, Qbank, materials) ends together on Day 160 or the owner's date. After that the
+      // student keeps their account and purchase history and can buy again; staff are never affected.
+      await exemptAlreadyEnded(c.env.DB);
+      const all = (
+        await c.env.DB.prepare(
+          `SELECT e.id, e.package_id, e.cohort_id, e.status, p.name AS package_name, p.one_on_one_sessions, p.evening_q_months, e.lectures_until, e.expiry_exempt
+           FROM enrollments e JOIN packages p ON p.id = e.package_id
+           WHERE e.user_id = ? AND e.status = 'active' AND e.suspended_at IS NULL ORDER BY e.paid_at DESC`,
+        )
+          .bind(user.id)
+          .all<Enrollment & { expiry_exempt: number }>()
+      ).results;
+      let enr: Enrollment | null = null;
+      for (const e of all) if (isStaff(user as User) || (await courseOpen(c.env.DB, e))) { enr = e; break; }
+      c.set('enrollment', enr);
     }
   }
   await next();

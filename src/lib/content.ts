@@ -112,6 +112,47 @@ export function defaultLecturesUntil(cohort: Cohort): string {
   return new Date(dayDate(cohort, cohort.total_days).getTime() + LECTURE_DAYS_AFTER_END * DAY_MS).toISOString().slice(0, 10);
 }
 
+/** Last day of paid course access for a program: the owner's date, or Day 160 (60 days after Day 100). */
+export const courseEndsOn = (enr: { lectures_until: string | null }, cohort: Cohort) => enr.lectures_until || defaultLecturesUntil(cohort);
+export const todayYmdNY = () => new Date(todayUtc()).toISOString().slice(0, 10);
+
+// Day 160 per cohort, kept briefly so checking it doesn't add database reads to every page.
+const endCache = new Map<number, { at: number; end: string | null }>();
+async function cohortDefaultEnd(db: D1Database, cohortId: number | null) {
+  const key = cohortId ?? 0;
+  const hit = endCache.get(key);
+  if (hit && Date.now() - hit.at < 5 * 60_000) return hit.end;
+  const co = await currentCohort(db, cohortId);
+  const end = co ? defaultLecturesUntil(co) : null;
+  endCache.set(key, { at: Date.now(), end });
+  return end;
+}
+/** True while a program's paid course access lasts. Programs exempted when the rule began are always open. */
+export async function courseOpen(db: D1Database, enr: { cohort_id: number | null; lectures_until: string | null; expiry_exempt?: number | null }) {
+  if (enr.expiry_exempt) return true;
+  const end = enr.lectures_until || (await cohortDefaultEnd(db, enr.cohort_id));
+  return !end || todayYmdNY() <= end;
+}
+
+/**
+ * Once, when the Day 160 rule starts: active programs whose end date has already passed keep their current access
+ * (exempt) instead of losing it, and the owner reviews them. Nobody's access is shortened by the rule itself.
+ */
+let exemptDone = false;
+/** For tests only. */
+export const _resetExemptForTests = () => { exemptDone = false; };
+export async function exemptAlreadyEnded(db: D1Database) {
+  if (exemptDone) return;
+  if (await db.prepare("SELECT 1 FROM settings WHERE key = 'course_end_rule_started'").first()) { exemptDone = true; return; }
+  const rows = (await db.prepare("SELECT id, user_id, cohort_id, lectures_until FROM enrollments WHERE status = 'active'").all<{ id: number; user_id: number; cohort_id: number | null; lectures_until: string | null }>()).results;
+  const ids: number[] = [];
+  for (const r of rows) if (!(await courseOpen(db, r))) ids.push(r.id);
+  const steps = ids.map((id) => db.prepare('UPDATE enrollments SET expiry_exempt = 1 WHERE id = ?').bind(id));
+  steps.push(db.prepare("INSERT INTO settings (key, value) VALUES ('course_end_rule_started', ?) ON CONFLICT (key) DO NOTHING").bind(JSON.stringify({ at: new Date().toISOString(), exempted: ids })));
+  await db.batch(steps);
+  exemptDone = true;
+}
+
 export const LETTERS = 'ABCDEFGHIJ';
 
 export function money(cents: number) {

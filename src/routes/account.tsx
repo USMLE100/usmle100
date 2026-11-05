@@ -10,6 +10,7 @@ import { checkCode, emailReady, notify, sendCode, smsReady } from '../lib/messag
 import { RISK_TEXT, type Risk } from '../lib/risk';
 import { audit } from '../lib/audit';
 import { getSettings } from '../lib/settings';
+import { courseEndsOn, courseOpen, currentCohort, money } from '../lib/content';
 
 /** Session timing, the agreement, and the account notices (warning, suspension, lockdown). */
 export const account = new Hono<AppEnv>();
@@ -223,6 +224,17 @@ account.get('/account', requireUser, async (c) => {
     db.prepare('SELECT s.signed_at, a.title, a.id FROM agreement_signatures s JOIN agreements a ON a.id = s.agreement_id WHERE s.user_id = ? ORDER BY s.id DESC LIMIT 1').bind(u.id).first<any>(),
   ]);
   await db.prepare("UPDATE notices SET read_at = datetime('now') WHERE user_id = ? AND read_at IS NULL").bind(u.id).run();
+  // Purchase history: stays visible after course access has ended.
+  const progs = (await db.prepare("SELECT e.*, p.name AS package_name FROM enrollments e JOIN packages p ON p.id = e.package_id WHERE e.user_id = ? AND e.status != 'pending' ORDER BY e.id DESC").bind(u.id).all<any>()).results;
+  const purchases: { what: string; when: string; amount: string; status: string }[] = [];
+  for (const e of progs) {
+    const co = await currentCohort(db, e.cohort_id);
+    const ends = co ? courseEndsOn(e, co) : null;
+    const status = e.status !== 'active' ? e.status : e.suspended_at ? 'on hold' : (await courseOpen(db, e)) ? `access until ${ends}` : `access ended ${ends}`;
+    purchases.push({ what: e.package_name, when: String(e.paid_at ?? e.created_at).slice(0, 10), amount: e.amount_cents ? money(e.amount_cents) : '—', status });
+  }
+  for (const b of (await db.prepare("SELECT status, amount_cents, paid_at FROM book_purchases WHERE user_id = ? AND status != 'pending' ORDER BY id DESC").bind(u.id).all<any>()).results)
+    purchases.push({ what: 'Course Book', when: String(b.paid_at ?? '').slice(0, 10), amount: money(b.amount_cents), status: b.status });
   const next = c.req.query('next');
   const label = (a: string) =>
     ({ 'signin.ok': 'Signed in', 'signin.failed': 'Wrong password', 'signin.locked': 'Locked after wrong passwords', 'signin.device_blocked': 'Blocked: device not approved' })[a] ?? a;
@@ -231,6 +243,14 @@ account.get('/account', requireUser, async (c) => {
       <PageHead eyebrow="Account" title="My account" />
       {c.req.query('ok') && <Flash>{c.req.query('ok')}</Flash>}
       {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
+
+      {purchases.length > 0 && (
+        <section class="card stack" id="purchases">
+          <h2 style="margin:0">Your purchases</h2>
+          <ul class="stack" style="gap:4px;margin:0;padding-left:18px">{purchases.map((p) => <li class="small">{p.what} · {p.when} · {p.amount} · {p.status}</li>)}</ul>
+          {purchases.some((p) => p.status.startsWith('access ended')) && <a class="btn btn-outline btn-sm" href="/enroll" style="align-self:flex-start">Buy more access</a>}
+        </section>
+      )}
 
       <section class="card stack" id="details">
         <h2 style="margin:0">Your details</h2>

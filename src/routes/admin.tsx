@@ -472,7 +472,7 @@ admin.get('/students', async (c) => {
       <p><a class="btn btn-outline btn-sm" href="/admin/students/directory">All students: search, filters, CSV</a></p>
       {c.req.query('ok') && <Flash>Saved.</Flash>}
       {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
-      <p class="muted">Lecture recordings stay open until {LECTURE_DAYS_AFTER_END} days after a cohort’s last day (Day 100). To give one student more time, change their date and tap Save.</p>
+      <p class="muted">Paid course access (lectures, Qbank and materials) stays open until {LECTURE_DAYS_AFTER_END} days after a cohort’s Day 100 (Day 160). To give one student more or less time, change their date and tap Save.</p>
       <form method="post" action="/admin/reset-link" class="card row" style="align-items:flex-end">
         <div class="stack" style="flex:1 1 100%;gap:4px">
           <h2 style="margin:0">Password reset link</h2>
@@ -486,7 +486,7 @@ admin.get('/students', async (c) => {
       ) : (
         <div class="table-box">
           <table class="t">
-            <thead><tr><th scope="col">Student</th><th scope="col">Program</th><th scope="col">Lectures until</th><th scope="col">Extend access</th></tr></thead>
+            <thead><tr><th scope="col">Student</th><th scope="col">Program</th><th scope="col">Course access until</th><th scope="col">Change end date</th></tr></thead>
             <tbody>
               {rows.map((r: any) => {
                 const co = cohorts.get(r.cohort_id) ?? fallback;
@@ -588,7 +588,12 @@ admin.post('/students/:id{[0-9]+}/lectures', async (c) => {
     const co = await currentCohort(c.env.DB, e?.cohort_id);
     if (co && defaultLecturesUntil(co) === value) value = null;
   }
-  if (value !== undefined) await c.env.DB.prepare('UPDATE enrollments SET lectures_until = ? WHERE id = ?').bind(value, Number(c.req.param('id'))).run();
+  if (value !== undefined) {
+    const id = Number(c.req.param('id'));
+    await c.env.DB.prepare('UPDATE enrollments SET lectures_until = ?, expiry_exempt = 0 WHERE id = ?').bind(value, id).run();
+    const t = await c.env.DB.prepare('SELECT user_id FROM enrollments WHERE id = ?').bind(id).first<{ user_id: number }>();
+    await audit(c.env.DB, { actorId: c.get('user')!.id, action: 'access.course_until', targetUserId: t?.user_id ?? null, detail: { enrollment: id, until: value, from: 'access dates list' }, ip: c.req.header('cf-connecting-ip') ?? null });
+  }
   return c.redirect('/admin/students?ok=1');
 });
 

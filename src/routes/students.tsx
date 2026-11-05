@@ -8,8 +8,8 @@ import { toCsv } from '../lib/csv';
 import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { deviceLabel } from '../lib/devices';
 import { itemLabel } from '../lib/viewing';
-import { money } from '../lib/content';
-import { giveEveningMonths, includedEvening, todayYmd } from '../lib/evening';
+import { courseEndsOn, courseOpen, currentCohort, dayDate, defaultLecturesUntil, money } from '../lib/content';
+import { allSessions, giveEveningMonths, includedEvening, subStatus, todayYmd } from '../lib/evening';
 import { fulfil, retrieveCheckoutSession } from '../lib/stripe';
 
 /**
@@ -107,7 +107,7 @@ studentsAdmin.get('/students/view', async (c) => {
   const [enr, book, evening, devices, sessions, views, signed, packages, cohorts, log] = await Promise.all([
     db.prepare('SELECT e.*, p.name AS package_name, p.evening_q_months, c.name AS cohort FROM enrollments e JOIN packages p ON p.id = e.package_id LEFT JOIN cohorts c ON c.id = e.cohort_id WHERE e.user_id = ? ORDER BY e.id DESC').bind(u.id).all<any>(),
     db.prepare('SELECT note, created_at FROM book_access WHERE user_id = ?').bind(u.id).first<any>().catch(() => null),
-    db.prepare('SELECT start_date, months FROM evening_subscriptions WHERE user_id = ? ORDER BY start_date DESC LIMIT 5').bind(u.id).all<any>().catch(() => ({ results: [] as any[] })),
+    db.prepare('SELECT start_date, months FROM evening_subscriptions WHERE user_id = ? ORDER BY start_date DESC LIMIT 10').bind(u.id).all<any>().catch(() => ({ results: [] as any[] })),
     db.prepare('SELECT label, status, first_seen, last_seen, last_country FROM devices WHERE user_id = ? ORDER BY id').bind(u.id).all<any>(),
     db.prepare('SELECT created_at, last_seen_at, ip, country, user_agent FROM sessions WHERE user_id = ?').bind(u.id).all<any>(),
     db.prepare('SELECT item, kind, SUM(counted) AS used FROM view_sessions WHERE user_id = ? GROUP BY item, kind ORDER BY item').bind(u.id).all<any>(),
@@ -117,6 +117,27 @@ studentsAdmin.get('/students/view', async (c) => {
     db.prepare('SELECT at, action, detail FROM audit_log WHERE target_user_id = ? ORDER BY id DESC LIMIT 30').bind(u.id).all<any>(),
   ]);
   const viewRows = await Promise.all(views.results.map(async (v: any) => ({ ...v, label: await itemLabel(db, v.item) })));
+  const activeE = enr.results.find((e: any) => e.status === 'active');
+  let courseInfo: { start: string; day100: string; day160: string; ends: string; open: boolean } | null = null;
+  if (activeE) {
+    const co = await currentCohort(db, activeE.cohort_id);
+    if (co) {
+      const d160 = defaultLecturesUntil(co);
+      courseInfo = { start: co.start_date, day100: dayDate(co, co.total_days).toISOString().slice(0, 10), day160: d160, ends: courseEndsOn(activeE, co), open: await courseOpen(db, activeE) };
+    }
+  }
+  // Each Evening Questions period: start, months, and its last day once the 12th class of its last month is up.
+  const allEv = await allSessions(db);
+  const evPeriods: { start: string; months: number; label: string }[] = evening.results.map((x: any) => ({ start: x.start_date, months: x.months, label: 'given' }));
+  if (activeE && activeE.evening_q_months > 0 && !activeE.evening_removed_at) {
+    const inc = await includedEvening(db, activeE.id);
+    if (inc) evPeriods.push({ start: inc.start, months: inc.months, label: 'included with the program' });
+  }
+  const eveningInfo = evPeriods.map((p) => {
+    const st = subStatus({ start: p.start, months: p.months }, allEv);
+    const last = st.blocks.length === p.months ? st.blocks[st.blocks.length - 1]?.end : null;
+    return `${p.months} month(s) from ${p.start} (${p.label}), ${last ? `ends after ${last}` : 'end date set when its last month’s 12th class is up'}`;
+  });
   const owner = isOwner(me);
   return c.html(
     <PortalLayout shell={c.get('shell')} title={`Admin: ${u.name}`} active="admin-students" user={me} wide>
@@ -148,7 +169,7 @@ studentsAdmin.get('/students/view', async (c) => {
         )}
         <p class="small" style="margin:0">Course Book: {book ? `yes (${book.note ?? 'given'})` : 'no'} · Evening Questions: {evening.results.length ? evening.results.map((x: any) => `${x.start_date} (${x.months} mo)`).join(', ') : 'no'}</p>
         {owner ? (() => {
-          const active = enr.results.find((e: any) => e.status === 'active');
+          const active = activeE;
           const today = new Date().toISOString().slice(0, 10);
           const evOn = evening.results.length > 0 || (active && active.evening_q_months > 0 && !active.evening_removed_at);
           return (
@@ -157,15 +178,17 @@ studentsAdmin.get('/students/view', async (c) => {
                 <h3 style="margin:0">100-Day Course</h3>
                 {active ? (
                   <>
-                    <p class="small" style="margin:0"><strong>Has access</strong>: {active.package_name}{active.cohort ? ` · ${active.cohort}` : ''} · lectures open until {active.lectures_until ? active.lectures_until : 'the cohort’s normal end (60 days after Day 100)'}{active.suspended_at ? ' · SUSPENDED' : ''}</p>
+                    <p class="small" style="margin:0">{courseInfo!.open ? <strong>Has access</strong> : <strong style="color:#a3402c">Access ended</strong>}: {active.package_name} · cohort {active.cohort ?? '—'} · starts {courseInfo!.start} · Day 100 {courseInfo!.day100} · Day 160 {courseInfo!.day160}</p>
+                    <p class="small" style="margin:0">Access ends after <strong>{courseInfo!.ends}</strong>{active.lectures_until ? ' (your override)' : ' (Day 160)'}{active.expiry_exempt ? ' · kept open: this date had passed when the 160-day rule began. Set a date to review it.' : ''}{active.suspended_at ? ' · SUSPENDED' : ''}</p>
                     <form method="post" action={`/admin/students/${u.id}/course/until`} class="row" style="align-items:flex-end">
-                      <label class="field">Lecture access end date<input type="date" name="until" value={active.lectures_until ?? ''} /></label>
+                      <label class="field">Change end date<input type="date" name="until" value={active.lectures_until ?? ''} /></label>
+                      <label class="field" style="flex:2 1 200px">Reason<input type="text" name="reason" required maxlength={200} placeholder="e.g. medical leave" /></label>
                       <button class="btn btn-outline btn-sm" type="submit">Save end date</button>
-                      <button class="btn btn-ghost btn-sm" type="submit" name="clear" value="1">No end date</button>
+                      <button class="btn btn-ghost btn-sm" type="submit" name="clear" value="1">Use Day 160</button>
                     </form>
                     <form method="post" action={`/admin/students/${u.id}/course/remove`} class="row" style="align-items:flex-end">
                       <label class="field" style="flex:2 1 200px">Reason<input type="text" name="reason" required maxlength={200} /></label>
-                      <button class="btn btn-ghost btn-sm" type="submit">Remove course access</button>
+                      <button class="btn btn-ghost btn-sm" type="submit">Remove access</button>
                     </form>
                   </>
                 ) : (
@@ -173,36 +196,34 @@ studentsAdmin.get('/students/view', async (c) => {
                     <input type="hidden" name="evening_choice" value="1" />
                     <label class="field" style="flex:1 1 160px">Program<select name="package">{packages.results.map((p: any) => <option value={p.id}>{p.name}</option>)}</select></label>
                     <label class="field" style="flex:1 1 160px">Cohort<select name="cohort">{cohorts.results.map((x: any) => <option value={String(x.id)}>{x.name}</option>)}</select></label>
-                    <label class="field">Lecture access end date (optional)<input type="date" name="until" /></label>
+                    <label class="field">End date (optional; blank = Day 160)<input type="date" name="until" /></label>
                     <label class="field" style="flex:2 1 200px">Reason<input type="text" name="reason" required maxlength={200} placeholder="e.g. paid by Payment Link" /></label>
                     <label class="small"><input type="checkbox" name="include_evening" value="1" /> Also give the Evening Questions months this program includes</label>
-                    <button class="btn btn-outline" type="submit">Give course access</button>
+                    <button class="btn btn-outline" type="submit">Give access</button>
                   </form>
                 )}
               </div>
               <div class="card stack" style="margin:0">
                 <h3 style="margin:0">Evening Questions</h3>
-                <p class="small" style="margin:0">{evOn ? <strong>Has access</strong> : 'No access'}
-                  {evening.results.length ? ` · given: ${evening.results.map((x: any) => `${x.months} mo from ${x.start_date}`).join(', ')}` : ''}
-                  {active && active.evening_q_months > 0 && !active.evening_removed_at ? ` · ${active.evening_q_months} mo included with the program` : ''}
-                  {u.evening_until ? ` · ends after ${u.evening_until}${u.evening_until < today ? ' (ended)' : ''}` : ''}</p>
+                <p class="small" style="margin:0">{evOn ? <strong>Has access</strong> : 'No access'}{eveningInfo.length ? ' · ' + eveningInfo.join(' · ') : ''}{u.evening_until ? ` · end date ${u.evening_until}${u.evening_until < today ? ' (ended)' : ''}` : ''}</p>
+                <p class="small muted" style="margin:0">One month = the next 12 evening classes from its start, watchable until 2 days after the 12th recording.</p>
                 <form method="post" action={`/admin/students/${u.id}/evening/give`} class="row" style="align-items:flex-end">
                   <label class="field">Start<input type="date" name="start" value={today} /></label>
                   <label class="field">Months<input type="number" name="months" min={1} max={12} value={1} /></label>
                   <label class="field">End date (optional)<input type="date" name="until" /></label>
                   <label class="field" style="flex:2 1 160px">Note<input type="text" name="note" maxlength={80} placeholder="e.g. monthly Payment Link" /></label>
-                  <button class="btn btn-outline btn-sm" type="submit">Give Evening Questions</button>
+                  <button class="btn btn-outline btn-sm" type="submit">Give access</button>
                 </form>
                 {evOn && (
                   <>
                     <form method="post" action={`/admin/students/${u.id}/evening/until`} class="row" style="align-items:flex-end">
-                      <label class="field">End date<input type="date" name="until" value={u.evening_until ?? ''} /></label>
+                      <label class="field">Change end date<input type="date" name="until" value={u.evening_until ?? ''} /></label>
                       <button class="btn btn-outline btn-sm" type="submit">Save end date</button>
                       <button class="btn btn-ghost btn-sm" type="submit" name="clear" value="1">No end date</button>
                     </form>
                     <form method="post" action={`/admin/students/${u.id}/evening/remove`} class="row" style="align-items:flex-end">
                       <label class="field" style="flex:2 1 200px">Reason<input type="text" name="reason" required maxlength={200} /></label>
-                      <button class="btn btn-ghost btn-sm" type="submit">Remove Evening Questions</button>
+                      <button class="btn btn-ghost btn-sm" type="submit">Remove access</button>
                     </form>
                   </>
                 )}
@@ -265,7 +286,7 @@ studentsAdmin.post('/students/:uid{[0-9]+}/give-program', async (c) => {
   const back = (msg: string, err = false) => c.redirect(`/admin/students/view?email=${encodeURIComponent(u?.email ?? '')}&${err ? 'error' : 'ok'}=${encodeURIComponent(msg)}`);
   if (!u || !pkg || !cohort) return back('Choose a program and a cohort.', true);
   if (!reason) return back('Please give a reason.', true);
-  if (await db.prepare("SELECT 1 FROM enrollments WHERE user_id = ? AND status = 'active'").bind(uid).first()) return back('This student already has an active program.', true);
+  if (await db.prepare("SELECT 1 FROM enrollments WHERE user_id = ? AND status = 'active'").bind(uid).first()) return back('This student already has 100-Day Course access. Change its end date instead, or remove it first.', true);
   const until = /^\d{4}-\d{2}-\d{2}$/.test(String(f.until ?? '')) ? String(f.until) : null;
   // The form sends include_evening=1 when its box is ticked; older forms (no field) keep the included months.
   const noEvening = f.evening_choice === '1' && f.include_evening !== '1';
@@ -286,7 +307,7 @@ async function studentFor(c: any) {
   const back = (msg: string, err = false) => c.redirect(`/admin/students/view?email=${encodeURIComponent(u?.email ?? '')}&${err ? 'error' : 'ok'}=${encodeURIComponent(msg)}`);
   return { u, back };
 }
-const activeEnrollment = (db: D1Database, uid: number) => db.prepare("SELECT id, package_id FROM enrollments WHERE user_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1").bind(uid).first<{ id: number; package_id: string }>();
+const activeEnrollment = (db: D1Database, uid: number) => db.prepare("SELECT id, package_id, cohort_id, lectures_until FROM enrollments WHERE user_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1").bind(uid).first<{ id: number; package_id: string }>();
 
 studentsAdmin.post('/students/:uid{[0-9]+}/course/until', async (c) => {
   const db = c.env.DB;
@@ -296,10 +317,13 @@ studentsAdmin.post('/students/:uid{[0-9]+}/course/until', async (c) => {
   const e = await activeEnrollment(db, u.id);
   if (!e) return back('This student has no 100-Day Course access.', true);
   const until = f.clear ? null : ymdOrNull(f.until);
-  if (!f.clear && !until) return back('Pick a date, or choose “No end date”.', true);
-  await db.prepare('UPDATE enrollments SET lectures_until = ? WHERE id = ?').bind(until, e.id).run();
-  await audit(db, { actorId: c.get('user')!.id, action: 'access.course_until', targetUserId: u.id, detail: { enrollment: e.id, until }, ip: c.req.header('cf-connecting-ip') ?? null });
-  return back(until ? `Lectures now open until ${until}.` : 'Lecture end date removed (the cohort’s normal end applies).');
+  if (!f.clear && !until) return back('Pick a date, or choose “Use Day 160”.', true);
+  const reason = String(f.reason ?? '').trim().slice(0, 200);
+  if (!reason) return back('Please give a reason for the change.', true);
+  // Setting a date (or going back to Day 160) replaces any exemption from when the rule began.
+  await db.prepare('UPDATE enrollments SET lectures_until = ?, expiry_exempt = 0 WHERE id = ?').bind(until, e.id).run();
+  await audit(db, { actorId: c.get('user')!.id, action: 'access.course_until', targetUserId: u.id, detail: { enrollment: e.id, until, reason }, ip: c.req.header('cf-connecting-ip') ?? null });
+  return back(until ? `100-Day Course access now ends after ${until}.` : '100-Day Course access now ends on Day 160.');
 });
 
 studentsAdmin.post('/students/:uid{[0-9]+}/course/remove', async (c) => {

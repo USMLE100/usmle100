@@ -81,7 +81,7 @@ describe('separate access for the 100-Day Course and Evening Questions', () => {
     await req(`/admin/students/${s.id}/evening/until`, { cookie: owner.cookie, form: { clear: '1' } });
     expect(await evening(s.id)).toBe(true);
     await req(`/admin/students/${s.id}/give-program`, { cookie: owner.cookie, form: { package: 'refresher', cohort: String(cohort), reason: 'x', evening_choice: '1' } });
-    await req(`/admin/students/${s.id}/course/until`, { cookie: owner.cookie, form: { until: '2027-01-31' } });
+    await req(`/admin/students/${s.id}/course/until`, { cookie: owner.cookie, form: { until: '2027-01-31', reason: 'extension' } });
     expect((await course(s.id)).lectures_until).toBe('2027-01-31');
     expect(await evening(s.id)).toBe(true);
   });
@@ -104,6 +104,80 @@ describe('separate access for the 100-Day Course and Evening Questions', () => {
     }
     expect(await evening(s.id)).toBe(false);
     const html = await (await req(`/admin/students/view?email=${encodeURIComponent(s.email)}`, { cookie: owner.cookie })).text();
-    for (const t of ['100-Day Course', 'Give course access', 'Evening Questions', 'Give Evening Questions']) expect(html, t).toContain(t);
+    for (const t of ['100-Day Course', 'Give access', 'Evening Questions', 'End date (optional'])  expect(html, t).toContain(t);
+  });
+});
+
+describe('Day 160: paid course access ends together', () => {
+  const ymd = (days: number) => new Date(Date.now() + days * 86400e3).toISOString().slice(0, 10);
+  const page = (cookie: string, p: string) => req(p, { cookie });
+  it('the standard end is Day 160 from the cohort start (60 days after Day 100), not the payment date', async () => {
+    const { currentCohort, defaultLecturesUntil, dayDate } = await import('../src/lib/content');
+    const co = (await currentCohort(db, cohort))!;
+    const d100 = dayDate(co, co.total_days).getTime();
+    expect(Date.parse(defaultLecturesUntil(co)) - d100).toBe(60 * 86400e3);
+  });
+
+  it('before the end everything opens; after it lectures, Qbank and materials close together, account and purchases stay, buying again works', async () => {
+    const s = await acct();
+    await req(`/admin/students/${s.id}/give-program`, { cookie: owner.cookie, form: { package: 'companion', cohort: String(cohort), reason: 'x', evening_choice: '1', until: ymd(5) } });
+    for (const p of ['/dashboard', '/topics']) expect((await page(s.cookie, p)).status, p).toBe(200);
+    // Owner shortens access to a day already past (with a reason): everything paid closes.
+    await req(`/admin/students/${s.id}/course/until`, { cookie: owner.cookie, form: { until: ymd(-3), reason: 'shorten test' } });
+    for (const p of ['/dashboard', '/topics', '/lectures']) expect((await page(s.cookie, p)).headers.get('location'), p).toBe('/enroll');
+    const claim = await req('/play/claim', { cookie: s.cookie, form: {} });
+    expect(claim.status).not.toBe(200);
+    const acc = await page(s.cookie, '/account');
+    expect(acc.status).toBe(200);
+    const html = await acc.text();
+    expect(html).toContain('Your purchases');
+    expect(html).toMatch(/access ended/);
+    expect((await page(s.cookie, '/enroll')).status).toBe(200);
+    // Extend again with a reason: access returns. Every change is in the activity log with its reason.
+    await req(`/admin/students/${s.id}/course/until`, { cookie: owner.cookie, form: { until: ymd(30), reason: 'medical leave' } });
+    expect((await page(s.cookie, '/dashboard')).status).toBe(200);
+    const log = (await db.prepare("SELECT detail FROM audit_log WHERE action = 'access.course_until' AND target_user_id = ?").bind(s.id).all<any>()).results.map((r: any) => r.detail).join(' ');
+    expect(log).toContain('medical leave');
+    // A change without a reason is refused.
+    await req(`/admin/students/${s.id}/course/until`, { cookie: owner.cookie, form: { until: ymd(-3) } });
+    expect((await page(s.cookie, '/dashboard')).status).toBe(200);
+  });
+
+  it('Evening Questions bought separately stay open after the course has ended', async () => {
+    const s = await acct();
+    await req(`/admin/students/${s.id}/give-program`, { cookie: owner.cookie, form: { package: 'refresher', cohort: String(cohort), reason: 'x', evening_choice: '1', until: ymd(-2) } });
+    await req(`/admin/students/${s.id}/evening/give`, { cookie: owner.cookie, form: { months: '1' } });
+    expect(await evening(s.id)).toBe(true);
+    expect((await page(s.cookie, '/evening')).status).toBe(200);
+    expect((await page(s.cookie, '/topics')).headers.get('location')).not.toBe('/topics');
+  });
+
+  it('existing students: a program whose date had already passed when the rule began keeps working and is flagged for review', async () => {
+    const { exemptAlreadyEnded } = await import('../src/lib/content');
+    const s = await acct();
+    const id = Number((await db.prepare("INSERT INTO enrollments (user_id, package_id, status, paid_at, cohort_id, amount_cents, lectures_until) VALUES (?, 'refresher', 'active', datetime('now'), ?, 150000, ?)").bind(s.id, cohort, ymd(-10)).run()).meta.last_row_id);
+    const open = await acct();
+    const id2 = Number((await db.prepare("INSERT INTO enrollments (user_id, package_id, status, paid_at, cohort_id, amount_cents) VALUES (?, 'refresher', 'active', datetime('now'), ?, 150000)").bind(open.id, cohort).run()).meta.last_row_id);
+    // Simulate the first run of the rule on a database that already has these students.
+    await db.prepare("DELETE FROM settings WHERE key = 'course_end_rule_started'").run();
+    const mod = await import('../src/lib/content');
+    (mod as any)._resetExemptForTests();
+    await exemptAlreadyEnded(db);
+    expect((await db.prepare('SELECT expiry_exempt, lectures_until FROM enrollments WHERE id = ?').bind(id).first<any>())).toEqual({ expiry_exempt: 1, lectures_until: ymd(-10) });
+    expect((await db.prepare('SELECT expiry_exempt FROM enrollments WHERE id = ?').bind(id2).first<any>())!.expiry_exempt).toBe(0);
+    expect((await page(s.cookie, '/dashboard')).status).toBe(200);
+    // The owner sees it on the student page and decides.
+    const html = await (await req(`/admin/students/view?email=${encodeURIComponent(s.email)}`, { cookie: owner.cookie })).text();
+    for (const t of ['kept open', 'Day 160', 'Day 100', 'starts']) expect(html, t).toContain(t);
+    await req(`/admin/students/${s.id}/course/until`, { cookie: owner.cookie, form: { until: ymd(-10), reason: 'reviewed: ended' } });
+    expect((await page(s.cookie, '/dashboard')).headers.get('location')).toBe('/enroll');
+  });
+
+  it('no duplicate programs: giving the course to a student who has it is refused', async () => {
+    const s = await acct();
+    const give = { package: 'refresher', cohort: String(cohort), reason: 'x', evening_choice: '1' };
+    await req(`/admin/students/${s.id}/give-program`, { cookie: owner.cookie, form: give });
+    await req(`/admin/students/${s.id}/give-program`, { cookie: owner.cookie, form: give });
+    expect((await db.prepare("SELECT COUNT(*) AS n FROM enrollments WHERE user_id = ? AND status = 'active'").bind(s.id).first<any>()).n).toBe(1);
   });
 });

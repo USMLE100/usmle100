@@ -145,7 +145,7 @@ launchCheck.get('/payment-links', async (c) => {
     const after = ac?.type === 'redirect' ? `redirects to ${String(ac.redirect?.url ?? '')}` : 'Stripe confirmation page';
     let sessions: any[] = [], more = false, err: string | undefined;
     try {
-      const r = await fetch(`https://api.stripe.com/v1/checkout/sessions?payment_link=${encodeURIComponent(l.id)}&status=complete&limit=100&expand[]=data.subscription`, H);
+      const r = await fetch(`https://api.stripe.com/v1/checkout/sessions?payment_link=${encodeURIComponent(l.id)}&status=complete&limit=100&expand[]=data.subscription&expand[]=data.payment_intent.latest_charge`, H);
       if (r.ok) {
         const j = (await r.json()) as any;
         sessions = j.data ?? [];
@@ -179,7 +179,7 @@ launchCheck.get('/payment-links', async (c) => {
     <PortalLayout shell={c.get('shell')} title="Payment link audit" active="admin-launch" user={user} wide>
       <Eyebrow>Owner · read-only</Eyebrow>
       <h1>Payment link audit</h1>
-      <p class="muted">Payments made through Stripe Payment Links are not matched to a site account automatically. This page lists every completed payment per active link and what that buyer currently has on the site. Nothing here changes Stripe or the site.</p>
+      <p class="muted">Refunds of later subscription renewals don’t show here; check those in Stripe. Payments made through Stripe Payment Links are not matched to a site account automatically. This page lists every completed payment per active link and what that buyer currently has on the site. Nothing here changes Stripe or the site.</p>
       {error && <p><strong>{error}</strong></p>}
       {rows.map((r) => (
         <section class="card stack">
@@ -187,12 +187,18 @@ launchCheck.get('/payment-links', async (c) => {
           <p class="small" style="margin:0">Link ID <code>{r.link.id}</code> · {r.link.url} · after payment: {r.after}{r.link.metadata?.name ? ` · ${r.link.metadata.name}` : ''}</p>
           {r.err ? <p><strong>{r.err}</strong></p> : r.sessions.length === 0 ? <p class="small muted" style="margin:0">No completed payments.</p> : (
             <div class="table-box"><table class="t">
-              <thead><tr><th scope="col">Paid</th><th scope="col">Buyer</th><th scope="col">Amount</th><th scope="col">Stripe</th><th scope="col">Site account</th><th scope="col">Has on the site now</th></tr></thead>
+              <thead><tr><th scope="col">Paid</th><th scope="col">Buyer</th><th scope="col">Amount</th><th scope="col">Stripe</th><th scope="col">Site account</th><th scope="col">Has on the site now</th><th scope="col">Review</th></tr></thead>
               <tbody>{r.sessions.map((s: any) => {
                 const em = String(s.customer_details?.email ?? s.customer_email ?? '');
                 const d = detail[em] ?? { id: null, has: '' };
                 const sub = s.subscription && typeof s.subscription === 'object' ? `subscription ${s.subscription.status}` : s.mode;
-                return <tr><td class="small">{day(s.created)}</td><td class="small">{s.customer_details?.name ?? ''} {em}</td><td class="small">{usd(s.amount_total)} ({s.payment_status})</td><td class="small">{sub} · {s.id.slice(0, 14)}…</td><td class="small">{d.id ? `ID ${d.id}` : '—'}</td><td class="small">{d.has}</td></tr>;
+                // Access from these links is given by hand, so Stripe changes after payment need a manual look.
+                const ch = s.payment_intent && typeof s.payment_intent === 'object' ? s.payment_intent.latest_charge : null;
+                const refunded = ch && typeof ch === 'object' && (ch.amount_refunded ?? 0) > 0 ? (ch.refunded ? 'Refunded' : `Partly refunded (${usd(ch.amount_refunded)})`) : '';
+                const subSt = s.subscription && typeof s.subscription === 'object' ? String(s.subscription.status) : '';
+                const subFlag = ['canceled', 'unpaid', 'past_due', 'incomplete_expired', 'paused'].includes(subSt) ? `Subscription ${subSt}` : '';
+                const flag = [refunded, subFlag].filter(Boolean).join(' · ');
+                return <tr><td class="small">{day(s.created)}</td><td class="small">{s.customer_details?.name ?? ''} {em}</td><td class="small">{usd(s.amount_total)} ({s.payment_status})</td><td class="small">{sub} · {s.id.slice(0, 14)}…</td><td class="small">{d.id ? `ID ${d.id}` : '—'}</td><td class="small">{d.has}</td><td class="small">{flag ? <strong style="color:#a3402c">{flag}: check this student’s access</strong> : ''}</td></tr>;
               })}</tbody>
             </table></div>
           )}
