@@ -6,6 +6,7 @@ import { isAdmin, isOwner, isStaff } from '../lib/types';
 import { itemLabel } from '../lib/viewing';
 import { requireEnrolled } from '../lib/auth';
 import { PortalLayout, PageHead, Eyebrow, Flash, initials } from '../views/layout';
+import { Splash } from '../views/splash';
 import { Icon, type IconName } from '../views/icons';
 import { lecturesEndedOn, lecturesEndedPage, lectureNotice, LectureNotice } from '../views/lectureAccess';
 import { examCountdown } from '../lib/countdown';
@@ -265,6 +266,7 @@ portal.get('/dashboard', async (c) => {
   return (
     c.html(
       <PortalLayout shell={c.get('shell')} title="Home" active="home" user={user} wide>
+        <Splash />
         <div class="welcome">
           <span class="avatar">{initials(user.name)}</span>
           <h1>Welcome back, {firstName(user)}</h1>

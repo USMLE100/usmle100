@@ -20,6 +20,7 @@ import { currentCohort, dayDate, fmtDate, money, todayUtc, ymdToUtc } from '../l
 import { getSettings } from '../lib/settings';
 import { enrollingCohort, enrollingLine } from '../lib/enrolling';
 import { HOME_FAQ } from '../views/homeFaq';
+import { SPLASH_FLAG_JS } from '../views/splash';
 
 export type Pkg = { id: string; name: string; tagline: string; price_cents: number; one_on_one_sessions: number; evening_q_months: number; recommended: number };
 
@@ -495,6 +496,7 @@ const AuthPage = (p: { mode: 'in' | 'up'; selfReset?: boolean; error?: string; n
             <button type="button" class="btn btn-outline btn-block" id="pk-signin" data-next={p.next ?? ''} hidden>Sign in with a passkey</button>
             <p id="pk-msg" class="flash flash-error" hidden role="alert"></p>
             <script dangerouslySetInnerHTML={{ __html: SIGNIN_PASSKEY_JS }} />
+            <script dangerouslySetInnerHTML={{ __html: SPLASH_FLAG_JS }} />
           </>
         )}
         {p.mode === 'in' && p.contact && !p.selfReset && (
