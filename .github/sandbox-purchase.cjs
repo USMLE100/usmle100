@@ -19,11 +19,12 @@ const R = (s) => console.log('RESULT ' + s);
     const body = (await p.innerText('body')).replace(/\s+/g, ' ');
     R('3 at Stripe checkout: ' + new URL(p.url()).host + ' test=' + p.url().includes('cs_test') + ' amount ' + ((body.match(/\$[\d,]+\.\d\d/) || ['none'])[0]));
     const acc = await p.$('[data-testid="card-accordion-item-button"], button[aria-label*="Card" i]'); if (acc) await acc.click().catch(() => {});
-    await p.click('[data-testid="card-accordion-item-button"]', { force: true }).catch(() => {}); await p.waitForTimeout(4000);
+    await p.getByText('Card', { exact: true }).first().click().catch(() => {}); await p.waitForTimeout(2000);
+    await p.locator('[data-testid="card-accordion-item-button"]').click().catch(() => {}); await p.waitForTimeout(4000);
     // Card fields may sit on the page or inside Stripe's own frames.
     const pick = async (sels) => { for (const f of p.frames()) for (const sel of sels) { const h = await f.$(sel).catch(() => null); if (h && (await h.isVisible().catch(() => false))) return h; } return null; };
     const num = await pick(['#cardNumber', 'input[autocomplete="cc-number"]', 'input[name="cardnumber"]', 'input[name="number"]']);
-    if (!num) { R('3e frames: ' + p.frames().map((f) => new URL(f.url() || 'about:blank').pathname.slice(0, 25)).join(',').slice(0, 130)); throw new Error('no card field'); }
+    if (!num) { const ids = []; for (const f of p.frames()) ids.push(...(await f.$$eval('input', (els) => els.map((e) => (e.id || e.name || e.autocomplete) + (e.offsetParent ? '' : '-h'))).catch(() => []))); R('3e inputs: ' + ids.join(',').slice(0, 130)); R('3f ' + (await p.innerText('body')).replace(/\s+/g, ' ').slice(100, 230)); throw new Error('no card field'); }
     await num.fill('4242 4242 4242 4242');
     await (await pick(['#cardExpiry', 'input[autocomplete="cc-exp"]', 'input[name="exp-date"]', 'input[name="expiry"]'])).fill('12 / 34');
     await (await pick(['#cardCvc', 'input[autocomplete="cc-csc"]', 'input[name="cvc"]'])).fill('123');
