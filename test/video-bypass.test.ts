@@ -84,7 +84,8 @@ describe('video access cannot be bypassed', () => {
     const c = await claim(a.cookie, `L:${lec}`, t);
     expect(c.state).toBe('ok');
     // Lecture access ended yesterday (60 days after Day 100, or an admin date).
-    await db.prepare("UPDATE enrollments SET lectures_until = date('now', '-1 day') WHERE id = ?").bind(a.enr).run();
+    // Two days back: access lasts to the end of its last day in New York time, and in the evening UTC is already tomorrow.
+    await db.prepare("UPDATE enrollments SET lectures_until = date('now', '-2 day') WHERE id = ?").bind(a.enr).run();
     expect((await beat(a.cookie, c, t, {})).state).toBe('gone');
     expect((await claim(a.cookie, `L:${lec}`, newTab())).state).not.toBe('ok');
     // Refresher includes no Evening Questions: no evening class link.
