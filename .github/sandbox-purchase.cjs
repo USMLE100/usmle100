@@ -1,6 +1,9 @@
 const R = (s) => console.log('RESULT ' + s);
 (async () => {
-  const j = await (await fetch('https://v12-frontend-usmle100.info-usmle100.workers.dev/__staging')).json();
-  R('P ' + JSON.stringify(j.purchases));
-  for (const e of (j.recent_stripe_events || []).slice(0, 11)) R(`${e.at} ${e.source} ${e.type}: ${e.outcome}`);
+  const out = [];
+  for (const p of ['/', '/programs', '/enroll', '/sign-in', '/dashboard', '/admin/payment-links', '/terms']) {
+    const r = await fetch('https://usmle100.com' + p, { redirect: 'manual' });
+    out.push(`${p} ${r.status}`);
+  }
+  R(out.join(' · '));
 })();
