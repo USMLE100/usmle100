@@ -84,6 +84,16 @@ describe('payment link audit', () => {
     const admin = await acct('admin');
     expect((await worker.fetch(new Request(BASE + '/admin/payment-links', { headers: { cookie: admin }, redirect: 'manual' }))).status).toBe(404);
     expect((await worker.fetch(new Request(BASE + '/admin/payment-links', { headers: { cookie: stu }, redirect: 'manual' }))).status).not.toBe(200);
+    // Faculty, signed-out visitors, HEAD and POST requests get nothing either.
+    const facCookie = await acct('student');
+    await db.prepare("UPDATE users SET role = 'faculty' WHERE id = (SELECT MAX(id) FROM users)").run();
+    for (const ck of [facCookie, '']) {
+      for (const method of ['GET', 'HEAD', 'POST']) {
+        const r = await worker.fetch(new Request(BASE + '/admin/payment-links', { method, headers: { cookie: ck, origin: BASE, 'sec-fetch-site': 'same-origin' }, redirect: 'manual' }));
+        expect(r.status, `${method} ${ck ? 'faculty' : 'signed out'}`).not.toBe(200);
+        expect(await r.text()).not.toContain('Link Buyer');
+      }
+    }
     const owner = await acct('owner');
     const before = await db.prepare('SELECT (SELECT COUNT(*) FROM enrollments) + (SELECT COUNT(*) FROM audit_log) AS n').first<{ n: number }>();
     const r = await worker.fetch(new Request(BASE + '/admin/payment-links', { headers: { cookie: owner } }));
@@ -91,6 +101,8 @@ describe('payment link audit', () => {
     const html = await r.text();
     for (const s of ['plink_course', '$1,381.50 one-time', '100-Day Course', 'Link Buyer', 'account exists, no access given', 'plink_tutor', 'redirects to https://calendly.com/x', 'No completed payments.']) expect(html, s).toContain(s);
     expect(calls.every((x) => x.method === 'GET')).toBe(true);
+    // No payment credentials or full Stripe ids on the page.
+    expect(html).not.toMatch(/sk_(live|test)_|cs_live_abc123456789|last4|card_number/i);
     expect((await db.prepare('SELECT (SELECT COUNT(*) FROM enrollments) + (SELECT COUNT(*) FROM audit_log) AS n').first<{ n: number }>())!.n).toBe(before!.n);
     await db.prepare("UPDATE settings SET value = '1' WHERE key = 'staff_passkeys'").run();
   });
