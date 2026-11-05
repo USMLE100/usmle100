@@ -2,25 +2,16 @@ name: probe-route-check
 on: { push: { branches: [probe-route-check] } }
 permissions: { statuses: write, contents: read }
 jobs:
-  probe:
+  sandbox-purchase:
     runs-on: ubuntu-latest
     steps:
-      - name: Read-only checks against the live site (no sign-in, nothing written)
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Stripe TEST-mode purchase on staging (no real money; production untouched)
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          S="https://usmle100.com"
-          st() { gh api repos/${{ github.repository }}/statuses/${{ github.sha }} -f state=success -f context="$1" -f description="$(echo "$2" | cut -c1-138)" >/dev/null; echo "$1: $2"; }
-          code() { curl -s -o /dev/null -w "%{http_code}" "$@"; }
-          # Webhooks: a request without a valid signature must be refused (400/401), proving the secret is configured (503 = missing).
-          st webhooks "stripe=$(code -X POST -H 'stripe-signature: t=1,v1=00' --data '{}' $S/stripe/webhook) zoom=$(code -X POST -H 'x-zm-request-timestamp: 1' -H 'x-zm-signature: v0=00' --data '{"event":"x"}' $S/zoom/webhook)"
-          # Access: staff/student pages need sign-in; staging diagnostics hidden; exports protected.
-          st access "admin=$(code $S/admin/students/directory) export=$(code $S/admin/students/export.csv) dash=$(code $S/dashboard) lecture=$(code $S/lectures/1) claim=$(code -X POST --data '{}' $S/play/claim) staging=$(code $S/__staging)"
-          # Public pages and addresses.
-          st public "home=$(code $S/) programs=$(code $S/programs) terms=$(code $S/terms) privacy=$(code $S/privacy) refunds=$(code $S/refunds) signup=$(code $S/sign-up) www=$(code https://www.usmle100.com/) http=$(code http://usmle100.com/)"
-          h=$(curl -s -D - -o /dev/null $S/sign-in | tr -d '\r')
-          st headers "csp=$(echo "$h" | grep -ci '^content-security-policy') hsts=$(echo "$h" | grep -ci '^strict-transport-security') xcto=$(echo "$h" | grep -ci '^x-content-type-options') frame=$(echo "$h" | grep -ci '^x-frame-options')"
-          # Cross-site form posts are refused (sign-in from another origin).
-          st csrf "signin-cross-site=$(code -X POST -H 'origin: https://evil.example' -H 'sec-fetch-site: cross-site' --data 'email=a@b.c&password=x' $S/sign-in)"
-          # Visible text checks on public pages: no placeholders or the removed claim.
-          t=$(curl -s $S/ $S/programs $S/terms $S/privacy $S/refunds | sed 's/<[^>]*>/ /g')
-          st content "placeholders=$(echo "$t" | grep -ciE '\[(BUSINESS|STATE|EFFECTIVE)|lorem|TODO') claim1400=$(echo "$t" | grep -c '1,400') twice=$(curl -s $S/ $S/programs | grep -ci 'watched twice') terms65=$(curl -s $S/terms | grep -c '65% of the lecture')"
+          npm i --no-save playwright@1.48.2 >/dev/null 2>&1 && npx playwright install --with-deps chromium >/dev/null 2>&1
+          node .github/sandbox-purchase.cjs > out.txt 2>&1 || true
+          cat out.txt
+          i=0; while IFS= read -r line; do i=$((i+1)); gh api repos/${{ github.repository }}/statuses/${{ github.sha }} -f state=success -f context="step$i" -f description="$(echo "$line" | cut -c1-138)" >/dev/null; done < <(grep '^RESULT' out.txt | head -12)
