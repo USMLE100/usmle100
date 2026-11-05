@@ -19,7 +19,8 @@ const R = (s) => console.log('RESULT ' + s);
     const body = (await p.innerText('body')).replace(/\s+/g, ' ');
     R('3 at Stripe checkout: ' + new URL(p.url()).host + ' test=' + p.url().includes('cs_test') + ' amount ' + ((body.match(/\$[\d,]+\.\d\d/) || ['none'])[0]));
     const acc = await p.$('[data-testid="card-accordion-item-button"], button[aria-label*="Card" i]'); if (acc) await acc.click().catch(() => {});
-    await p.waitForSelector('#cardNumber', { timeout: 30000 }).catch(async (e) => { const t = (await p.innerText('body')).replace(/\s+/g, ' '); R('3b ' + t.slice(110, 240)); R('3c ' + t.slice(240, 370)); R('3d inputs: ' + (await p.$$eval('input,button', (els) => els.map((e) => e.id || e.name || e.getAttribute('data-testid') || '').filter(Boolean).join(','))).slice(0, 130)); throw e; });
+    for (let k = 0; k < 4 && !(await p.$('#cardNumber:visible')); k++) { await p.click('[data-testid="card-accordion-item-button"]', { force: true }).catch(() => {}); await p.waitForTimeout(3000); }
+    await p.waitForSelector('#cardNumber', { timeout: 15000, state: 'visible' }).catch(async (e) => { const t = (await p.innerText('body')).replace(/\s+/g, ' '); R('3b ' + t.slice(110, 240)); R('3c ' + t.slice(240, 370)); R('3d inputs: ' + (await p.$$eval('input,button', (els) => els.map((e) => e.id || e.name || e.getAttribute('data-testid') || '').filter(Boolean).join(','))).slice(0, 130)); throw e; });
     await p.fill('#cardNumber', '4242 4242 4242 4242'); await p.fill('#cardExpiry', '12 / 34'); await p.fill('#cardCvc', '123');
     if (await p.$('#billingName')) await p.fill('#billingName', 'Sandbox Buyer');
     if (await p.$('#billingPostalCode')) await p.fill('#billingPostalCode', '10001');
