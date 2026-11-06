@@ -96,7 +96,7 @@ export const ContactRow = () => (
       <li><a href={`mailto:${CONTACT.email}`}>{IC.mail}<span><small>Email</small>{CONTACT.email}</span></a></li>
       <li><a href={CONTACT.phoneSms}>{IC.text}<span><small>Text</small>{CONTACT.phoneDisplay}</span></a></li>
       <li><a href={CONTACT.phoneWhatsApp} {...ext}>{IC.wa}<span><small>WhatsApp</small>{CONTACT.phoneDisplay}</span></a></li>
-      <li><a href={CONTACT.tutoring} {...ext}>{IC.cal}<span><small>Tutoring</small>Book a $50 session</span></a></li>
+      <li><a href={CONTACT.tutoring} {...ext}>{IC.cal}<span><small>Tutoring</small>Book a tutoring session</span></a></li>
     </ul>
   </div>
 );
