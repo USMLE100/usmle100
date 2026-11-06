@@ -14,9 +14,9 @@ type Who = { label: string; tint: string; look: Look };
 export const WHO: Who[] = [
   { label: 'US Medical Students', tint: 'mint', look: { style: 'short', hair: '#2E2A26', skin: '#E8C9A8', shade: '#D4AE8B', top: '#2E936F', outfit: 'coat' } },
   { label: 'IMGs & FMGs', tint: 'blue', look: { style: 'long', hair: '#1F1B18', skin: '#C79068', shade: '#B07A55', top: '#8CB0B2', outfit: 'coat' } },
-  { label: 'Repeat Takers', tint: 'pink', look: { style: 'curly', hair: '#2B1E15', skin: '#8D5B3C', shade: '#76492E', top: '#956BAD', outfit: 'coat', lip: '#5E3221' } },
+  { label: 'Repeat Takers', tint: 'pink', look: { style: 'side', hair: '#5A4632', skin: '#D9A880', shade: '#C08F67', top: '#956BAD', outfit: 'coat', glasses: true } },
   { label: 'CBSE & Comp Exam Students', tint: 'cream', look: { style: 'hijab', hair: '#4F6075', skin: '#EDD3B5', shade: '#D7B996', top: '#C6A673', outfit: 'coat' } },
-  { label: 'Residency Applicants', tint: 'green', look: { style: 'side', hair: '#5A4632', skin: '#D9A880', shade: '#C08F67', top: '#1B6549', outfit: 'coat', glasses: true } },
+  { label: 'Residency Applicants', tint: 'green', look: { style: 'curly', hair: '#2B1E15', skin: '#8D5B3C', shade: '#76492E', top: '#1B6549', outfit: 'coat', lip: '#5E3221' } },
   { label: 'USMLE Step 1, 2 & 3 Students', tint: 'mint', look: { style: 'bun', hair: '#232019', skin: '#A9714B', shade: '#93603D', top: '#EB8771', outfit: 'coat', lip: '#7A3E2A' } },
 ];
 const FIG = WHO.map((w) => personSvg(w.look, 'hw-fig'));
