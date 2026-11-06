@@ -62,7 +62,7 @@ export const INCLUDES: Record<string, string[]> = {
 
 export const INDIVIDUAL = [
   { name: 'Evening Questions', price: '$160', unit: 'per month', desc: 'Live, instructor-guided USMLE-style question review. Paid month by month.' },
-  { name: 'One-on-one tutoring', price: '$50', unit: 'per 60-minute session', desc: 'Personalised tutoring on your own weak areas, question interpretation and clinical reasoning.' },
+  { name: 'One-on-one tutoring', price: '$49.99', unit: 'per 60-minute session', desc: 'Personalised tutoring on your own weak areas, question interpretation and clinical reasoning.' },
   { name: 'USMLE100 Course Book', price: money(BOOK_PRICE_CENTS), unit: 'one-time', desc: 'A structured companion resource supporting organised review of high-yield concepts.' },
 ];
 
@@ -133,7 +133,7 @@ publicRoutes.get('/', async (c) => {
           <div class="addons">
             <a class="addon tile-green" href="/programs"><span class="ti"><Icon name="school" size={22} /></span><h3>100-day programs</h3><p>Live lectures, recordings and the question bank, with Evening Questions and tutoring in the larger packages.</p>{from && <span class="p">From {from} <small>one-time</small></span>}</a>
             <a class="addon tile-sky" href="/programs#addons"><span class="ti"><Icon name="videocam" size={22} /></span><h3>Evening Questions</h3><p>Live question sessions on Monday, Wednesday and Friday evenings.</p><span class="p">$160 <small>per month</small></span></a>
-            <a class="addon tile-warm" href={CONTACT.tutoring} target="_blank" rel="noopener noreferrer"><span class="ti"><Icon name="person" size={22} /></span><h3>One-on-one tutoring</h3><p>A private hour on your own weak areas, over Zoom.</p><span class="p">$50 <small>per session</small></span><span class="book">Book a session <Icon name="arrow_forward" size={16} /></span></a>
+            <a class="addon tile-warm" href={CONTACT.tutoring} target="_blank" rel="noopener noreferrer"><span class="ti"><Icon name="person" size={22} /></span><h3>One-on-one tutoring</h3><p>A private hour on your own weak areas, over Zoom.</p><span class="p">$49.99 <small>per session</small></span><span class="book">Book a session <Icon name="arrow_forward" size={16} /></span></a>
           </div>
         </div>
       </section>
@@ -213,8 +213,8 @@ const FAQ = (p: { start: string | null }) => {
       'No. Recordings stream in your portal only, and your name and account number appear on the video. Your progress is saved, so you can pause and continue where you stopped. Your account works on up to 2 registered devices, and viewing limits are set out in the Terms of Service.',
     ],
     ['How do Evening Questions work?', 'Live question sessions on Monday, Wednesday and Friday evenings. Each month covers the next 12 classes from your start date, and you can rewatch them until 2 days after the 12th class goes up. Companion, Complete and MAX include 4 months.'],
-    ['How many tutoring sessions are included?', 'Complete includes 10 private one-on-one sessions and MAX includes 40, each 60 minutes. Extra sessions are $50 each.'],
-    ['Can I buy tutoring, Evening Questions or the Course Book separately?', 'Yes: one-on-one tutoring is $50 per session, Evening Questions is $160 per month and the Course Book is $199. Use the buttons above to ask us.'],
+    ['How many tutoring sessions are included?', 'Complete includes 10 private one-on-one sessions and MAX includes 40, each 60 minutes. Extra sessions are $49.99 each.'],
+    ['Can I buy tutoring, Evening Questions or the Course Book separately?', 'Yes: one-on-one tutoring is $49.99 per session, Evening Questions is $160 per month and the Course Book is $199. Use the buttons above to ask us.'],
   ];
   return (
     <div class="faq">
