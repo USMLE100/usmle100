@@ -10,4 +10,4 @@ jobs:
         env: { GH_TOKEN: "${{ github.token }}", TARGET: "${{ 'https://v12-frontend-usmle100.info-usmle100.workers.dev' }}" }
         run: |
           node .github/check.cjs > out.txt 2>&1 || true; cat out.txt
-          i=0; while IFS= read -r line; do i=$((i+1)); gh api repos/${{ github.repository }}/statuses/${{ github.sha }} -f state=success -f context="step$(printf %02d $i)" -f description="$(echo "$line" | cut -c1-138)" >/dev/null; done < <(grep '^RESULT' out.txt | head -12)
+          i=0; while IFS= read -r line; do i=$((i+1)); gh api repos/${{ github.repository }}/statuses/${{ github.sha }} -f state=success -f context="step$(printf %02d $i)" -f description="$(echo "$line" | cut -c1-138)" >/dev/null; done < <(grep '^RESULT' out.txt | head -20)
