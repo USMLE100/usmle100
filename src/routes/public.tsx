@@ -95,7 +95,7 @@ publicRoutes.get('/', async (c) => {
         <div class="wrap">
           {settings.student_count && <p class="join">Join <strong>{settings.student_count}</strong> students preparing with USMLE100</p>}
           <h1>Board prep, <em>taught live</em> by doctors.</h1>
-          <p class="exams">USMLE Step 1 · COMLEX · CBSE</p>
+          <p class="exams">USMLE Step 1, 2 &amp; 3 · COMLEX · CBSE</p>
           <p class="lead">Daily live classes. One-on-one tutoring. No endless video library. No guessing what to study next.</p>
           <div class="row">
             <a class="btn btn-gold" href="/programs">See programs</a>
