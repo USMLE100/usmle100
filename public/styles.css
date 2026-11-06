@@ -884,24 +884,41 @@ fieldset.bare legend { padding: 0; margin-bottom: 12px; }
 .hv-marq:hover .hv-row { animation-play-state: paused; }
 @keyframes hv-a { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 @keyframes hv-b { from { transform: translateX(-50%); } to { transform: translateX(0); } }
-.hv-card { margin: 0 20px 0 0; width: 430px; min-height: 230px; flex: none; border-radius: 20px; padding: 30px; display: flex; flex-direction: column; gap: 16px; }
+.hv-card { margin: 0 20px 0 0; width: 430px; height: 280px; flex: none; border-radius: 20px; padding: 26px 28px 22px; display: flex; flex-direction: column; gap: 12px; }
 .hv-card[data-t=mint] { background: #deede0; }
 .hv-card[data-t=blue] { background: #e4ecf2; }
 .hv-card[data-t=pink] { background: #f2e6ec; }
 .hv-card[data-t=cream] { background: #f2ebe1; }
 .hv-card[data-t=grey] { background: #f5f6f5; }
-.hv-name { font: 700 20px var(--display); color: #242220; }
-.hv-card blockquote { margin: 0; font-size: 16px; line-height: 1.5; color: rgba(36, 34, 32, .82); }
-.hv-photo { margin-right: 20px; width: 230px; min-height: 230px; flex: none; border-radius: 20px; overflow: hidden; display: grid; place-items: end center; }
+.hv-who { display: flex; flex-direction: column; gap: 2px; margin: 0; }
+.hv-name { font: 700 20px/1.2 var(--display); color: #242220; }
+.hv-school { font: 500 13.5px/1.35 var(--text); color: rgba(36, 34, 32, .62); }
+.hv-text { margin: 0; font-size: 15.5px; line-height: 1.55; color: rgba(36, 34, 32, .84); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; line-clamp: 5; overflow: hidden; }
+.hv-more { align-self: flex-start; margin-top: auto; border: 0; background: none; padding: 4px 0; font: 700 14px var(--text); color: var(--green); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.hv-more:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 4px; }
+/* Without scripts the whole testimonial shows and the button is hidden. */
+html:not(.hv-js) .hv-text { -webkit-line-clamp: unset; line-clamp: none; overflow: visible; }
+html:not(.hv-js) .hv-card { height: auto; }
+html:not(.hv-js) .hv-more { display: none; }
+.hv-marq.hv-paused .hv-row, .hv-marq:focus-within .hv-row { animation-play-state: paused; }
+.hv-note { max-width: 680px; margin: 28px auto 0; padding: 0 16px; text-align: center; font: 400 12.5px/1.5 var(--text); color: var(--muted, #6f6a64); }
+.hv-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); border: 0; border-radius: 20px; padding: 28px 28px 24px; background: #fff; color: #242220; box-shadow: 0 24px 60px rgba(17, 33, 17, .28); }
+.hv-dialog::backdrop { background: rgba(17, 33, 17, .45); }
+.hv-dialog .hv-who { padding-right: 36px; margin-bottom: 14px; }
+.hv-dtext { margin: 0; font-size: 16px; line-height: 1.65; white-space: pre-line; }
+.hv-close { position: absolute; top: 12px; right: 12px; width: 36px; height: 36px; border-radius: 999px; border: 0; background: #f2f1ee; font: 600 22px/1 var(--text); color: #242220; cursor: pointer; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.hv-photo { margin-right: 20px; width: 260px; height: 280px; flex: none; border-radius: 20px; overflow: hidden; display: grid; place-items: end center; }
 .hv-photo[data-t=sage] { background: #c7dccf; }
 .hv-photo[data-t=olive] { background: #a58979; }
 .hv-photo[data-t=stone] { background: #e6ded4; }
 .hv-photo[data-t=mist] { background: #e4ecf2; }
-.hv-photo svg { width: 200px; height: 222px; display: block; }
+.hv-photo svg { width: 232px; height: 257px; display: block; }
 @media (max-width: 599.98px) {
-  .hv-card { width: 300px; padding: 22px; min-height: 200px; }
-  .hv-photo { width: 200px; min-height: 200px; }
-  .hv-photo svg { width: 174px; height: 193px; }
+  .hv-card { width: 300px; height: 300px; padding: 22px 22px 18px; }
+  .hv-text { -webkit-line-clamp: 7; line-clamp: 7; font-size: 15px; }
+  .hv-photo { width: 220px; height: 300px; }
+  .hv-photo svg { width: 210px; height: 233px; }
 }
 /* Reduced motion: nothing moves; each row scrolls sideways by hand and shows one set of cards. */
 @media (prefers-reduced-motion: reduce) {

@@ -30,18 +30,24 @@ describe('who we teach', () => {
 });
 
 describe('testimonials', () => {
-  it('is not shown on the homepage until real, approved testimonials are added', async () => {
-    expect(TESTIMONIALS.length).toBe(0);
-    const html = await home();
-    expect(html).not.toContain('class="hv"');
-    expect(html).not.toContain('raving about us');
-  });
-  it('when given testimonials, shows each student’s exact words and name with no ratings', () => {
-    const items = [{ name: 'A. Student', quote: 'Exact words.' }, { name: 'B. Student', quote: 'Other words.' }];
-    const html = renderToString(Testimonials({ items }) as any);
-    expect(html).toContain('There’s a reason students are');
-    expect(html).toContain('“Exact words.”');
-    expect(html).toContain('B. Student');
-    expect(html).not.toMatch(/★|stars/);
+  const decode = (h: string) => h.replace(/&#39;|&#x27;/g, "'").replace(/&quot;/g, '"');
+  it('shows all six students with name, school and their complete words exactly as supplied, and the disclaimer once', async () => {
+    const { TESTIMONIALS: T, TESTIMONIAL_DISCLAIMER } = await import('../src/views/testimonials');
+    expect(T.map((t) => t.name)).toEqual(['Mohammed', 'Maria', 'Elijah', 'Jennifer', 'Amelia', 'José']);
+    expect(new Set(T.map((t) => t.portrait)).size).toBe(6);
+    const html = decode(await home());
+    for (const t of T) {
+      expect(html, t.name).toContain(`<span class="hv-name">${t.name}</span><span class="hv-school">${t.school}</span>`);
+      // The complete testimonial is in the page (shortened only visually, with Read more).
+      expect(html, t.name).toContain(`“${t.quote}”`);
+    }
+    expect(html.split(TESTIMONIAL_DISCLAIMER).length - 1).toBe(1);
+    expect(html.indexOf(TESTIMONIAL_DISCLAIMER)).toBeGreaterThan(html.lastIndexOf('class="hv-row b"'));
+    expect(html).not.toMatch(/★|class="stars"/);
+    // Only these six testimonials appear, reused for the loop; copies are hidden from screen readers.
+    const names = [...html.matchAll(/<span class="hv-name">([^<]+)<\/span>/g)].map((m) => m[1]);
+    expect(new Set(names.filter(Boolean))).toEqual(new Set(T.map((t) => t.name)));
+    for (const m of html.matchAll(/<figure class="hv-card"[^>]*data-copy[^>]*>/g)) expect(m[0]).toContain('aria-hidden="true"');
+    expect(html).toContain('<dialog id="hv-dialog"');
   });
 });
