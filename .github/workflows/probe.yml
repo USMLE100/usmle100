@@ -1,13 +1,16 @@
 name: probe-route-check
 on: { push: { branches: [probe-route-check] } }
-permissions: { statuses: write, contents: read }
+permissions: { statuses: write, contents: write }
 jobs:
-  check:
+  iphone:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Read-only page check
-        env: { GH_TOKEN: "${{ github.token }}", TARGET: "${{ 'https://v12-frontend-usmle100.info-usmle100.workers.dev' }}" }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Screenshot the live homepage as an iPhone (Safari engine), read-only
         run: |
-          node .github/check.cjs > out.txt 2>&1 || true; cat out.txt
-          i=0; while IFS= read -r line; do i=$((i+1)); gh api repos/${{ github.repository }}/statuses/${{ github.sha }} -f state=success -f context="step$(printf %02d $i)" -f description="$(echo "$line" | cut -c1-138)" >/dev/null; done < <(grep '^RESULT' out.txt | head -20)
+          npm i --no-save playwright@1.48.2 >/dev/null 2>&1 && npx playwright install --with-deps webkit >/dev/null 2>&1
+          node .github/iphone.cjs || true
+          git config user.email noreply@anthropic.com; git config user.name Claude
+          git add shots && git commit -qm "iPhone screenshots of the live homepage (reference)" && git push -q origin HEAD:probe-route-check
