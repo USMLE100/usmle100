@@ -16,6 +16,7 @@ const R = (s) => console.log('RESULT ' + s);
     const nav = (home.match(/<nav aria-label="Footer">([\s\S]*?)<\/nav>/) || [])[1] || '';
     R(`${tag}: heading Our programs ${home.includes('<h2>Our programs</h2>')} · Three ways in gone ${!home.includes('Three ways in')} · Refunds in footer links ${nav.includes('/refunds')} · Refund policy in fine print ${home.includes('class="fine" href="/refunds"')}`);
     R(`${tag}: footer tutoring says 'Book a tutoring session' ${home.includes('Book a tutoring session')} · '$50 session' gone ${!home.includes('Book a $50 session')}`);
+    R(`${tag}: social order ${[...home.matchAll(/<span>(Facebook|WhatsApp group|Instagram)<\/span>/g)].map((m) => m[1]).join(' | ')}`);
     R(`${tag}: disclaimer ${home.split('Testimonials are furnished in an individual capacity').length - 1} · characters ${labels.length} · FAQ ${(home.match(/<summary>/g) || []).length} · css ${css.includes('.hv-more')}`);
   }
 })();
