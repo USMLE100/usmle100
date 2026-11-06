@@ -8,6 +8,8 @@ const R = (s) => console.log('RESULT ' + s);
     const labels = [...home.matchAll(/<a class="hw-tile"(?![^>]*data-copy)[^>]*>[\s\S]*?<span class="hw-cap"><span>([^<]+)<\/span>/g)].map((m) => m[1]);
     R(`${tag}: ${st.join(' · ')}`);
     R(`${tag}: characters ${labels.length}: ${labels.join(' | ')}`.slice(0, 138));
-    R(`${tag}: old 3 cards gone ${!home.includes('aud-wrap')} · testimonials hidden ${!home.includes('class="hv"')} · FAQ ${(home.match(/<summary>/g) || []).length} · css has rail ${css.includes('.hw-rail')}`);
+    const names = [...new Set([...home.matchAll(/<span class="hv-name">([^<]+)<\/span><span class="hv-school">([^<]+)<\/span>/g)].map((m) => m[1] + ' (' + m[2].replace(/&#39;|&#x27;/g, "'").split(' ').slice(0, 2).join(' ') + ')'))];
+    R(`${tag}: testimonials ${names.length}: ${names.join(', ')}`.slice(0, 138));
+    R(`${tag}: disclaimer ${home.split('Testimonials are furnished in an individual capacity').length - 1} · characters ${labels.length} · FAQ ${(home.match(/<summary>/g) || []).length} · css ${css.includes('.hv-more')}`);
   }
 })();
