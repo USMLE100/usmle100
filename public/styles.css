@@ -849,3 +849,66 @@ fieldset.bare legend { padding: 0; margin-bottom: 12px; }
 .focus-main { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
 .focus-inner { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 16px; }
 @media (max-width: 380px) { .pub-top .wrap { gap: 6px; } .logo-lockup { gap: 7px; } .pub-nav { gap: 4px; } .pub-nav .btn { padding: 0 10px; } }
+
+/* ---------- Homepage: who we teach + testimonials (restored from V12, owner 5 Nov 2026) ---------- */
+/* The rail overlaps the bottom of the green hero. Each head rises about 23px above its card; tiles keep 86px of room
+   above them, so heads stay inside the rail even when lifted on hover and are never clipped. */
+.hero-dark.hero-rail { padding-bottom: 160px; }
+.hw-rail { position: relative; z-index: 2; margin-top: -158px; overflow: hidden; padding: 12px 0 34px; }
+.hw-track { display: flex; width: max-content; animation: hw-slide 44s linear infinite; }
+.hw-rail:hover .hw-track, .hw-rail:focus-within .hw-track { animation-play-state: paused; }
+@keyframes hw-slide { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.hw-tile { flex: none; width: 230px; margin: 74px 20px 0 0; border-radius: 20px; background: #fff; border: 1px solid #ddd; position: relative; text-decoration: none; color: #242220; display: flex; flex-direction: column; transition: transform .22s cubic-bezier(.16, 1, .3, 1); }
+.hw-tile:hover, .hw-tile:focus-visible { transform: translateY(-6px); }
+.hw-tile:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.hw-photo { display: block; height: 160px; position: relative; border-radius: 20px 20px 0 0; }
+.hw-tile[data-t=mint] .hw-photo { background: #deede0; }
+.hw-tile[data-t=blue] .hw-photo { background: #e4ecf2; }
+.hw-tile[data-t=pink] .hw-photo { background: #f2e6ec; }
+.hw-tile[data-t=cream] .hw-photo { background: #f2ebe1; }
+.hw-tile[data-t=green] .hw-photo { background: #d6f2da; }
+.hw-pop { position: absolute; left: 50%; bottom: 0; width: 165px; height: 220px; transform: translateX(-50%); filter: drop-shadow(0 20px 22px rgba(36, 34, 32, .24)); transition: transform .22s cubic-bezier(.16, 1, .3, 1); }
+.hw-tile:hover .hw-pop { transform: translateX(-50%) translateY(-10px) scale(1.05); }
+.hw-fig { width: 165px; height: 220px; display: block; }
+.hw-cap { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 64px; padding: 12px 20px; font: 700 16px/1.25 var(--display); }
+.hw-cap .gic { flex: none; }
+
+.hv { padding: 64px 0 72px; overflow: hidden; }
+.hv-kick { margin: 0 auto 14px; text-align: center; font: 700 12px var(--text); letter-spacing: .1em; text-transform: uppercase; color: var(--ink); }
+.hv-head { margin: 0 auto 40px; max-width: 700px; padding: 0 16px; text-align: center; font: 800 clamp(28px, 6vw, 40px)/1.2 var(--display); letter-spacing: -.02em; text-wrap: balance; }
+.hv-head em { font-style: normal; color: var(--green); }
+.hv-marq { display: grid; gap: 20px; }
+.hv-row { display: flex; width: max-content; align-items: stretch; }
+.hv-row.a { animation: hv-a 54s linear infinite; }
+.hv-row.b { animation: hv-b 62s linear infinite; }
+.hv-marq:hover .hv-row { animation-play-state: paused; }
+@keyframes hv-a { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes hv-b { from { transform: translateX(-50%); } to { transform: translateX(0); } }
+.hv-card { margin: 0 20px 0 0; width: 430px; min-height: 230px; flex: none; border-radius: 20px; padding: 30px; display: flex; flex-direction: column; gap: 16px; }
+.hv-card[data-t=mint] { background: #deede0; }
+.hv-card[data-t=blue] { background: #e4ecf2; }
+.hv-card[data-t=pink] { background: #f2e6ec; }
+.hv-card[data-t=cream] { background: #f2ebe1; }
+.hv-card[data-t=grey] { background: #f5f6f5; }
+.hv-name { font: 700 20px var(--display); color: #242220; }
+.hv-card blockquote { margin: 0; font-size: 16px; line-height: 1.5; color: rgba(36, 34, 32, .82); }
+.hv-photo { margin-right: 20px; width: 230px; min-height: 230px; flex: none; border-radius: 20px; overflow: hidden; display: grid; place-items: end center; }
+.hv-photo[data-t=sage] { background: #c7dccf; }
+.hv-photo[data-t=olive] { background: #a58979; }
+.hv-photo[data-t=stone] { background: #e6ded4; }
+.hv-photo[data-t=mist] { background: #e4ecf2; }
+.hv-photo svg { width: 150px; height: 190px; display: block; }
+@media (max-width: 599.98px) {
+  .hv-card { width: 300px; padding: 22px; min-height: 200px; }
+  .hv-photo { width: 200px; min-height: 200px; }
+  .hv-photo svg { width: 130px; height: 165px; }
+}
+/* Reduced motion: nothing moves; each row scrolls sideways by hand and shows one set of cards. */
+@media (prefers-reduced-motion: reduce) {
+  .hw-track, .hv-row.a, .hv-row.b { animation: none; }
+  .hw-rail, .hv-marq > .hv-row { overflow-x: auto; }
+  .hw-rail { padding-left: 16px; }
+  .hv-marq { overflow: hidden; }
+  .hv-row { width: auto; padding: 0 16px; }
+  .hw-tile[data-copy], .hv-row [data-copy] { display: none; }
+}

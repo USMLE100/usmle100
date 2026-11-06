@@ -20,6 +20,7 @@ import { currentCohort, dayDate, fmtDate, money, todayUtc, ymdToUtc } from '../l
 import { getSettings } from '../lib/settings';
 import { enrollingCohort, enrollingLine } from '../lib/enrolling';
 import { HOME_FAQ } from '../views/homeFaq';
+import { Testimonials, WhoWeTeach } from '../views/homeSections';
 import { SPLASH_FLAG_JS } from '../views/splash';
 
 export type Pkg = { id: string; name: string; tagline: string; price_cents: number; one_on_one_sessions: number; evening_q_months: number; recommended: number };
@@ -66,18 +67,6 @@ export const INDIVIDUAL = [
 
 export const publicRoutes = new Hono<AppEnv>();
 
-/** Simple flat portrait used on the audience cards (original drawing, no photos). */
-const Bust = (p: { skin: string; hair: string; shirt: string; bg: string; long?: boolean }) => (
-  <svg viewBox="0 0 200 150" class="bust" aria-hidden="true" style={`background:${p.bg}`}>
-    {p.long && <path d="M62 52c0-30 18-44 38-44s38 14 38 44v58H62z" fill={p.hair} />}
-    <path d="M40 150c4-34 28-52 60-52s56 18 60 52z" fill={p.shirt} />
-    <rect x="88" y="78" width="24" height="30" rx="10" fill={p.skin} filter="brightness(.9)" />
-    <ellipse cx="100" cy="58" rx="28" ry="32" fill={p.skin} />
-    {!p.long && <path d="M72 54c-2-26 14-36 28-36s30 10 28 36c-6-12-16-16-28-16s-22 4-28 16z" fill={p.hair} />}
-    {p.long && <path d="M72 58c0-24 12-34 28-34s28 10 28 34c-8-14-18-18-28-18s-20 4-28 18z" fill={p.hair} />}
-    <path d="M90 104l10 10 10-10" fill="#fff" opacity=".9" />
-  </svg>
-);
 
 publicRoutes.get('/', async (c) => {
   const user = c.get('user');
@@ -88,7 +77,7 @@ publicRoutes.get('/', async (c) => {
   const free = (await c.env.DB.prepare('SELECT id, title, category FROM free_videos WHERE published = 1 ORDER BY sort, id LIMIT 6').all<{ id: number; title: string; category: string }>()).results;
   return c.html(
     <PublicLayout title="Board prep, taught live by doctors" user={user} legal={{ terms: !!settings.terms_text, privacy: !!settings.privacy_text, refunds: !!settings.refund_text }}>
-      <section class="hero hero-dark">
+      <section class="hero hero-dark hero-rail">
         <div class="wrap">
           {settings.student_count && <p class="join">Join <strong>{settings.student_count}</strong> students preparing with USMLE100</p>}
           <h1>Board prep, <em>taught live</em> by doctors.</h1>
@@ -101,13 +90,7 @@ publicRoutes.get('/', async (c) => {
         </div>
       </section>
 
-      <section class="aud-wrap" aria-label="Who it is for">
-        <div class="aud">
-          <a href="/programs"><Bust bg="#e3eee6" skin="#e9c39f" hair="#3a2a20" shirt="#1e6b4c" /><span class="lbl">Medical students <Icon name="arrow_forward" class="gic" /></span></a>
-          <a href="/programs"><Bust bg="#e3ecf2" skin="#c98c62" hair="#1f1a17" shirt="#8cb0b2" long /><span class="lbl">IMGs &amp; FMGs <Icon name="arrow_forward" class="gic" /></span></a>
-          <a href="/programs"><Bust bg="#f2e6ec" skin="#8a5a3b" hair="#2b1d16" shirt="#9b6bb0" /><span class="lbl">Repeat takers <Icon name="arrow_forward" class="gic" /></span></a>
-        </div>
-      </section>
+      <WhoWeTeach />
 
       <div class="trust">
         <span><Icon name="verified" size={20} />Taught by doctors</span>
@@ -127,6 +110,8 @@ publicRoutes.get('/', async (c) => {
           </ul>
         </div>
       </section>
+
+      <Testimonials />
 
       <section class="ways">
         <div class="wrap">
