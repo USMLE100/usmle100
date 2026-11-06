@@ -89,8 +89,8 @@ export const ContactRow = () => (
   <div class="contact">
     <nav class="social" aria-label="USMLE100 on social media">
       <a href={CONTACT.facebook} {...ext}>{IC.fb}<span>Facebook</span></a>
-      <a href={CONTACT.instagram} {...ext}>{IC.ig}<span>Instagram</span></a>
       <a href={CONTACT.whatsappGroup} {...ext}>{IC.wa}<span>WhatsApp group</span></a>
+      <a href={CONTACT.instagram} {...ext}>{IC.ig}<span>Instagram</span></a>
     </nav>
     <ul class="reach" aria-label="Contact USMLE100">
       <li><a href={`mailto:${CONTACT.email}`}>{IC.mail}<span><small>Email</small>{CONTACT.email}</span></a></li>
