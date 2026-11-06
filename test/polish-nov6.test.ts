@@ -12,7 +12,7 @@ describe('homepage wording', () => {
     const h = await page('/');
     for (const s of [
       'Medical board prep, <em>taught live</em> by physicians.',
-      'Live interactive classes. One-on-one tutoring. A clear plan, so you always know what to study next.', 'Live interactive sessions',
+      'Live interactive classes. One-on-one tutoring. A clear plan, so you always know what to study next.', 'Live interactive sessions taught by US physicians, where you can ask questions in real time',
       'Individual learning plans', 'Foundational knowledge gaps', 'Time management and prioritization', 'Spaced repetition and active recall', 'Data-driven academic remediation', 'Early identification and intervention', 'Test-taking strategy', 'Clinical reasoning',
       'A Structured Approach to Medical Board Preparation',
       'Student experiences', 'In Our <em>Students’ Words</em>',

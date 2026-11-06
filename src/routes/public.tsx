@@ -121,7 +121,7 @@ publicRoutes.get('/', async (c) => {
         <div class="wrap">
           <h2>A Structured Approach to Medical Board Preparation</h2>
           <ul>
-            <li><Icon name="check" />Live interactive sessions</li>
+            <li><Icon name="check" />Live interactive sessions taught by US physicians, where you can ask questions in real time</li>
             <li><Icon name="check" /><span><strong>Every class is recorded</strong>, so you can catch up or rewatch</span></li>
             <li><Icon name="check" />A question bank that tracks your results by system and discipline</li>
             <li><Icon name="check" />Evening question sessions and private one-on-one tutoring</li>
