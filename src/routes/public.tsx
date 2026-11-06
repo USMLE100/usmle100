@@ -20,6 +20,7 @@ import { currentCohort, dayDate, fmtDate, money, todayUtc, ymdToUtc } from '../l
 import { getSettings } from '../lib/settings';
 import { enrollingCohort, enrollingLine } from '../lib/enrolling';
 import { HOME_FAQ } from '../views/homeFaq';
+import { CONTACT } from '../lib/contact';
 import { Testimonials, WhoWeTeach } from '../views/homeSections';
 import { SPLASH_FLAG_JS } from '../views/splash';
 
@@ -132,7 +133,7 @@ publicRoutes.get('/', async (c) => {
           <div class="addons">
             <a class="addon tile-green" href="/programs"><span class="ti"><Icon name="school" size={22} /></span><h3>100-day programs</h3><p>Live lectures, recordings and the question bank, with Evening Questions and tutoring in the larger packages.</p>{from && <span class="p">From {from} <small>one-time</small></span>}</a>
             <a class="addon tile-sky" href="/programs#addons"><span class="ti"><Icon name="videocam" size={22} /></span><h3>Evening Questions</h3><p>Live question sessions on Monday, Wednesday and Friday evenings.</p><span class="p">$160 <small>per month</small></span></a>
-            <a class="addon tile-warm" href="/programs#addons"><span class="ti"><Icon name="person" size={22} /></span><h3>One-on-one tutoring</h3><p>A private hour on your own weak areas, over Zoom.</p><span class="p">$50 <small>per session</small></span></a>
+            <a class="addon tile-warm" href={CONTACT.tutoring} target="_blank" rel="noopener noreferrer"><span class="ti"><Icon name="person" size={22} /></span><h3>One-on-one tutoring</h3><p>A private hour on your own weak areas, over Zoom.</p><span class="p">$50 <small>per session</small></span><span class="book">Book a session <Icon name="arrow_forward" size={16} /></span></a>
           </div>
         </div>
       </section>
@@ -170,7 +171,10 @@ publicRoutes.get('/', async (c) => {
         <div class="cta-band">
           <h2>Ready to start?</h2>
           <p>Pick a program, and your portal opens as soon as payment goes through.</p>
-          <a class="btn btn-primary" href="/programs">See programs</a>
+          <div class="cta-row">
+            <a class="btn btn-primary" href="/programs">See programs</a>
+            <a class="btn btn-outline" href={CONTACT.whatsappGroup} target="_blank" rel="noopener noreferrer">Join our WhatsApp group</a>
+          </div>
         </div>
       </section>
     </PublicLayout>,

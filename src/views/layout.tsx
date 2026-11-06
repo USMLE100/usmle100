@@ -1,3 +1,4 @@
+import { CONTACT } from '../lib/contact';
 import type { Child } from 'hono/jsx';
 import type { Shell, User } from '../lib/types';
 import { isAdmin, isOwner, isStaff } from '../lib/types';
@@ -60,6 +61,24 @@ function Doc(props: { title: string; children: Child; bodyClass?: string }) {
   );
 }
 
+/** Social and contact links (owner, 5 Nov 2026). Outside links open in a new tab. */
+const ext = { target: '_blank', rel: 'noopener noreferrer' };
+export const ContactRow = () => (
+  <div class="contact-row">
+    <div class="social" aria-label="USMLE100 on social media">
+      <a href={CONTACT.facebook} {...ext} aria-label="USMLE100 on Facebook"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="currentColor"/><path d="M13.3 19v-6h2l.3-2.4h-2.3V9.1c0-.7.2-1.2 1.2-1.2h1.2V5.8c-.2 0-1-.1-1.8-.1-1.8 0-3 1.1-3 3.1v1.8h-2V13h2v6z" fill="#fff"/></svg></a>
+      <a href={CONTACT.instagram} {...ext} aria-label="USMLE100 on Instagram"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" fill="currentColor"/><circle cx="12" cy="12" r="4.4" fill="none" stroke="#fff" stroke-width="2"/><circle cx="17.4" cy="6.6" r="1.3" fill="#fff"/></svg></a>
+      <a href={CONTACT.whatsappGroup} {...ext} aria-label="Join the USMLE100 WhatsApp group"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.6A10.3 10.3 0 0 0 3.2 17.3L1.8 22.4l5.3-1.4A10.3 10.3 0 1 0 12 1.6z" fill="currentColor"/><path d="M8.6 6.9c.2 0 .5 0 .7.5l1 2.3c.1.2.1.4 0 .6l-.5.7c-.1.2-.2.3 0 .6.5.9 1.2 1.7 2 2.3.6.4 1.1.7 1.4.8.2.1.4.1.5-.1l.8-.9c.2-.2.4-.2.6-.1l2.2 1c.3.2.4.3.4.5 0 .5-.1 1.2-.7 1.7-.6.5-1.6.9-2.6.6-2.3-.6-4.4-2.2-5.8-4.2-.7-1-1.2-2.1-1.2-3.2 0-1 .5-1.8 1-2.2.3-.3.5-.3.7-.3z" fill="#fff"/></svg></a>
+    </div>
+    <div class="reach">
+      <a href={`mailto:${CONTACT.email}`}>{CONTACT.email}</a>
+      <span class="phone">Text or WhatsApp {CONTACT.phoneDisplay}: <a href={CONTACT.phoneSms}>Text</a> · <a href={CONTACT.phoneWhatsApp} {...ext}>WhatsApp us</a></span>
+      <a href={CONTACT.whatsappGroup} {...ext}>Join our WhatsApp group</a>
+      <a href={CONTACT.tutoring} {...ext}>Book $50 tutoring</a>
+    </div>
+  </div>
+);
+
 export function PublicLayout(props: { title: string; user: User | null; children: Child; bare?: boolean; plain?: boolean; legal?: { terms: boolean; privacy: boolean; refunds?: boolean }; portalLink?: { href: string; label: string } }) {
   return (
     <Doc title={props.title}>
@@ -108,6 +127,7 @@ export function PublicLayout(props: { title: string; user: User | null; children
             {props.legal?.privacy && <a href="/privacy">Privacy</a>}
             {props.legal?.refunds && <a href="/refunds">Refunds</a>}
           </nav>
+          <ContactRow />
           © {new Date().getUTCFullYear()} USMLE100 · Not affiliated with NBME, FSMB or ECFMG.
         </footer>
       )}
