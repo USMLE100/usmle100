@@ -16,9 +16,16 @@ describe('who we teach', () => {
     expect(html).not.toContain('class="aud-wrap"');
     // Copies used for the loop are hidden from screen readers and keyboard.
     for (const m of html.matchAll(/<a class="hw-tile"[^>]*data-copy[^>]*>/g)) expect(m[0]).toMatch(/aria-hidden="true"/);
-    // Every figure has a unique clip id.
-    const ids = [...html.matchAll(/<clipPath id="([^"]+)"/g)].map((m) => m[1]);
-    expect(new Set(ids).size).toBe(ids.length);
+    // Every card holds one complete drawn person: face, eyes, neck, coat and stethoscope.
+    const figs = [...html.matchAll(/<span class="hw-pop">(<svg[\s\S]*?<\/svg>)<\/span>/g)].map((m) => m[1]);
+    expect(figs.length).toBe(24);
+    for (const f of figs.slice(0, 6)) {
+      expect(f).toContain('viewBox="0 0 200 222"');
+      expect(f).toContain('M100 50 C121 50');
+      expect(f).toContain('ellipse cx="87" cy="93"');
+      expect(f).toContain('#F7F6F2');
+      expect(f).toContain('stroke="#3B4A55"');
+    }
   });
 });
 

@@ -851,8 +851,8 @@ fieldset.bare legend { padding: 0; margin-bottom: 12px; }
 @media (max-width: 380px) { .pub-top .wrap { gap: 6px; } .logo-lockup { gap: 7px; } .pub-nav { gap: 4px; } .pub-nav .btn { padding: 0 10px; } }
 
 /* ---------- Homepage: who we teach + testimonials (restored from V12, owner 5 Nov 2026) ---------- */
-/* The rail overlaps the bottom of the green hero. Each head rises about 23px above its card; tiles keep 86px of room
-   above them, so heads stay inside the rail even when lifted on hover and are never clipped. */
+/* The rail overlaps the bottom of the green hero. Each figure stands in its card with only the head rising a little
+   above the top edge; tiles keep 86px of room above them, so heads are never clipped, even when lifted on hover. */
 .hero-dark.hero-rail { padding-bottom: 160px; }
 .hw-rail { position: relative; z-index: 2; margin-top: -158px; overflow: hidden; padding: 12px 0 34px; }
 .hw-track { display: flex; width: max-content; animation: hw-slide 44s linear infinite; }
@@ -861,15 +861,15 @@ fieldset.bare legend { padding: 0; margin-bottom: 12px; }
 .hw-tile { flex: none; width: 230px; margin: 74px 20px 0 0; border-radius: 20px; background: #fff; border: 1px solid #ddd; position: relative; text-decoration: none; color: #242220; display: flex; flex-direction: column; transition: transform .22s cubic-bezier(.16, 1, .3, 1); }
 .hw-tile:hover, .hw-tile:focus-visible { transform: translateY(-6px); }
 .hw-tile:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
-.hw-photo { display: block; height: 160px; position: relative; border-radius: 20px 20px 0 0; }
+.hw-photo { display: block; height: 160px; position: relative; border-radius: 20px 20px 0 0; border-bottom: 1px solid rgba(36, 34, 32, .06); }
 .hw-tile[data-t=mint] .hw-photo { background: #deede0; }
 .hw-tile[data-t=blue] .hw-photo { background: #e4ecf2; }
 .hw-tile[data-t=pink] .hw-photo { background: #f2e6ec; }
 .hw-tile[data-t=cream] .hw-photo { background: #f2ebe1; }
 .hw-tile[data-t=green] .hw-photo { background: #d6f2da; }
-.hw-pop { position: absolute; left: 50%; bottom: 0; width: 165px; height: 220px; transform: translateX(-50%); filter: drop-shadow(0 20px 22px rgba(36, 34, 32, .24)); transition: transform .22s cubic-bezier(.16, 1, .3, 1); }
-.hw-tile:hover .hw-pop { transform: translateX(-50%) translateY(-10px) scale(1.05); }
-.hw-fig { width: 165px; height: 220px; display: block; }
+.hw-pop { position: absolute; left: 50%; bottom: 0; width: 200px; height: 222px; transform: translateX(-50%); filter: drop-shadow(0 4px 6px rgba(36, 34, 32, .12)); transition: transform .22s cubic-bezier(.16, 1, .3, 1); }
+.hw-tile:hover .hw-pop { transform: translateX(-50%) translateY(-4px); }
+.hw-pop svg { width: 200px; height: 222px; display: block; }
 .hw-cap { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 64px; padding: 12px 20px; font: 700 16px/1.25 var(--display); }
 .hw-cap .gic { flex: none; }
 
@@ -897,11 +897,11 @@ fieldset.bare legend { padding: 0; margin-bottom: 12px; }
 .hv-photo[data-t=olive] { background: #a58979; }
 .hv-photo[data-t=stone] { background: #e6ded4; }
 .hv-photo[data-t=mist] { background: #e4ecf2; }
-.hv-photo svg { width: 150px; height: 190px; display: block; }
+.hv-photo svg { width: 200px; height: 222px; display: block; }
 @media (max-width: 599.98px) {
   .hv-card { width: 300px; padding: 22px; min-height: 200px; }
   .hv-photo { width: 200px; min-height: 200px; }
-  .hv-photo svg { width: 130px; height: 165px; }
+  .hv-photo svg { width: 174px; height: 193px; }
 }
 /* Reduced motion: nothing moves; each row scrolls sideways by hand and shows one set of cards. */
 @media (prefers-reduced-motion: reduce) {
