@@ -42,7 +42,7 @@ export const initials = (name: string) =>
     .slice(0, 2)
     .toUpperCase() || 'U';
 
-const SHARE_TEXT = 'Live classes every weekday taught by physicians, one-on-one tutoring and a structured 100-day program.';
+const SHARE_TEXT = 'Live interactive classes taught by physicians, one-on-one tutoring and a structured 100-day program.';
 
 function Doc(props: { title: string; fullTitle?: string; children: Child; bodyClass?: string }) {
   return (

@@ -95,7 +95,7 @@ publicRoutes.get('/', async (c) => {
           {settings.student_count && <p class="join">Join <strong>{settings.student_count}</strong> students preparing with USMLE100</p>}
           <h1>Medical board prep, <em>taught live</em> by physicians.</h1>
           <p class="exams">USMLE Step 1, 2 &amp; 3 · COMLEX · CBSE</p>
-          <p class="lead">Live classes every weekday. One-on-one tutoring. A clear plan, so you always know what to study next.</p>
+          <p class="lead">Live interactive classes. One-on-one tutoring. A clear plan, so you always know what to study next.</p>
           <div class="row">
             <a class="btn btn-primary" href="/programs">Explore Programs</a>
             <a class="btn btn-ghost-light" href={user ? '/dashboard' : '/sign-up'}>{user ? 'Open portal' : 'Create account'}</a>
@@ -121,7 +121,7 @@ publicRoutes.get('/', async (c) => {
         <div class="wrap">
           <h2>A Structured Approach to Medical Board Preparation</h2>
           <ul>
-            <li><Icon name="check" />90 days of live lectures on weekdays, then a 10-day exam window</li>
+            <li><Icon name="check" />Live interactive sessions</li>
             <li><Icon name="check" /><span><strong>Every class is recorded</strong>, so you can catch up or rewatch</span></li>
             <li><Icon name="check" />A question bank that tracks your results by system and discipline</li>
             <li><Icon name="check" />Evening question sessions and private one-on-one tutoring</li>
