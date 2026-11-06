@@ -181,3 +181,15 @@ describe('Day 160: paid course access ends together', () => {
     expect((await db.prepare("SELECT COUNT(*) AS n FROM enrollments WHERE user_id = ? AND status = 'active'").bind(s.id).first<any>()).n).toBe(1);
   });
 });
+
+describe('Evening Questions included with a program start on the New York date of payment', () => {
+  it('a payment after 7 pm New York time (already the next day in UTC) starts that same evening', async () => {
+    const { nyYmdOf } = await import('../src/lib/evening');
+    // Monday 16 Nov 2026, 7:45 pm EST = 00:45 UTC on the 17th.
+    expect(nyYmdOf('2026-11-17 00:45:00')).toBe('2026-11-16');
+    expect(nyYmdOf('2026-11-17T00:45:00.000Z')).toBe('2026-11-16');
+    expect(nyYmdOf('2026-11-16 15:00:00')).toBe('2026-11-16');
+    // Summer time: 8 pm EDT on 1 Jul = 00:00 UTC on 2 Jul.
+    expect(nyYmdOf('2027-07-02 00:00:00')).toBe('2027-07-01');
+  });
+});

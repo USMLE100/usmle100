@@ -15,6 +15,13 @@ export const todayYmd = () => ymdOf(todayUtc());
 /** New York date a recording went live ("2026-11-02 23:10:00" is stored in UTC). */
 const liveYmd = (s: { live_at: string | null }) => (s.live_at ? ymdOf(todayUtc(new Date(s.live_at.replace(' ', 'T') + 'Z'))) : null);
 
+/** New York date of a stored UTC time ("2026-11-16 00:45:00" or ISO). Payments after 7 pm ET are already "tomorrow" in UTC. */
+export const nyYmdOf = (utc: string) => {
+  const iso = utc.includes('T') ? utc : utc.replace(' ', 'T');
+  const d = new Date(/Z|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z');
+  return Number.isNaN(d.getTime()) ? utc.slice(0, 10) : ymdOf(todayUtc(d));
+};
+
 type Sess = Pick<EveningSession, 'id' | 'session_date' | 'status' | 'live_at'>;
 export type Sub = { start: string; months: number };
 
@@ -64,17 +71,20 @@ export type EveningAccess =
 
 async function subsFor(db: D1Database, userId: number): Promise<(Sub & { id?: number })[]> {
   const manual = (await db.prepare('SELECT id, start_date AS start, months FROM evening_subscriptions WHERE user_id = ? ORDER BY start_date').bind(userId).all<Sub & { id: number }>()).results;
-  // Months included with Companion, Complete and MAX start on the later of payment and the cohort's Day 1.
+  // Months included with Companion, Complete and MAX start on the later of payment (its New York date) and the cohort's Day 1.
   const pkg = (
     await db
       .prepare(
-        `SELECT substr(COALESCE(e.paid_at, e.created_at), 1, 10) AS paid, p.evening_q_months AS months, c.start_date
+        `SELECT COALESCE(e.paid_at, e.created_at) AS paid_at, p.evening_q_months AS months, c.start_date
          FROM enrollments e JOIN packages p ON p.id = e.package_id LEFT JOIN cohorts c ON c.id = e.cohort_id
          WHERE e.user_id = ? AND e.status = 'active' AND e.suspended_at IS NULL AND e.evening_removed_at IS NULL AND p.evening_q_months > 0`,
       )
       .bind(userId)
-      .all<{ paid: string; months: number; start_date: string | null }>()
-  ).results.map((r) => ({ start: r.start_date && r.start_date > r.paid ? r.start_date : r.paid, months: r.months }));
+      .all<{ paid_at: string; months: number; start_date: string | null }>()
+  ).results.map((r) => {
+    const paid = nyYmdOf(r.paid_at);
+    return { start: r.start_date && r.start_date > paid ? r.start_date : paid, months: r.months };
+  });
   return [...manual, ...pkg];
 }
 
@@ -118,13 +128,15 @@ export async function giveEveningMonths(db: D1Database, userId: number, start: s
 
 /** Months of Evening Questions a program includes, as they would start for this enrollment (see subsFor). */
 export async function includedEvening(db: D1Database, enrollmentId: number) {
-  return db
+  const r = await db
     .prepare(
-      `SELECT e.user_id, p.evening_q_months AS months,
-         CASE WHEN c.start_date > substr(COALESCE(e.paid_at, e.created_at), 1, 10) THEN c.start_date ELSE substr(COALESCE(e.paid_at, e.created_at), 1, 10) END AS start
+      `SELECT e.user_id, p.evening_q_months AS months, COALESCE(e.paid_at, e.created_at) AS paid_at, c.start_date
        FROM enrollments e JOIN packages p ON p.id = e.package_id LEFT JOIN cohorts c ON c.id = e.cohort_id
        WHERE e.id = ? AND e.status = 'active' AND e.suspended_at IS NULL AND e.evening_removed_at IS NULL AND p.evening_q_months > 0`,
     )
     .bind(enrollmentId)
-    .first<{ user_id: number; months: number; start: string }>();
+    .first<{ user_id: number; months: number; paid_at: string; start_date: string | null }>();
+  if (!r) return null;
+  const paid = nyYmdOf(r.paid_at);
+  return { user_id: r.user_id, months: r.months, start: r.start_date && r.start_date > paid ? r.start_date : paid };
 }
