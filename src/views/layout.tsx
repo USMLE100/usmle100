@@ -42,6 +42,8 @@ export const initials = (name: string) =>
     .slice(0, 2)
     .toUpperCase() || 'U';
 
+const SHARE_TEXT = 'Live daily classes taught by doctors, one-on-one tutoring and a structured 100-day program.';
+
 function Doc(props: { title: string; children: Child; bodyClass?: string }) {
   return (
     <html lang="en">
@@ -51,6 +53,17 @@ function Doc(props: { title: string; children: Child; bodyClass?: string }) {
         <meta name="theme-color" content="#ffffff" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <title>{props.title} · USMLE100</title>
+        {/* Share preview (owner, 5 Nov 2026): the card WhatsApp, Facebook and others show when usmle100.com is posted. */}
+        <meta name="description" content={SHARE_TEXT} />
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="USMLE100" />
+        <meta property="og:title" content={`USMLE100 · ${props.title}`} />
+        <meta property="og:description" content={SHARE_TEXT} />
+        <meta property="og:image" content="https://usmle100.com/share.jpg" />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta property="og:image:alt" content="USMLE100: Board prep, taught live by doctors" />
+        <meta name="twitter:card" content="summary_large_image" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
         <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500;600;700;800&family=Red+Hat+Text:wght@400;500;600;700&display=swap" />
