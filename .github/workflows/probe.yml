@@ -13,4 +13,4 @@ jobs:
           sleep 120
           node .github/live-polish.cjs || true
           git config user.email noreply@anthropic.com; git config user.name Claude
-          git add shots && git commit -qm "Live footer check (read-only)" && git push -q origin HEAD:probe-route-check
+          git add shots && git commit -qm "Live wording check (read-only)" && git push -q origin HEAD:probe-route-check

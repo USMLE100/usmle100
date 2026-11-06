@@ -1,6 +1,6 @@
 const fs = require('fs');
 (async () => {
-  const css = await (await fetch('https://usmle100.com/styles.css', { cache: 'no-store' })).text();
-  const out = `css has fix ${css.includes('.footer > nav a, .footer a.fine')} · old rule gone ${!css.includes('.footer nav a, .footer a.fine')} · home ${(await fetch('https://usmle100.com/')).status}`;
-  fs.mkdirSync('shots', { recursive: true }); fs.writeFileSync('shots/live-footer.txt', out + '\n'); console.log(out);
+  const h = (await (await fetch('https://usmle100.com/', { cache: 'no-store' })).text());
+  const out = `intro ${h.includes('Live interactive classes. One-on-one tutoring. A clear plan')} · point ${h.includes('Live interactive sessions</li>')} · old intro gone ${!h.includes('Live classes every weekday')} · old point gone ${!h.includes('90 days of live lectures on weekdays')}`;
+  fs.mkdirSync('shots', { recursive: true }); fs.writeFileSync('shots/live-wording.txt', out + '\n'); console.log(out);
 })();
