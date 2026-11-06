@@ -975,7 +975,7 @@ html:not(.hv-js) .hv-more { display: none; }
 .footer .copy { margin: 0; }
 .footer .tm { margin: 8px auto 0; max-width: 600px; font-size: 12px; line-height: 1.5; }
 /* Bigger tap areas for small links. */
-.footer nav a, .footer a.fine { display: inline-block; padding: 12px 4px; }
+.footer > nav a, .footer a.fine { display: inline-block; padding: 12px 4px; }
 details.more summary { min-height: 44px; }
 @media (max-width: 599.98px) {
   .hv-marq { -webkit-mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
