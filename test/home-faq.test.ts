@@ -22,6 +22,15 @@ describe('homepage FAQ (owner, 5 Nov 2026)', () => {
     expect(html).not.toContain('100 instructional days');
     expect(html).toContain('<a href="/programs">Programs page</a>');
   });
+  it('shows the first 8, with the other 10 in the page behind "See all 18 questions" (visible without scripts)', async () => {
+    const html = decode(await page('/'));
+    const more = html.indexOf('<div class="faq-more" id="faq-more">');
+    expect(more).toBeGreaterThan(0);
+    expect(html.slice(0, more).split('<summary>').length - 1 - (html.slice(0, html.indexOf('home-faq')).split('<summary>').length - 1)).toBe(8);
+    expect(html.indexOf(`<summary>${HOME_FAQ[8][0]}`)).toBeGreaterThan(more);
+    expect(html).toContain('See all 18 questions');
+    expect(html).not.toMatch(/<div class="faq-more"[^>]*hidden/);
+  });
   it('the Programs page FAQ is unchanged', async () => {
     const html = decode(await page('/programs'));
     for (const q of ['Are these one-time payments?', 'How long is the program?', 'Can I download the recordings?']) expect(html).toContain(q);

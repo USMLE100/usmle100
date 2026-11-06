@@ -68,6 +68,19 @@ export const INDIVIDUAL = [
 export const publicRoutes = new Hono<AppEnv>();
 
 
+/** Homepage FAQ (owner, 5 Nov 2026): the first 8 questions show; "See all" opens the rest in place. All 18 are always in the page. */
+const FAQ_SHOWN = 8;
+const faqItem = ([q, paras]: [string, string[]]) => (
+  <details>
+    <summary>{q}<span class="pl"><Icon name="close" size={16} /></span></summary>
+    {paras.map((t) => <p>{t === 'To get started, visit our Programs page, review the current package details, and choose the option that fits your preparation needs.' ? <>To get started, visit our <a href="/programs">Programs page</a>, review the current package details, and choose the option that fits your preparation needs.</> : t}</p>)}
+  </details>
+);
+// Without scripts every question shows and the button stays hidden.
+const FAQ_MORE_JS = `(function(){var m=document.getElementById('faq-more'),b=document.getElementById('faq-all');if(!m||!b)return;
+m.hidden=true;b.hidden=false;b.addEventListener('click',function(){m.hidden=false;b.setAttribute('aria-expanded','true');b.remove();
+var s=m.querySelector('summary');if(s)s.focus();});})();`;
+
 publicRoutes.get('/', async (c) => {
   const user = c.get('user');
   const settings = await getSettings(c.env.DB);
@@ -146,13 +159,11 @@ publicRoutes.get('/', async (c) => {
       <section class="wrap home-faq">
         <h2 class="section-title">Frequently Asked Questions</h2>
         <div class="faq">
-          {HOME_FAQ.map(([q, paras]) => (
-            <details>
-              <summary>{q}<span class="pl"><Icon name="close" size={16} /></span></summary>
-              {paras.map((t) => <p>{t === 'To get started, visit our Programs page, review the current package details, and choose the option that fits your preparation needs.' ? <>To get started, visit our <a href="/programs">Programs page</a>, review the current package details, and choose the option that fits your preparation needs.</> : t}</p>)}
-            </details>
-          ))}
+          {HOME_FAQ.slice(0, FAQ_SHOWN).map(faqItem)}
+          <div class="faq-more" id="faq-more">{HOME_FAQ.slice(FAQ_SHOWN).map(faqItem)}</div>
         </div>
+        <button type="button" class="btn btn-outline faq-all" id="faq-all" aria-controls="faq-more" aria-expanded="false" hidden>See all {HOME_FAQ.length} questions</button>
+        <script dangerouslySetInnerHTML={{ __html: FAQ_MORE_JS }} />
       </section>
 
       <section class="wrap" style="padding-bottom:56px">
