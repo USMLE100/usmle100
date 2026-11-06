@@ -16,6 +16,10 @@ const R = (s) => console.log('RESULT ' + s);
     const nav = (home.match(/<nav aria-label="Footer">([\s\S]*?)<\/nav>/) || [])[1] || '';
     R(`${tag}: heading Our programs ${home.includes('<h2>Our programs</h2>')} · Three ways in gone ${!home.includes('Three ways in')} · Refunds in footer links ${nav.includes('/refunds')} · Refund policy in fine print ${home.includes('class="fine" href="/refunds"')}`);
     R(`${tag}: footer tutoring says 'Book a tutoring session' ${home.includes('Book a tutoring session')} · '$50 session' gone ${!home.includes('Book a $50 session')}`);
+    const prog = (await (await fetch(base + '/programs')).text());
+    const terms = (await (await fetch(base + '/terms')).text());
+    const fifty = (t) => (t.match(/\$50(?![.\d])/g) || []).length;
+    R(`${tag}: tutoring $49.99 home ${home.includes('$49.99')} programs ${prog.includes('$49.99')} terms ${terms.includes('tutoring $49.99 per 60-minute')} · stray $50 home ${fifty(home)} programs ${fifty(prog)} · $160 ${prog.includes('$160')}`);
     R(`${tag}: social order ${[...home.matchAll(/<span>(Facebook|WhatsApp group|Instagram)<\/span>/g)].map((m) => m[1]).join(' | ')}`);
     R(`${tag}: disclaimer ${home.split('Testimonials are furnished in an individual capacity').length - 1} · characters ${labels.length} · FAQ ${(home.match(/<summary>/g) || []).length} · css ${css.includes('.hv-more')}`);
   }
