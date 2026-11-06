@@ -61,7 +61,7 @@ const PortraitTile = (p: { k: number; copy?: boolean }) => {
 /** A card shows the start of the testimonial; "Read more" opens the whole of it. The full text is always in the page. */
 const Quote = (p: { t: Testimonial; tint: string; id: string; copy?: boolean }) => (
   <figure class="hv-card" data-t={p.tint} aria-hidden={p.copy ? 'true' : undefined} data-copy={p.copy ? '' : undefined}>
-    <figcaption class="hv-who"><span class="hv-name">{p.t.name}</span><span class="hv-school">{p.t.school}</span></figcaption>
+    <figcaption class="hv-who"><span class="hv-name">{p.t.name}</span><span class="sr-only">, </span><span class="hv-school">{p.t.school}</span></figcaption>
     <blockquote class="hv-text" id={p.copy ? undefined : p.id}>“{p.t.quote}”</blockquote>
     <button type="button" class="hv-more" data-hv={p.id} tabindex={p.copy ? -1 : undefined}>Read more<span class="sr-only"> from {p.t.name}</span></button>
   </figure>
@@ -95,8 +95,8 @@ export const Testimonials = (p: { items?: Testimonial[] }) => {
     ).flat();
   return (
     <section class="hv" aria-labelledby="hv-head">
-      <p class="hv-kick">Those who chose USMLE100</p>
-      <h2 class="hv-head" id="hv-head">There’s a reason students are <em>raving about us</em>.</h2>
+      <p class="hv-kick">Student experiences</p>
+      <h2 class="hv-head" id="hv-head">In Our <em>Students’ Words</em></h2>
       <div class="hv-marq">
         {rows.map((list, r) => <div class={`hv-row ${r ? 'b' : 'a'}`}>{row(list, r)}</div>)}
       </div>

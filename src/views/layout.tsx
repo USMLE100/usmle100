@@ -42,9 +42,9 @@ export const initials = (name: string) =>
     .slice(0, 2)
     .toUpperCase() || 'U';
 
-const SHARE_TEXT = 'Live daily classes taught by doctors, one-on-one tutoring and a structured 100-day program.';
+const SHARE_TEXT = 'Live classes every weekday taught by physicians, one-on-one tutoring and a structured 100-day program.';
 
-function Doc(props: { title: string; children: Child; bodyClass?: string }) {
+function Doc(props: { title: string; fullTitle?: string; children: Child; bodyClass?: string }) {
   return (
     <html lang="en">
       <head>
@@ -52,17 +52,17 @@ function Doc(props: { title: string; children: Child; bodyClass?: string }) {
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
         <meta name="theme-color" content="#ffffff" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-        <title>{props.title} · USMLE100</title>
+        <title>{props.fullTitle ?? `${props.title} · USMLE100`}</title>
         {/* Share preview (owner, 5 Nov 2026): the card WhatsApp, Facebook and others show when usmle100.com is posted. */}
         <meta name="description" content={SHARE_TEXT} />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="USMLE100" />
-        <meta property="og:title" content={`USMLE100 · ${props.title}`} />
+        <meta property="og:title" content={props.fullTitle ?? `USMLE100 · ${props.title}`} />
         <meta property="og:description" content={SHARE_TEXT} />
         <meta property="og:image" content="https://usmle100.com/share.jpg" />
         <meta property="og:image:width" content="1200" />
         <meta property="og:image:height" content="630" />
-        <meta property="og:image:alt" content="USMLE100: Board prep, taught live by doctors" />
+        <meta property="og:image:alt" content="USMLE100: Medical board prep, taught live by physicians" />
         <meta name="twitter:card" content="summary_large_image" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
@@ -87,6 +87,7 @@ const IC = {
 /** Footer contact block: social links, then one line each for email, text, WhatsApp and tutoring. */
 export const ContactRow = () => (
   <div class="contact">
+    <p class="reply-time">We usually reply within 24 hours.</p>
     <nav class="social" aria-label="USMLE100 on social media">
       <a href={CONTACT.facebook} {...ext}>{IC.fb}<span>Facebook</span></a>
       <a href={CONTACT.whatsappGroup} {...ext}>{IC.wa}<span>WhatsApp group</span></a>
@@ -101,9 +102,9 @@ export const ContactRow = () => (
   </div>
 );
 
-export function PublicLayout(props: { title: string; user: User | null; children: Child; bare?: boolean; plain?: boolean; legal?: { terms: boolean; privacy: boolean; refunds?: boolean }; portalLink?: { href: string; label: string } }) {
+export function PublicLayout(props: { title: string; fullTitle?: string; user: User | null; children: Child; bare?: boolean; plain?: boolean; legal?: { terms: boolean; privacy: boolean; refunds?: boolean }; portalLink?: { href: string; label: string } }) {
   return (
-    <Doc title={props.title}>
+    <Doc title={props.title} fullTitle={props.fullTitle} bodyClass="pub">
       {!props.plain && (
       <header class="pub-top">
         <div class="wrap">
@@ -149,8 +150,11 @@ export function PublicLayout(props: { title: string; user: User | null; children
             {props.legal?.privacy && <a href="/privacy">Privacy</a>}
           </nav>
           <ContactRow />
-          © {new Date().getUTCFullYear()} USMLE100 · Not affiliated with NBME, FSMB or ECFMG.
-          {props.legal?.refunds && <> · <a class="fine" href="/refunds">Refund policy</a></>}
+          <p class="copy">
+            © {new Date().getUTCFullYear()} USMLE100 LLC. All rights reserved.
+            {props.legal?.refunds && <> · <a class="fine" href="/refunds">Refund policy</a></>}
+          </p>
+          <p class="tm">USMLE® is a registered trademark of FSMB and NBME, and COMLEX-USA® of NBOME. USMLE100 is not affiliated with or endorsed by them or by ECFMG.</p>
         </footer>
       )}
     </Doc>

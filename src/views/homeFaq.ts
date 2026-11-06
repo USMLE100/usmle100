@@ -74,7 +74,7 @@ export const HOME_FAQ: [string, string[]][] = [
       "Our physician-led classes combine foundational teaching, clinical reasoning, and NBME-style question discussions.",
       "We focus on helping students connect medical concepts, recognize important clinical clues, and understand the reasoning behind correct and incorrect answers.",
       "Rather than relying on memorization alone, we teach a structured approach to learning and applying medicine.",
-      "We’re building the most trusted platform for physicians throughout their careers, starting with the education they need to prepare for their licensing exams.",
+      "We’re building a trusted platform for physicians at every stage of their careers, starting with the education they need to prepare for their licensing exams.",
       "That’s our philosophy: Think Like the Test Maker™."
     ]
   ],

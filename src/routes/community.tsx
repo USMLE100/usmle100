@@ -528,7 +528,7 @@ community.get('/plans', async (c) => {
                 <p class="tagline">{p.tagline}</p>
                 {(p.evening_q_months > 0 || p.one_on_one_sessions > 0) && (
                   <div class="counts-big">
-                    {p.evening_q_months > 0 && <span><b>{p.evening_q_months}</b>months of Evening Q’s</span>}
+                    {p.evening_q_months > 0 && <span><b>{p.evening_q_months}</b>months of Evening Questions</span>}
                     {p.one_on_one_sessions > 0 && <span><b>{p.one_on_one_sessions}</b>1-on-1 sessions</span>}
                   </div>
                 )}

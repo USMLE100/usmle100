@@ -34,11 +34,10 @@ export const INCLUDES: Record<string, string[]> = {
     'Integrated review of foundational sciences and the major organ systems',
     'USMLE-style question interpretation and clinical reasoning',
     'Lecture recordings for review',
-    'Group practice test together during the exam window',
+    'Group practice test during the exam window',
   ],
   companion: [
     'Everything in Refresher, plus:',
-    '4 months of live Evening Q’s',
     'USMLE100 Comprehensive Course Book',
     'Discussion of commonly tested distractors and misconceptions',
     'Training in NBME-style clinical reasoning',
@@ -46,7 +45,7 @@ export const INCLUDES: Record<string, string[]> = {
   complete: [
     'Everything in Companion, plus:',
     '10 private one-on-one sessions (60 min each)',
-    'Personalised identification and remediation of knowledge gaps',
+    'Personalized identification and remediation of knowledge gaps',
     'Individual NBME- and UWorld-style question breakdowns',
     'Flexible session scheduling',
   ],
@@ -54,16 +53,16 @@ export const INCLUDES: Record<string, string[]> = {
     'Everything in Complete, plus:',
     '40 private one-on-one sessions (60 min each)',
     'Comprehensive assessment of academic strengths and weaknesses',
-    'Personalised study planning and preparation priorities',
+    'Personalized study planning and preparation priorities',
     'Exam-readiness guidance and progress review',
-    'Test-day strategy: pacing, breaks and exam-day organisation',
+    'Test-day strategy: pacing, breaks and exam-day organization',
   ],
 };
 
 export const INDIVIDUAL = [
   { name: 'Evening Questions', price: '$160', unit: 'per month', desc: 'Live, instructor-guided USMLE-style question review. Paid month by month.' },
-  { name: 'One-on-one tutoring', price: '$49.99', unit: 'per 60-minute session', desc: 'Personalised tutoring on your own weak areas, question interpretation and clinical reasoning.' },
-  { name: 'USMLE100 Course Book', price: money(BOOK_PRICE_CENTS), unit: 'one-time', desc: 'A structured companion resource supporting organised review of high-yield concepts.' },
+  { name: 'One-on-one tutoring', price: '$49.99', unit: 'per 60-minute session', desc: 'Personalized tutoring on your own weak areas, question interpretation and clinical reasoning.' },
+  { name: 'USMLE100 Course Book', price: money(BOOK_PRICE_CENTS), unit: 'one-time', desc: 'A structured companion resource supporting organized review of high-yield concepts.' },
 ];
 
 export const publicRoutes = new Hono<AppEnv>();
@@ -90,15 +89,15 @@ publicRoutes.get('/', async (c) => {
   // Titles only: the videos themselves need an account (owner: register before watching anything).
   const free = (await c.env.DB.prepare('SELECT id, title, category FROM free_videos WHERE published = 1 ORDER BY sort, id LIMIT 6').all<{ id: number; title: string; category: string }>()).results;
   return c.html(
-    <PublicLayout title="Board prep, taught live by doctors" user={user} legal={{ terms: !!settings.terms_text, privacy: !!settings.privacy_text, refunds: !!settings.refund_text }}>
+    <PublicLayout title="Physician-Led USMLE, COMLEX & CBSE Preparation" fullTitle="USMLE100 · Physician-Led USMLE, COMLEX & CBSE Preparation" user={user} legal={{ terms: !!settings.terms_text, privacy: !!settings.privacy_text, refunds: !!settings.refund_text }}>
       <section class="hero hero-dark hero-rail">
         <div class="wrap">
           {settings.student_count && <p class="join">Join <strong>{settings.student_count}</strong> students preparing with USMLE100</p>}
-          <h1>Board prep, <em>taught live</em> by doctors.</h1>
+          <h1>Medical board prep, <em>taught live</em> by physicians.</h1>
           <p class="exams">USMLE Step 1, 2 &amp; 3 · COMLEX · CBSE</p>
-          <p class="lead">Daily live classes. One-on-one tutoring. No endless video library. No guessing what to study next.</p>
+          <p class="lead">Live classes every weekday. One-on-one tutoring. A clear plan, so you always know what to study next.</p>
           <div class="row">
-            <a class="btn btn-gold" href="/programs">See programs</a>
+            <a class="btn btn-primary" href="/programs">Explore Programs</a>
             <a class="btn btn-ghost-light" href={user ? '/dashboard' : '/sign-up'}>{user ? 'Open portal' : 'Create account'}</a>
           </div>
         </div>
@@ -107,15 +106,15 @@ publicRoutes.get('/', async (c) => {
       <WhoWeTeach />
 
       <div class="trust">
-        <span><Icon name="verified" size={20} />Taught by doctors</span>
-        <span><Icon name="videocam" size={20} />Live daily</span>
+        <span><Icon name="verified" size={20} />Taught by physicians</span>
+        <span><Icon name="videocam" size={20} />Live every weekday</span>
+        <span><Icon name="school" size={20} />100-day curriculum</span>
         <span><Icon name="monitoring" size={20} />Progress tracking</span>
-        <span><Icon name="premium" size={20} />One price</span>
       </div>
 
       <section class="pass">
         <div class="wrap">
-          <h2>Pass your boards without teaching yourself.</h2>
+          <h2>A Structured Approach to Medical Board Preparation</h2>
           <ul>
             <li><Icon name="check" />90 days of live lectures on weekdays, then a 10-day exam window</li>
             <li><Icon name="check" /><span><strong>Every class is recorded</strong>, so you can catch up or rewatch</span></li>
@@ -131,8 +130,8 @@ publicRoutes.get('/', async (c) => {
         <div class="wrap">
           <h2>Our programs</h2>
           <div class="addons">
-            <a class="addon tile-green" href="/programs"><span class="ti"><Icon name="school" size={22} /></span><h3>100-day programs</h3><p>Live lectures, recordings and the question bank, with Evening Questions and tutoring in the larger packages.</p>{from && <span class="p">From {from} <small>one-time</small></span>}</a>
-            <a class="addon tile-sky" href="/programs#addons"><span class="ti"><Icon name="videocam" size={22} /></span><h3>Evening Questions</h3><p>Live question sessions on Monday, Wednesday and Friday evenings.</p><span class="p">$160 <small>per month</small></span></a>
+            <a class="addon tile-green" href="/programs"><span class="ti"><Icon name="school" size={22} /></span><h3>100-Day Programs</h3><p>Live lectures, recordings and the question bank, with Evening Questions and tutoring in the larger packages.</p>{from && <span class="p">From {from} <small>one-time</small></span>}<span class="book">View programs <Icon name="arrow_forward" size={16} /></span></a>
+            <a class="addon tile-sky" href="/programs#addons"><span class="ti"><Icon name="videocam" size={22} /></span><h3>Evening Questions</h3><p>Live question sessions on Monday, Wednesday and Friday evenings.</p><span class="p">$160 <small>per month</small></span><span class="book">Learn more <Icon name="arrow_forward" size={16} /></span></a>
             <a class="addon tile-warm" href={CONTACT.tutoring} target="_blank" rel="noopener noreferrer"><span class="ti"><Icon name="person" size={22} /></span><h3>One-on-one tutoring</h3><p>A private hour on your own weak areas, over Zoom.</p><span class="p">$49.99 <small>per session</small></span><span class="book">Book a session <Icon name="arrow_forward" size={16} /></span></a>
           </div>
         </div>
@@ -169,12 +168,12 @@ publicRoutes.get('/', async (c) => {
 
       <section class="wrap" style="padding-bottom:56px">
         <div class="cta-band">
-          <h2>Ready to start?</h2>
-          <p>Pick a program, and your portal opens as soon as payment goes through.</p>
+          <h2>Begin Your Preparation With USMLE100</h2>
+          <p>Compare our programs and start learning with physicians from Day 1.</p>
           <div class="cta-row">
-            <a class="btn btn-primary" href="/programs">See programs</a>
-            <a class="btn btn-outline" href={CONTACT.whatsappGroup} target="_blank" rel="noopener noreferrer">Join our WhatsApp group</a>
+            <a class="btn btn-primary" href="/programs">Explore Programs</a>
           </div>
+          <p class="cta-small"><a href={CONTACT.whatsappGroup} target="_blank" rel="noopener noreferrer">Questions? Join our WhatsApp group</a></p>
         </div>
       </section>
     </PublicLayout>,
@@ -186,7 +185,7 @@ export const KICKER: Record<string, string> = {
   refresher: 'Comprehensive foundational review',
   companion: 'Comprehensive learning and structured question practice',
   complete: 'Learning plus private tutoring',
-  max: 'Our most complete program',
+  max: 'Full curriculum plus personal mentorship',
 };
 /** How many lines of the package list show before "Show full feature list". */
 const SHOW = 4;
@@ -197,24 +196,24 @@ const COMPARE: Row[] = [
   { label: 'Lecture recordings for review', cells: [true, true, true, true] },
   { label: 'USMLE-style question interpretation and clinical reasoning', cells: [true, true, true, true] },
   { label: 'Group practice test in the exam window', cells: [true, true, true, true] },
-  { label: 'Live Evening Q’s', cells: [false, '4 months', '4 months', '4 months'] },
+  { label: 'Live Evening Questions', cells: [false, '4 months', '4 months', '4 months'] },
   { label: 'USMLE100 Comprehensive Course Book', cells: [false, true, true, true] },
   { label: 'Private one-on-one sessions (60 min)', cells: [false, false, '10', '40'] },
-  { label: 'Personalised study planning and test-day strategy', cells: [false, false, false, true] },
+  { label: 'Personalized study planning and test-day strategy', cells: [false, false, false, true] },
 ];
 
 const FAQ = (p: { start: string | null }) => {
   const qa: [string, string][] = [
     ['Are these one-time payments?', 'Yes. Each package is a one-time enrollment price, not a subscription. Evening Questions bought on its own is paid month by month.'],
     ['How long is the program?', `100 days: 90 weekday lecture days, then a 10-weekday exam window.${p.start ? ` The next cohort starts on ${p.start}.` : ''}`],
-    ['How long can I watch the lecture recordings?', 'Until 60 days after the last day of your program (Day 100).'],
+    ['How long can I watch the lecture recordings?', 'Your course access, including lectures, recordings and the question bank, lasts until Day 160: 60 days after the last day of your program (Day 100).'],
     [
       'Can I download the recordings?',
       'No. Recordings stream in your portal only, and your name and account number appear on the video. Your progress is saved, so you can pause and continue where you stopped. Your account works on up to 2 registered devices, and viewing limits are set out in the Terms of Service.',
     ],
     ['How do Evening Questions work?', 'Live question sessions on Monday, Wednesday and Friday evenings. Each month covers the next 12 classes from your start date, and you can rewatch them until 2 days after the 12th class goes up. Companion, Complete and MAX include 4 months.'],
     ['How many tutoring sessions are included?', 'Complete includes 10 private one-on-one sessions and MAX includes 40, each 60 minutes. Extra sessions are $49.99 each.'],
-    ['Can I buy tutoring, Evening Questions or the Course Book separately?', 'Yes: one-on-one tutoring is $49.99 per session, Evening Questions is $160 per month and the Course Book is $199. Use the buttons above to ask us.'],
+    ['Can I buy tutoring, Evening Questions or the Course Book separately?', 'Yes: one-on-one tutoring is $49.99 per session, Evening Questions is $160 per month and the Course Book is $199. Use the buttons above to book a session or ask us.'],
   ];
   return (
     <div class="faq">
@@ -240,7 +239,7 @@ publicRoutes.get('/programs', async (c) => {
     <>
       <div class="page-head">
         <div class="eyebrow">Programs &amp; tuition</div>
-        <h1>Preparation Packages</h1>
+        <h1>Our Programs</h1>
         <p>Structured live instruction, question review and one-on-one tutoring. Every package is a one-time enrollment fee.</p>
       </div>
       <div class="pkgs">
@@ -255,7 +254,7 @@ publicRoutes.get('/programs', async (c) => {
               <div class="price"><b>{money(p.price_cents)}</b><span>one-time enrollment</span></div>
               {(p.one_on_one_sessions > 0 || p.evening_q_months > 0) && (
                 <div class="counts">
-                  {p.evening_q_months > 0 && <span><Icon name="videocam" size={18} />{p.evening_q_months} months of Evening Q’s</span>}
+                  {p.evening_q_months > 0 && <span><Icon name="videocam" size={18} />{p.evening_q_months} months of Evening Questions</span>}
                   {p.one_on_one_sessions > 0 && <span><Icon name="person" size={18} />{p.one_on_one_sessions} one-on-one sessions</span>}
                 </div>
               )}
@@ -309,8 +308,12 @@ publicRoutes.get('/programs', async (c) => {
             <h3>{i.name}</h3>
             <span class="p">{i.price} <small>{i.unit}</small></span>
             <p>{i.desc}</p>
-            {settings.contact_email && (
-              i.name === 'USMLE100 Course Book' ? <a class="btn btn-primary" href="/buy/course-book">Buy the Course Book</a> : <a class="btn btn-primary" href={`mailto:${settings.contact_email}?subject=${encodeURIComponent('USMLE100: ' + i.name)}`}>Inquire about {i.name}</a>
+            {i.name === 'USMLE100 Course Book' ? (
+              settings.contact_email && <a class="btn btn-primary" href="/buy/course-book">Buy the Course Book</a>
+            ) : i.name === 'One-on-one tutoring' ? (
+              <a class="btn btn-primary" href={CONTACT.tutoring} target="_blank" rel="noopener noreferrer">Book a tutoring session</a>
+            ) : (
+              settings.contact_email && <a class="btn btn-primary" href={`mailto:${settings.contact_email}?subject=${encodeURIComponent('USMLE100: ' + i.name)}`}>Ask about {i.name}</a>
             )}
           </div>
         ))}
@@ -912,7 +915,7 @@ const BookCheckout = (p: { user: any; owned: boolean; cancelled?: boolean; pendi
       <div class="page-head">
         <div class="eyebrow">Course Book</div>
         <h1>USMLE100 Course Book</h1>
-        <p>A structured companion resource supporting organised review of high-yield concepts: written chapters you read online in your portal, personalised to you. It can’t be downloaded or shared.</p>
+        <p>A structured companion resource supporting organized review of high-yield concepts: written chapters you read online in your portal, personalized to you. It can’t be downloaded or shared.</p>
       </div>
       {p.cancelled && <Flash kind="error">Payment was cancelled. You have not been charged.</Flash>}
       {p.pending && <Flash>We haven’t received confirmation of your payment yet. If you were charged, your book unlocks as soon as Stripe confirms it — refresh in a minute.</Flash>}

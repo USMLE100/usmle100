@@ -33,6 +33,7 @@ import { accountGate } from './lib/gate';
 import { pruneAudit } from './lib/audit';
 import { emailStaffAlerts, retryNotices, syncMarketing } from './lib/messaging';
 import { PublicLayout } from './views/layout';
+import { knownPathCheck } from './lib/knownPath';
 
 const app = new Hono<AppEnv>();
 
@@ -171,6 +172,15 @@ app.use('*', async (c, next) => {
 // Suspension, emergency lockdown, warnings and the student agreement (lib/gate).
 app.use('*', accountGate);
 
+// A mistyped address shows "Page not found" instead of the sign-in page (lib/knownPath). Known addresses carry on as before.
+let isKnownPath: ((p: string) => boolean) | null = null;
+app.use('*', async (c, next) => {
+  if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return next();
+  isKnownPath ??= knownPathCheck(app.routes);
+  if (!isKnownPath(c.req.path)) return c.notFound();
+  return next();
+});
+
 app.route('/', publicRoutes);
 app.route('/', account);
 app.route('/zoom', zoom);
@@ -200,7 +210,10 @@ app.notFound((c) => {
         <div class="eyebrow">404</div>
         <h1 style="margin:10px 0 12px">We can’t find that page</h1>
         <p class="muted" style="margin-bottom:22px">The link may be old or mistyped.</p>
-        <a class="btn btn-primary" href={c.get('user') ? '/dashboard' : '/'}>{c.get('user') ? 'Back to the portal' : 'Go to the home page'}</a>
+        <div class="cta-row">
+          <a class="btn btn-primary" href={c.get('user') ? '/dashboard' : '/'}>{c.get('user') ? 'Back to the portal' : 'Go to the home page'}</a>
+          <a class="btn btn-outline" href="/programs">Explore Programs</a>
+        </div>
       </main>
     </PublicLayout>,
     404,

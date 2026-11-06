@@ -37,7 +37,7 @@ describe('testimonials', () => {
     expect(new Set(T.map((t) => t.portrait)).size).toBe(6);
     const html = decode(await home());
     for (const t of T) {
-      expect(html, t.name).toContain(`<span class="hv-name">${t.name}</span><span class="hv-school">${t.school}</span>`);
+      expect(html, t.name).toContain(`<span class="hv-name">${t.name}</span><span class="sr-only">, </span><span class="hv-school">${t.school}</span>`);
       // The complete testimonial is in the page (shortened only visually, with Read more).
       expect(html, t.name).toContain(`“${t.quote}”`);
     }
