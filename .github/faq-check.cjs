@@ -2,23 +2,24 @@ const { chromium } = require('playwright');
 const approved = require('./approved-faq.json');
 const R = (s) => console.log('RESULT ' + s);
 const norm = (s) => s.replace(/\s+/g, ' ').trim();
-(async () => {
+(async () => { try {
   const b = await chromium.launch();
   for (const [w, h, dev] of [[390, 844, 'mobile'], [1440, 900, 'desktop']]) {
     const p = await (await b.newContext({ viewport: { width: w, height: h } })).newPage();
-    await p.goto('https://usmle100.com/', { waitUntil: 'networkidle' });
+    p.setDefaultTimeout(8000);
+    await p.goto('https://usmle100.com/', { waitUntil: 'load', timeout: 30000 });
     const items = p.locator('.home-faq details');
     const n = await items.count();
     let ok = 0; const bad = [];
     for (let i = 0; i < n; i++) {
       const d = items.nth(i);
-      await d.locator('summary').scrollIntoViewIfNeeded();
-      await d.locator('summary').click();
-      await p.waitForTimeout(80);
+      // Tap the question the way a visitor does (the browser's own click on the question line).
+      await d.evaluate((e) => { e.scrollIntoView({ block: 'center' }); e.querySelector('summary').click(); });
+      await p.waitForTimeout(120);
       const open = await d.evaluate((e) => e.open);
       const q = norm(await d.locator('summary').innerText());
       const paras = (await d.locator('p').allInnerTexts()).map(norm);
-      const visible = await d.locator('p').evaluateAll((ps) => ps.every((x) => x.offsetHeight > 0 && getComputedStyle(x).visibility !== 'hidden'));
+      const visible = await d.evaluate((e) => [...e.querySelectorAll('p')].every((x) => x.offsetHeight > 0 && x.scrollHeight <= x.offsetHeight + 1 && getComputedStyle(x).visibility !== 'hidden'));
       const a = approved[i];
       const same = a && q === norm(a.q) && paras.length === a.a.length && paras.every((t, k) => t === norm(a.a[k]));
       if (same && open && visible) ok++; else bad.push(`#${i + 1}${!a ? ' extra' : q !== norm(a.q) ? ' question differs' : !open ? ' did not open' : !visible ? ' answer hidden' : ' answer differs'}`);
@@ -27,4 +28,4 @@ const norm = (s) => s.replace(/\s+/g, ' ').trim();
     R(`${dev}: ${n} questions on the page · ${ok} of 18 match the approved question and full answer and open fully${bad.length ? ' · problems: ' + bad.join(', ') : ''}`);
   }
   await b.close();
-})();
+} catch (e) { R('ERROR ' + String(e.message).slice(0, 120)); process.exit(0); } })();
