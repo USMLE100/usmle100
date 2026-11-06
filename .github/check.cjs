@@ -13,6 +13,8 @@ const R = (s) => console.log('RESULT ' + s);
     const og = (home.match(/property="og:image" content="([^"]+)"/) || [])[1] || 'none';
     const img = og !== 'none' ? (await fetch(og.replace('https://usmle100.com', base))).status : 0;
     R(`${tag}: FAQ#8 "${(home.match(/<summary>(How will USMLE100 teach me[^<]*)/) || [])[1]}" · shown first ${(home.slice(0, home.indexOf('faq-more')).match(/<summary>/g) || []).length} · share image ${img} · social ${home.includes('class="social"')} · whatsapp group ${home.includes('chat.whatsapp.com/L1gfbXeVnQ60i5kOSeaN8v')}`.slice(0, 138));
+    const nav = (home.match(/<nav aria-label="Footer">([\s\S]*?)<\/nav>/) || [])[1] || '';
+    R(`${tag}: heading Our programs ${home.includes('<h2>Our programs</h2>')} · Three ways in gone ${!home.includes('Three ways in')} · Refunds in footer links ${nav.includes('/refunds')} · Refund policy in fine print ${home.includes('class="fine" href="/refunds"')}`);
     R(`${tag}: disclaimer ${home.split('Testimonials are furnished in an individual capacity').length - 1} · characters ${labels.length} · FAQ ${(home.match(/<summary>/g) || []).length} · css ${css.includes('.hv-more')}`);
   }
 })();
