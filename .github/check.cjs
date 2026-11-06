@@ -10,6 +10,9 @@ const R = (s) => console.log('RESULT ' + s);
     R(`${tag}: characters ${labels.length}: ${labels.join(' | ')}`.slice(0, 138));
     const names = [...new Set([...home.matchAll(/<span class="hv-name">([^<]+)<\/span><span class="hv-school">([^<]+)<\/span>/g)].map((m) => m[1] + ' (' + m[2].replace(/&#39;|&#x27;/g, "'").split(' ').slice(0, 2).join(' ') + ')'))];
     R(`${tag}: testimonials ${names.length}: ${names.join(', ')}`.slice(0, 138));
+    const og = (home.match(/property="og:image" content="([^"]+)"/) || [])[1] || 'none';
+    const img = og !== 'none' ? (await fetch(og.replace('https://usmle100.com', base))).status : 0;
+    R(`${tag}: FAQ#8 "${(home.match(/<summary>(How will USMLE100 teach me[^<]*)/) || [])[1]}" · shown first ${(home.slice(0, home.indexOf('faq-more')).match(/<summary>/g) || []).length} · share image ${img} · social ${home.includes('class="social"')} · whatsapp group ${home.includes('chat.whatsapp.com/L1gfbXeVnQ60i5kOSeaN8v')}`.slice(0, 138));
     R(`${tag}: disclaimer ${home.split('Testimonials are furnished in an individual capacity').length - 1} · characters ${labels.length} · FAQ ${(home.match(/<summary>/g) || []).length} · css ${css.includes('.hv-more')}`);
   }
 })();
