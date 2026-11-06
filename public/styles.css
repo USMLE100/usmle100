@@ -438,6 +438,7 @@ p { margin: 0; }
 .footer { border-top: 1px solid var(--line); padding: 28px 16px 40px; font-size: 13px; color: var(--muted); text-align: center; background: var(--surface); }
 .footer nav { display: flex; gap: 16px; justify-content: center; margin-bottom: 10px; flex-wrap: wrap; }
 .footer a { color: var(--ink); text-decoration: none; font-weight: 600; }
+.footer a.fine { color: var(--muted); font-weight: 400; }
 .contact { display: grid; gap: 22px; justify-items: center; margin: 6px auto 22px; max-width: 760px; }
 .social { display: flex; gap: 28px; justify-content: center; margin: 0; }
 .social a { display: grid; justify-items: center; gap: 6px; color: var(--green); font: 600 12px var(--text); }

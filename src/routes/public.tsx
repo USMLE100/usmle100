@@ -129,7 +129,7 @@ publicRoutes.get('/', async (c) => {
 
       <section class="ways">
         <div class="wrap">
-          <h2>Three ways in</h2>
+          <h2>Our programs</h2>
           <div class="addons">
             <a class="addon tile-green" href="/programs"><span class="ti"><Icon name="school" size={22} /></span><h3>100-day programs</h3><p>Live lectures, recordings and the question bank, with Evening Questions and tutoring in the larger packages.</p>{from && <span class="p">From {from} <small>one-time</small></span>}</a>
             <a class="addon tile-sky" href="/programs#addons"><span class="ti"><Icon name="videocam" size={22} /></span><h3>Evening Questions</h3><p>Live question sessions on Monday, Wednesday and Friday evenings.</p><span class="p">$160 <small>per month</small></span></a>

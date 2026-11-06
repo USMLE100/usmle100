@@ -147,10 +147,10 @@ export function PublicLayout(props: { title: string; user: User | null; children
             <a href="/sign-up">Create account</a>
             {props.legal?.terms && <a href="/terms">Terms</a>}
             {props.legal?.privacy && <a href="/privacy">Privacy</a>}
-            {props.legal?.refunds && <a href="/refunds">Refunds</a>}
           </nav>
           <ContactRow />
           © {new Date().getUTCFullYear()} USMLE100 · Not affiliated with NBME, FSMB or ECFMG.
+          {props.legal?.refunds && <> · <a class="fine" href="/refunds">Refund policy</a></>}
         </footer>
       )}
     </Doc>
