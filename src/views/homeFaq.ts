@@ -1,6 +1,7 @@
 /**
  * Homepage FAQ (owner, 5 Nov 2026): the owner's 18 questions in her exact order and wording. One factual correction,
- * approved by the owner: #17 says the review period starts after Day 100 (90 lecture days + 10-day exam window).
+ * approved by the owner: #17 says the review period starts after Day 100 (90 lecture days + 10-day exam window);
+ * #8 ends at “NBME-style questions?” (owner, 5 Nov 2026).
  * Shown in the same accordion style as the Programs FAQ, which stays as it is.
  */
 export const HOME_FAQ: [string, string[]][] = [
@@ -78,7 +79,7 @@ export const HOME_FAQ: [string, string[]][] = [
     ]
   ],
   [
-    "How will USMLE100 teach me to solve NBME-style questions instead of guessing?",
+    "How will USMLE100 teach me to solve NBME-style questions?",
     [
       "Knowing medical facts is only part of answering USMLE questions correctly.",
       "You also need to understand what the question is testing and how to apply your knowledge under exam conditions.",
