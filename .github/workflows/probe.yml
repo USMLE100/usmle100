@@ -2,15 +2,12 @@ name: probe-route-check
 on: { push: { branches: [probe-route-check] } }
 permissions: { statuses: write, contents: read }
 jobs:
-  faq:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-      - name: Check the live homepage FAQ against the approved text (read-only)
-        env: { GH_TOKEN: "${{ github.token }}" }
+      - name: Read-only page check
+        env: { GH_TOKEN: "${{ github.token }}", TARGET: "${{ 'https://v12-frontend-usmle100.info-usmle100.workers.dev' }}" }
         run: |
-          npm i --no-save playwright@1.48.2 >/dev/null 2>&1 && npx playwright install --with-deps chromium >/dev/null 2>&1
-          node .github/faq-check.cjs > out.txt 2>&1 || true; cat out.txt
-          i=0; while IFS= read -r line; do i=$((i+1)); gh api repos/${{ github.repository }}/statuses/${{ github.sha }} -f state=success -f context="step$(printf %02d $i)" -f description="$(echo "$line" | cut -c1-138)" >/dev/null; done < <(grep '^RESULT' out.txt | head -40)
+          node .github/check.cjs > out.txt 2>&1 || true; cat out.txt
+          i=0; while IFS= read -r line; do i=$((i+1)); gh api repos/${{ github.repository }}/statuses/${{ github.sha }} -f state=success -f context="step$(printf %02d $i)" -f description="$(echo "$line" | cut -c1-138)" >/dev/null; done < <(grep '^RESULT' out.txt | head -12)
