@@ -105,12 +105,17 @@ publicRoutes.get('/', async (c) => {
 
       <WhoWeTeach />
 
-      <div class="trust">
-        <span><Icon name="verified" size={20} />Taught by physicians</span>
-        <span><Icon name="videocam" size={20} />Live every weekday</span>
-        <span><Icon name="school" size={20} />100-day curriculum</span>
-        <span><Icon name="monitoring" size={20} />Progress tracking</span>
-      </div>
+      {/* Owner's eight points (6 Nov 2026): two columns on phones, four on computers. */}
+      <ul class="trust trust-grid" aria-label="How we teach">
+        <li><Icon name="route" size={20} />Individual learning plans</li>
+        <li><Icon name="target" size={20} />Foundational knowledge gaps</li>
+        <li><Icon name="schedule" size={20} />Time management and prioritization</li>
+        <li><Icon name="replay" size={20} />Spaced repetition and active recall</li>
+        <li><Icon name="chart" size={20} />Data-driven academic remediation</li>
+        <li><Icon name="visibility" size={20} />Early identification and intervention</li>
+        <li><Icon name="lightbulb" size={20} />Test-taking strategy</li>
+        <li><Icon name="psychology" size={20} />Clinical reasoning</li>
+      </ul>
 
       <section class="pass">
         <div class="wrap">

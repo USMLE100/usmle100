@@ -13,7 +13,7 @@ describe('homepage wording', () => {
     for (const s of [
       'Medical board prep, <em>taught live</em> by physicians.',
       'Live classes every weekday. One-on-one tutoring. A clear plan, so you always know what to study next.',
-      'Taught by physicians', 'Live every weekday', '100-day curriculum', 'Progress tracking',
+      'Individual learning plans', 'Foundational knowledge gaps', 'Time management and prioritization', 'Spaced repetition and active recall', 'Data-driven academic remediation', 'Early identification and intervention', 'Test-taking strategy', 'Clinical reasoning',
       'A Structured Approach to Medical Board Preparation',
       'Student experiences', 'In Our <em>Students’ Words</em>',
       '<h3>100-Day Programs</h3>', 'View programs', 'Learn more',
@@ -21,7 +21,7 @@ describe('homepage wording', () => {
       'Questions? Join our WhatsApp group', 'Explore Programs',
       'We’re building a trusted platform for physicians at every stage of their careers',
     ]) expect(h, s).toContain(s);
-    for (const s of ['Daily live classes', 'No endless video library', 'Live daily', 'One price', 'raving about us', 'Ready to start?', 'teaching yourself', 'See programs', 'btn-gold', 'most trusted'])
+    for (const s of ['Daily live classes', 'No endless video library', 'Live daily', 'One price', '100-day curriculum', 'raving about us', 'Ready to start?', 'teaching yourself', 'See programs', 'btn-gold', 'most trusted'])
       expect(h, s).not.toContain(s);
     // The disclaimer stays word for word.
     const { TESTIMONIAL_DISCLAIMER } = await import('../src/views/testimonials');
