@@ -33,6 +33,7 @@ import m0033 from '../../migrations/0033_course_access_end.sql';
 import m0034 from '../../migrations/0034_november_start_and_hide_tests.sql';
 import m0035 from '../../migrations/0035_tutoring_price.sql';
 import m0036 from '../../migrations/0036_terms_exam_list.sql';
+import m0037 from '../../migrations/0037_video_length_follows_video.sql';
 
 /**
  * Database migrations run by the Worker itself on first request, so deploys
@@ -74,6 +75,7 @@ const MIGRATIONS: [string, string][] = [
   ['0034_november_start_and_hide_tests', m0034],
   ['0035_tutoring_price', m0035],
   ['0036_terms_exam_list', m0036],
+  ['0037_video_length_follows_video', m0037],
 ];
 
 export function statements(sql: string): string[] {
