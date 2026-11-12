@@ -13,6 +13,7 @@ export const ProtectedPlayer = (p: { item: string; title: string }) => (
       <div class="pp-frame"></div>
       <div class="pp-wm-faint" aria-hidden="true"></div>
       <div class="pp-wm" aria-hidden="true"></div>
+      <button type="button" class="pp-exit" data-pp-exit aria-label="Exit full screen"><Icon name="close" size={20} />Exit full screen</button>
       <div class="pp-overlay" role="status" aria-live="polite">
         <div class="pp-card">
           <p class="pp-msg">Loading the lecture…</p>
@@ -33,7 +34,7 @@ export const ProtectedPlayer = (p: { item: string; title: string }) => (
 
 export const PLAYER_JS = `(function(){
 var root=document.getElementById('pp');if(!root||root.dataset.init)return;root.dataset.init='1';
-var ITEM=root.dataset.item,box=root.querySelector('.pp-frame'),wm=root.querySelector('.pp-wm'),faint=root.querySelector('.pp-wm-faint'),ov=root.querySelector('.pp-overlay'),msg=root.querySelector('.pp-msg'),acts=root.querySelector('.pp-actions'),endB=root.querySelector('[data-pp-end]'),doneN=root.querySelector('[data-pp-done]'),fsB=root.querySelector('[data-pp-fs]'),stage=root.querySelector('.pp-stage');
+var ITEM=root.dataset.item,box=root.querySelector('.pp-frame'),wm=root.querySelector('.pp-wm'),faint=root.querySelector('.pp-wm-faint'),ov=root.querySelector('.pp-overlay'),msg=root.querySelector('.pp-msg'),acts=root.querySelector('.pp-actions'),endB=root.querySelector('[data-pp-end]'),doneN=root.querySelector('[data-pp-done]'),fsB=root.querySelector('[data-pp-fs]'),exB=root.querySelector('[data-pp-exit]'),stage=root.querySelector('.pp-stage');
 function rand(){var a=new Uint8Array(12);crypto.getRandomValues(a);return Array.prototype.map.call(a,function(b){return('0'+b.toString(16)).slice(-2)}).join('')}
 var TAB;try{TAB=sessionStorage.getItem('u100tab');if(!TAB){TAB=rand();sessionStorage.setItem('u100tab',TAB)}}catch(e){TAB=rand()}
 var D={lib:false,libReady:false,rawReady:false,msgs:0,ev:{},origins:[],other:0,sample:'',subs:0,answers:0};
@@ -45,7 +46,7 @@ function block(kind,t,buttons){S.block=kind;cmd('pause');setPlaying(false);show(
 function unblock(){S.block=null;hide()}
 function setPlaying(v){S.playing=v;root.classList.toggle('pp-live',v)}
 function cmd(m,v,l){if(!S.frame||!S.frame.contentWindow)return;if(S.pj&&D.libReady&&!l){try{if(m==='pause')S.pj.pause();else if(m==='play')S.pj.play();else if(m==='setCurrentTime')S.pj.setCurrentTime(v)}catch(x){}}var o={context:'player.js',version:'0.0.11',method:m};if(v!==undefined)o.value=v;if(l)o.listener=l;S.frame.contentWindow.postMessage(JSON.stringify(o),S.origin)}
-function teardown(){S.pj=null;if(S.frame){S.frame.remove();S.frame=null}S.ready=false;setPlaying(false);S.last=null;clearTimeout(S.timer);endB.hidden=true;fsB.hidden=true}
+function teardown(){S.pj=null;if(S.frame){S.frame.remove();S.frame=null}S.ready=false;setPlaying(false);S.last=null;clearTimeout(S.timer);endB.hidden=true;fsB.hidden=true;maxi(false)}
 function claim(){teardown();show('Loading the lecture…');post('/play/claim',{item:ITEM,tab:TAB,continue:S.completed&&S.sid?S.sid:undefined}).then(function(r){if(r.status===401){location.href='/sign-in?ended=idle&next='+encodeURIComponent(location.pathname);return null}return r.json()}).then(function(j){if(!j)return;handle(j)}).catch(function(){show('We couldn’t load the lecture. Check your connection.',[{label:'Try again',primary:true,fn:claim}])})}
 function handle(j){
  if(j.state==='account'){location.href=j.url;return}
@@ -61,7 +62,7 @@ function handle(j){
  if(j.first){show(j.notice,[{label:'Start lecture',primary:true,fn:function(){load(j.src)}}])}else load(j.src)}
 function load(src){unblock();S.origin=new URL(src).origin;var f=document.createElement('iframe');f.src=src;f.title=root.dataset.title||'Lecture';f.setAttribute('allow',"autoplay; encrypted-media; picture-in-picture 'none'; fullscreen 'none'; display-capture 'none'");
 // Sealed frame: the video player can run, but cannot open windows or tabs, download files, cast, or navigate this page.
-f.setAttribute('sandbox','allow-scripts allow-same-origin');f.setAttribute('referrerpolicy','strict-origin');box.appendChild(f);S.frame=f;libAttach(f);endB.hidden=false;var fs=stage.requestFullscreen||stage.webkitRequestFullscreen;fsB.hidden=!fs;schedule(1000)}
+f.setAttribute('sandbox','allow-scripts allow-same-origin');f.setAttribute('referrerpolicy','strict-origin');box.appendChild(f);S.frame=f;libAttach(f);endB.hidden=false;fsB.hidden=false;schedule(1000)}
 addEventListener('message',function(e){if(!S.frame)return;var d=e.data;if(typeof d==='string'){try{d=JSON.parse(d)}catch(x){if(e.origin===S.origin){D.other++;if(!D.sample)D.sample=String(e.data).slice(0,40)}return}}if(!d||d.context!=='player.js'){if(e.origin===S.origin){D.other++;if(!D.sample)try{D.sample=Object.keys(d||{}).slice(0,6).join(',')}catch(x){}}return}D.msgs++;if(D.origins.indexOf(e.origin)<0&&D.origins.length<4)D.origins.push(e.origin);if(e.source!==S.frame.contentWindow&&e.origin!==S.origin)return;
  if(d.event==='ready'){D.rawReady=true;S.ready=true;subscribe();
   // On some devices (iPad Safari) a subscription sent the instant the player says "ready" is lost: repeat it until events arrive.
@@ -116,7 +117,9 @@ function moveWm(){var i;do{i=Math.floor(Math.random()*spots.length)}while(i===cu
 setInterval(moveWm,60000);
 setInterval(function(){if(!S.frame)return;var cs=getComputedStyle(wm),fs=getComputedStyle(faint);if(!wm.isConnected||wm.parentNode!==stage||cs.display==='none'||cs.visibility==='hidden'||+cs.opacity<0.2||!wm.textContent||wm.getBoundingClientRect().width<20||!faint.isConnected||faint.parentNode!==stage||fs.display==='none'||fs.visibility==='hidden'||+fs.opacity<0.9||fs.backgroundImage.indexOf('svg')<0){teardown();block('wm','The lecture stopped because its watermark was changed. Reload the page to continue.')}},3000);
 endB.onclick=function(){cmd('pause');var t=TAB,p=S.pos;teardown();post('/play/release',{tab:t,pos:p});S.block='ended';show('Lecture ended. You can come back and continue where you stopped.',[{label:'Resume',primary:true,fn:claim}])};
-fsB.onclick=function(){if(document.fullscreenElement||document.webkitFullscreenElement){(document.exitFullscreen||document.webkitExitFullscreen).call(document)}else{(stage.requestFullscreen||stage.webkitRequestFullscreen).call(stage)}};
+function maxi(on){root.classList.toggle('pp-max',on);document.documentElement.classList.toggle('pp-noscroll',on)}
+fsB.onclick=function(){if(root.classList.contains('pp-max')){maxi(false);return}if(document.fullscreenElement||document.webkitFullscreenElement){(document.exitFullscreen||document.webkitExitFullscreen).call(document);return}var f=stage.requestFullscreen||stage.webkitRequestFullscreen;if(f){try{var r=f.call(stage);if(r&&r.catch)r.catch(function(){maxi(true)})}catch(x){maxi(true)}}else maxi(true)};
+exB.onclick=function(){maxi(false)};addEventListener('keydown',function(e){if(e.key==='Escape')maxi(false)});
 addEventListener('pagehide',function(){if(S.frame&&navigator.sendBeacon)navigator.sendBeacon('/play/release',new Blob([JSON.stringify({tab:TAB,pos:S.pos})],{type:'application/json'}))});
 addEventListener('pageshow',function(e){if(e.persisted)claim()});
 claim();
