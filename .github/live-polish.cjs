@@ -1,6 +1,6 @@
 const fs = require('fs');
 (async () => {
-  const h = (await (await fetch('https://usmle100.com/', { cache: 'no-store' })).text());
-  const out = `point2 ${h.includes('Live interactive sessions taught by US physicians, where you can ask questions in real time</li>')}`;
-  fs.mkdirSync('shots', { recursive: true }); fs.writeFileSync('shots/live-wording2.txt', out + '\n'); console.log(out);
+  const css = await (await fetch('https://usmle100.com/styles.css', { cache: 'no-store' })).text();
+  const out = `phone fullscreen css live: ${css.includes('.pp.pp-max .pp-stage')} · home ${(await fetch('https://usmle100.com/')).status}`;
+  fs.mkdirSync('shots', { recursive: true }); fs.writeFileSync('shots/live-fs.txt', out + '\n'); console.log(out);
 })();
