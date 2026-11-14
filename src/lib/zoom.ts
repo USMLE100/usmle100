@@ -45,9 +45,13 @@ export function pickRecording(files: ZoomFile[]) {
     const i = VIEW_PREFERENCE.indexOf(f.recording_type ?? '');
     return i < 0 ? VIEW_PREFERENCE.length : i;
   };
-  const best = Math.min(...mp4.map(rank));
-  const sameView = mp4.filter((f) => rank(f) === best);
   const length = (f: ZoomFile) => (f.recording_start && f.recording_end ? Date.parse(f.recording_end) - Date.parse(f.recording_start) : 0) || f.file_size || 0;
+  // The whole class comes first (12 Nov 2026: a 12-minute screen-share file beat the 5-hour class). The preferred
+  // layout only decides between files that cover (nearly) the whole recording.
+  const longest = Math.max(...mp4.map(length));
+  const full = mp4.filter((f) => length(f) >= longest * 0.9);
+  const best = Math.min(...full.map(rank));
+  const sameView = mp4.filter((f) => rank(f) === best);
   sameView.sort((a, b) => length(b) - length(a));
   return { file: sameView[0], extraParts: sameView.length - 1 };
 }
@@ -220,4 +224,40 @@ export async function syncImports(env: Env) {
       await db.prepare("UPDATE zoom_imports SET status = 'failed', note = 'Bunny could not process the video.', updated_at = datetime('now') WHERE id = ?").bind(imp.id).run();
     }
   }
+}
+
+/**
+ * Owner's "Import again from Zoom" (13 Nov 2026): looks the class up in Zoom again and copies the full-length file
+ * to Bunny as a new recording row. Nothing changes for students until the owner attaches and approves it.
+ * Returns a key of REIMPORT_MESSAGES.
+ */
+export const REIMPORT_MESSAGES = {
+  missing: 'That recording was not found.',
+  noZoom: 'The Zoom connection is not set up, so the website cannot look the recording up again.',
+  zoomRefused: 'Zoom would not list the recordings. The Zoom app may need permission to view recordings.',
+  gone: 'Zoom no longer has this recording (it may have been deleted from the Zoom cloud).',
+  noFile: 'Zoom has no finished video file for this class yet.',
+  same: 'This is already the longest video Zoom has for this class.',
+  started: 'Copying the full recording from Zoom. It appears as a new row below; when it says Ready, decline the short one, then attach the new one to the day and approve it.',
+} as const;
+export async function reimportFromZoom(env: Env, importId: number): Promise<keyof typeof REIMPORT_MESSAGES> {
+  const db = env.DB;
+  const imp = await db.prepare('SELECT * FROM zoom_imports WHERE id = ?').bind(importId).first<any>();
+  if (!imp || !imp.meeting_id) return 'missing';
+  const token = await zoomServerToken(env);
+  if (!token) return 'noZoom';
+  const day = new Date(todayUtc(new Date(imp.start_time || Date.now())));
+  const ymd = (d: Date) => d.toISOString().slice(0, 10);
+  const from = ymd(new Date(day.getTime() - 86400000)), to = ymd(new Date(day.getTime() + 86400000));
+  const res = await fetch(`https://api.zoom.us/v2/users/me/recordings?from=${from}&to=${to}&page_size=100`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) return 'zoomRefused';
+  const meetings = (((await res.json()) as any).meetings ?? []) as any[];
+  const same = meetings.filter((m) => String(m.id) === String(imp.meeting_id) && ymd(new Date(todayUtc(new Date(m.start_time)))) === ymd(day));
+  const m = same.find((x) => (x.recording_files ?? []).some((f: any) => f.id === imp.zoom_file_id)) ?? same[0];
+  if (!m) return 'gone';
+  const picked = pickRecording(m.recording_files ?? []);
+  if (!picked) return 'noFile';
+  if (await db.prepare('SELECT id FROM zoom_imports WHERE zoom_file_id = ?').bind(picked.file.id).first()) return 'same';
+  await importRecording(env, { object: m }, token);
+  return 'started';
 }

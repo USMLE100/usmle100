@@ -9,7 +9,7 @@ import { PortalLayout, Eyebrow, Flash } from '../views/layout';
 import { currentCohort, dayDate, defaultLecturesUntil, fmtDate, LECTURE_DAYS_AFTER_END, LETTERS, todayUtc, ymdToUtc, type Cohort } from '../lib/content';
 import { parseCsv, toCsv, TEMPLATE_HEADERS } from '../lib/csv';
 import { getSettings, isHttpUrl, SETTING_FIELDS } from '../lib/settings';
-import { meetingIdList, syncImports } from '../lib/zoom';
+import { meetingIdList, REIMPORT_MESSAGES, reimportFromZoom, syncImports } from '../lib/zoom';
 import { isProduction } from '../lib/environment';
 import { allSessions, CLASSES_PER_MONTH, giveEveningMonths, GRACE_DAYS, subStatus, todayYmd } from '../lib/evening';
 
@@ -64,6 +64,7 @@ admin.get('/lectures', async (c) => {
       <Eyebrow>Admin</Eyebrow>
       <h1>Lectures</h1>
       {c.req.query('ok') && <Flash>Saved.</Flash>}
+      {(REIMPORT_MESSAGES as Record<string, string>)[c.req.query('reimport') ?? ''] && <Flash>{(REIMPORT_MESSAGES as Record<string, string>)[c.req.query('reimport')!]}</Flash>}
       {c.req.query('error') && <Flash kind="error">{c.req.query('error')}</Flash>}
       {!cohort && !adminUser ? (
         <p class="muted">No cohort yet. An admin needs to create one.</p>
@@ -123,7 +124,9 @@ admin.get('/lectures', async (c) => {
                       const lec = lectures.find((l: any) => l.id === i.lecture_id);
                       return (
                         <tr>
-                          <td>{i.topic}<br /><span class="muted small">{i.start_time ? new Date(i.start_time).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</span>{i.note && <><br /><span class="small">{i.note}</span></>}</td>
+                          <td>{i.topic}<br /><span class="muted small">{i.start_time ? new Date(i.start_time).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</span>{i.note && <><br /><span class="small">{i.note}</span></>}{isOwner(user) && !i.evening_date && (
+                            <form method="post" action={`/admin/zoom-imports/${i.id}/reimport`} style="margin-top:6px"><button class="btn btn-ghost btn-sm" type="submit">Import again from Zoom</button></form>
+                          )}</td>
                           <td>{i.status === 'ready' ? <span class="chip">Ready</span> : i.status === 'failed' ? <span class="chip chip-rust">Failed</span> : <span class="chip chip-sand">{i.status === 'fetching' ? 'Copying from Zoom' : 'Bunny is preparing it'}</span>}</td>
                           <td>
                             {lec ? (
@@ -289,6 +292,13 @@ admin.post('/zoom-settings', async (c) => {
   const ids = meetingIdList(String(f.zoom_meeting_ids ?? '')).join(', ');
   await c.env.DB.prepare("INSERT INTO settings (key, value) VALUES ('zoom_meeting_ids', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(ids).run();
   return c.redirect('/admin/lectures?ok=1#zoom');
+});
+
+/** Owner only: copy the class again from Zoom, picking the full-length file (lib/zoom reimportFromZoom). */
+admin.post('/zoom-imports/:id{[0-9]+}/reimport', async (c) => {
+  if (!isOwner(c.get('user')!)) return c.redirect('/admin/lectures');
+  const msg = await reimportFromZoom(c.env, Number(c.req.param('id')));
+  return c.redirect('/admin/lectures?reimport=' + msg + '#zoom');
 });
 
 /** Attach an imported recording that had no day (e.g. recorded on a weekend) to a lecture day. */
